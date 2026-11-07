@@ -52,6 +52,9 @@ export interface PaletteCommandContext {
   onToggleTheme: () => void;
   onRevealInExplorer: () => void;
   onShowShortcuts: () => void;
+  onReopenTab?: () => void;
+  onNextTab?: () => void;
+  onPrevTab?: () => void;
 }
 
 export async function buildPaletteFileItems(ctx: PaletteFileContext): Promise<PaletteItem[]> {
@@ -141,6 +144,39 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
       shortcut: 'Strg+Umschalt+O',
       run: ctx.onOpenFolderDialog,
     },
+    ...(ctx.onReopenTab
+      ? [
+          {
+            id: 'cmd:reopen-tab',
+            kind: 'command' as const,
+            label: 'Tab: Zuletzt geschlossenen Tab wiederherstellen',
+            shortcut: 'Strg+Umschalt+T',
+            run: ctx.onReopenTab,
+          },
+        ]
+      : []),
+    ...(ctx.onNextTab
+      ? [
+          {
+            id: 'cmd:next-tab',
+            kind: 'command' as const,
+            label: 'Tab: Zum nächsten Tab wechseln',
+            shortcut: 'Strg+BildAb',
+            run: ctx.onNextTab,
+          },
+        ]
+      : []),
+    ...(ctx.onPrevTab
+      ? [
+          {
+            id: 'cmd:prev-tab',
+            kind: 'command' as const,
+            label: 'Tab: Zum vorherigen Tab wechseln',
+            shortcut: 'Strg+BildAuf',
+            run: ctx.onPrevTab,
+          },
+        ]
+      : []),
     {
       id: 'cmd:save',
       kind: 'command',

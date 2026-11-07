@@ -757,13 +757,25 @@ export class MarkdownEditorController {
     const prefixLines = (prefix: string) => {
       const startLine = state.doc.lineAt(range.from);
       const endLine = state.doc.lineAt(range.to);
+      let lastLineNum = endLine.number;
+      if (lastLineNum > startLine.number && range.to === endLine.from) {
+        lastLineNum--;
+      }
       const changes: Array<{ from: number; to: number; insert: string }> = [];
-      for (let l = startLine.number; l <= endLine.number; l++) {
+      for (let l = startLine.number; l <= lastLineNum; l++) {
         const line = state.doc.line(l);
+        if (lastLineNum > startLine.number && line.text.trim() === '') {
+          continue;
+        }
         if (line.text.startsWith(prefix)) {
           changes.push({ from: line.from, to: line.from + prefix.length, insert: '' });
         } else {
-          const cleaned = line.text.replace(/^#{1,6}\s+/, '');
+          // Clean existing headings, blockquotes, and lists so switching types never stacks markers
+          const cleaned = line.text
+            .replace(/^#{1,6}\s+/, '')
+            .replace(/^>\s+/, '')
+            .replace(/^[-*+]\s+(?:\[[ xX]\]\s+)?/, '')
+            .replace(/^\d+[.)]\s+/, '');
           changes.push({ from: line.from, to: line.to, insert: `${prefix}${cleaned}` });
         }
       }

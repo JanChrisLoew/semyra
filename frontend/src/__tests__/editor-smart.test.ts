@@ -163,4 +163,28 @@ describe('MarkdownEditorController keybindings & folding integration', () => {
     ctrl.view.destroy();
     host.remove();
   });
+
+  it('switches list formats cleanly without stacking markers', () => {
+    const { host, ctrl } = createController('- Punkt eins\n- Punkt zwei\n');
+
+    // Select both lines
+    ctrl.view.dispatch({ selection: { anchor: 0, head: ctrl.view.state.doc.length } });
+
+    // Switch to ordered list
+    ctrl.applyFormat('ol');
+    expect(ctrl.view.state.doc.toString()).toBe('1. Punkt eins\n1. Punkt zwei\n');
+
+    // Switch to task list
+    ctrl.view.dispatch({ selection: { anchor: 0, head: ctrl.view.state.doc.length } });
+    ctrl.applyFormat('task');
+    expect(ctrl.view.state.doc.toString()).toBe('- [ ] Punkt eins\n- [ ] Punkt zwei\n');
+
+    // Switch to blockquote
+    ctrl.view.dispatch({ selection: { anchor: 0, head: ctrl.view.state.doc.length } });
+    ctrl.applyFormat('quote');
+    expect(ctrl.view.state.doc.toString()).toBe('> Punkt eins\n> Punkt zwei\n');
+
+    ctrl.view.destroy();
+    host.remove();
+  });
 });

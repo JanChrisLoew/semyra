@@ -33,6 +33,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Rust-Tests fehlgeschlagen." }
 
     Write-Host "==> [5/5] Standalone Windows 11 x64 Release bauen (cargo build --release)..." -ForegroundColor Cyan
+    $running = Get-Process -Name MarkLive -ErrorAction SilentlyContinue
+    if ($running) {
+        Write-Host "Beende laufende MarkLive-Testinstanz ($($running.Count) Prozess(e)) zur Dateifreigabe..." -ForegroundColor Yellow
+        $running | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 400
+    }
     & cargo build --release
     if ($LASTEXITCODE -ne 0) { throw "Cargo Release-Build fehlgeschlagen." }
 

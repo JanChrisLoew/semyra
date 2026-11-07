@@ -101,4 +101,65 @@ describe('palette-items', () => {
     expect(eolCmd.label).toContain('CRLF (Windows)');
     expect(eolCmd.badge).toBe('LF');
   });
+
+  it('provides tab navigation and reopen commands when optional callbacks are supplied', () => {
+    const onReopen = vi.fn();
+    const onNext = vi.fn();
+    const onPrev = vi.fn();
+    const noop = vi.fn();
+
+    const cmds = buildPaletteCommandItems({
+      wordWrapActive: false,
+      spellcheckActive: false,
+      syncScrollActive: false,
+      autoSaveActive: false,
+      currentLineEnding: 'LF',
+      onNewTab: noop,
+      onOpenFileDialog: noop,
+      onOpenFolderDialog: noop,
+      onSave: noop,
+      onSaveAs: noop,
+      onCopyRichText: noop,
+      onExportHtml: noop,
+      onExportPdf: noop,
+      onPrint: noop,
+      onAlignTable: noop,
+      onSetViewMode: noop,
+      onToggleWordWrap: noop,
+      onToggleSpellcheck: noop,
+      onToggleSyncScroll: noop,
+      onToggleAutoSave: noop,
+      onToggleLineEnding: noop,
+      onZoomDelta: noop,
+      onZoomReset: noop,
+      onOpenEditorSearch: noop,
+      onOpenSearchPanel: noop,
+      onOpenOutlinePanel: noop,
+      onToggleZen: noop,
+      onToggleTheme: noop,
+      onRevealInExplorer: noop,
+      onShowShortcuts: noop,
+      onReopenTab: onReopen,
+      onNextTab: onNext,
+      onPrevTab: onPrev,
+    });
+
+    const reopenCmd = cmds.find((c) => c.id === 'cmd:reopen-tab');
+    expect(reopenCmd).toBeDefined();
+    expect(reopenCmd?.shortcut).toBe('Strg+Umschalt+T');
+    reopenCmd?.run();
+    expect(onReopen).toHaveBeenCalledTimes(1);
+
+    const nextCmd = cmds.find((c) => c.id === 'cmd:next-tab');
+    expect(nextCmd).toBeDefined();
+    expect(nextCmd?.shortcut).toBe('Strg+BildAb');
+    nextCmd?.run();
+    expect(onNext).toHaveBeenCalledTimes(1);
+
+    const prevCmd = cmds.find((c) => c.id === 'cmd:prev-tab');
+    expect(prevCmd).toBeDefined();
+    expect(prevCmd?.shortcut).toBe('Strg+BildAuf');
+    prevCmd?.run();
+    expect(onPrev).toHaveBeenCalledTimes(1);
+  });
 });

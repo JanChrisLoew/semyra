@@ -47,6 +47,12 @@ class MarkLiveApp {
   private tabs: OpenTab[] = [];
   private activeTabId = '';
   private untitledCounter = 1;
+  private closedTabsHistory: Array<{
+    name: string;
+    path: string | null;
+    content: string;
+    lineEnding: 'LF' | 'CRLF';
+  }> = [];
 
   private editor!: MarkdownEditorController;
   private syncScroll!: SyncScrollController;
@@ -230,6 +236,11 @@ class MarkLiveApp {
             onShowShortcuts: () => {
               (document.getElementById('shortcuts-dialog') as HTMLDialogElement).showModal();
             },
+            onReopenTab: () => {
+              void this.reopenLastClosedTab();
+            },
+            onNextTab: () => this.cycleActiveTab(1),
+            onPrevTab: () => this.cycleActiveTab(-1),
           }),
       },
     );
@@ -743,6 +754,16 @@ class MarkLiveApp {
       }
     }
 
+    this.closedTabsHistory.push({
+      name: tab.name,
+      path: tab.path,
+      content: tab.currentContent,
+      lineEnding: tab.lineEnding,
+    });
+    if (this.closedTabsHistory.length > 15) {
+      this.closedTabsHistory.shift();
+    }
+
     this.tabs.splice(idx, 1);
     if (this.tabs.length === 0) {
       this.createNewTab();
@@ -756,6 +777,29 @@ class MarkLiveApp {
     this.flushDraftSync();
     this.schedulePrefsSave();
     return true;
+  }
+
+  private async reopenLastClosedTab(): Promise<void> {
+    const last = this.closedTabsHistory.pop();
+    if (!last) {
+      this.showToast('Keine geschlossenen Tabs zum Wiederherstellen');
+      return;
+    }
+    if (last.path) {
+      await this.openFileByPath(last.path);
+      this.showToast(`Tab wiederhergestellt: ${last.name}`);
+    } else {
+      this.createNewTab(last.name, last.content, false);
+      this.showToast(`Entwurf wiederhergestellt: ${last.name}`);
+    }
+  }
+
+  private cycleActiveTab(direction: 1 | -1): void {
+    if (this.tabs.length <= 1) return;
+    const curIdx = this.tabs.findIndex((t) => t.id === this.activeTabId);
+    if (curIdx === -1) return;
+    const nextIdx = (curIdx + direction + this.tabs.length) % this.tabs.length;
+    this.activateTab(this.tabs[nextIdx].id);
   }
 
   private async closeOtherTabs(keepTabId: string): Promise<void> {
@@ -1461,6 +1505,13 @@ class MarkLiveApp {
       }
     });
 
+    // Double click empty tab bar space to open a new tab
+    const tabStripWrap = document.querySelector('.tab-strip-wrap');
+    tabStripWrap?.addEventListener('dblclick', (e) => {
+      if ((e.target as HTMLElement).closest('.tab-slot, button')) return;
+      this.createNewTab();
+    });
+
     // Native Ctrl + MouseWheel document text zoom
     window.addEventListener(
       'wheel',
@@ -1609,6 +1660,7 @@ class MarkLiveApp {
         if (codeEl) {
           void navigator.clipboard.writeText(codeEl.textContent ?? '').then(() => {
             copyBtn.textContent = 'Kopiert ✓';
+            this.showToast('Codeblock in Zwischenablage kopiert');
             setTimeout(() => {
               copyBtn.textContent = 'Kopieren';
             }, 1400);
@@ -1734,6 +1786,15 @@ class MarkLiveApp {
           e.stopPropagation();
         };
 
+        if (e.key === 'Escape' && !mod && !e.altKey && !e.shiftKey) {
+          const hasOpenPopover = !!document.querySelector(':popover-open');
+          if (this.appEl.classList.contains('is-zen') && !hasOpenPopover) {
+            consume();
+            this.appEl.classList.remove('is-zen');
+            return;
+          }
+        }
+
         if (mod && !e.altKey && !e.shiftKey && key === 'e') {
           consume();
           this.palette.open('files');
@@ -1776,6 +1837,20 @@ class MarkLiveApp {
         } else if (mod && !e.altKey && !e.shiftKey && key === 'w') {
           consume();
           if (this.activeTab) void this.requestCloseTab(this.activeTab.id);
+        } else if (mod && !e.altKey && e.shiftKey && key === 't') {
+          consume();
+          void this.reopenLastClosedTab();
+        } else if (mod && !e.altKey && (key === 'tab' || key === 'pagedown' || key === 'next')) {
+          if (key === 'tab') {
+            consume();
+            this.cycleActiveTab(e.shiftKey ? -1 : 1);
+          } else if (!e.shiftKey) {
+            consume();
+            this.cycleActiveTab(1);
+          }
+        } else if (mod && !e.altKey && !e.shiftKey && (key === 'pageup' || key === 'prior')) {
+          consume();
+          this.cycleActiveTab(-1);
         } else if (mod && !e.altKey && !e.shiftKey && key === 'j') {
           consume();
           this.sidebarEl.classList.toggle('is-collapsed');
