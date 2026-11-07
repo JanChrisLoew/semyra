@@ -119,4 +119,57 @@ describe('SidebarExplorerController', () => {
     removeBtns[2].click();
     expect(onRemoveRecentFile).toHaveBeenCalledWith('C:\\Projekte\\MarkLive\\README.md');
   });
+
+  it('marks active tree row with .context-active on contextmenu and clears it on popover toggle close', () => {
+    const fileTreeEl = document.createElement('div');
+    const workspaceTitleEl = document.createElement('span');
+    const contextPopoverEl = document.createElement('div');
+    contextPopoverEl.showPopover = vi.fn();
+    contextPopoverEl.hidePopover = vi.fn();
+
+    const explorer = new SidebarExplorerController({
+      fileTreeEl,
+      workspaceTitleEl,
+      contextPopoverEl,
+      getActiveFilePath: () => null,
+      onOpenFilePath: vi.fn(),
+      onOpenCreatedFile: vi.fn(),
+      onTriggerOpenFolderDialog: vi.fn(),
+      onWorkspaceFolderLoaded: vi.fn(),
+      onEntryRenamed: vi.fn(),
+      onEntryDeleted: vi.fn(),
+    });
+
+    explorer.setTree({
+      name: 'Docs',
+      path: 'C:\\Docs',
+      isDir: true,
+      isMarkdown: false,
+      children: [
+        {
+          name: 'README.md',
+          path: 'C:\\Docs\\README.md',
+          isDir: false,
+          isMarkdown: true,
+        },
+      ],
+    });
+
+    const fileBtn = fileTreeEl.querySelector<HTMLButtonElement>('.tree-row[data-filepath]')!;
+    expect(fileBtn).not.toBeNull();
+    expect(fileBtn.classList.contains('context-active')).toBe(false);
+
+    // Trigger right click on file row
+    const ctxEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    fileBtn.dispatchEvent(ctxEvent);
+
+    expect(fileBtn.classList.contains('context-active')).toBe(true);
+
+    // Popover closes -> toggle event fires with newState: 'closed'
+    const toggleEvent = new Event('toggle');
+    Object.defineProperty(toggleEvent, 'newState', { value: 'closed' });
+    contextPopoverEl.dispatchEvent(toggleEvent);
+
+    expect(fileBtn.classList.contains('context-active')).toBe(false);
+  });
 });

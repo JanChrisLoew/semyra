@@ -140,10 +140,14 @@
         <section id="panel-search" class="sidebar-panel" role="tabpanel" aria-labelledby="sidebar-tab-search" hidden>
           <div class="sidebar-subheader">
             <span class="workspace-name">Volltextsuche</span>
+            <span id="search-status-badge" class="search-count-badge" aria-live="polite"></span>
           </div>
           <search class="search-box-row">
             <label for="workspace-search-input" class="visually-hidden">Im Arbeitsordner suchen</label>
-            <input id="workspace-search-input" type="search" class="search-input" placeholder="Im Arbeitsordner suchen…" autocomplete="off">
+            <div class="search-input-wrap">
+              <input id="workspace-search-input" type="search" class="search-input" placeholder="Im Arbeitsordner suchen…" autocomplete="off">
+              <button type="button" id="btn-search-clear" class="search-clear-btn" title="Suche leeren (Esc)" aria-label="Suche leeren" hidden>✕</button>
+            </div>
             <button type="button" id="btn-search-case" class="case-toggle-btn" title="Groß-/Kleinschreibung beachten" aria-pressed="false">Aa</button>
           </search>
           <div id="search-results-container" class="sidebar-scroll scroller">
@@ -303,15 +307,18 @@
       <button type="button" data-ctx-action="rename" id="ctx-btn-rename">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.8 2.8l2.4 2.4-7.6 7.6H3.2v-2.4l7.6-7.6z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
         <span>Umbenennen…</span>
+        <kbd class="ctx-shortcut">F2</kbd>
       </button>
       <button type="button" data-ctx-action="reveal">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 3.5H3.5v9h9v-3M9.5 2.5h4v4M13.5 2.5l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span>Im Explorer anzeigen</span>
+        <kbd class="ctx-shortcut">Alt+R</kbd>
       </button>
       <hr>
       <button type="button" data-ctx-action="delete" id="ctx-btn-delete" class="ctx-danger">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 4.5h9M6 4.5V3h4v1.5M4.8 4.5l.6 8.5h5.2l.6-8.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span>In Papierkorb verschieben…</span>
+        <kbd class="ctx-shortcut">Entf</kbd>
       </button>
     </div>
   </div>
@@ -322,6 +329,7 @@
       <button type="button" data-tab-ctx="close">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
         <span>Tab schließen</span>
+        <kbd class="ctx-shortcut">Strg+W</kbd>
       </button>
       <button type="button" data-tab-ctx="close-others">
         <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6 6l4 4M10 6l-4 4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>

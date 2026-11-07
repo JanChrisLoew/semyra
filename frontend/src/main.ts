@@ -200,6 +200,8 @@ class MarkLiveApp {
 
     this.workspaceSearch = new WorkspaceSearchController({
       searchInputEl: document.getElementById('workspace-search-input') as HTMLInputElement,
+      clearBtn: document.getElementById('btn-search-clear') as HTMLButtonElement | null,
+      statusBadgeEl: document.getElementById('search-status-badge'),
       caseToggleBtn: document.getElementById('btn-search-case')!,
       resultsContainerEl: document.getElementById('search-results-container')!,
       getWorkspaceRootPath: () => this.explorer.rootPath,

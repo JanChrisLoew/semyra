@@ -254,6 +254,13 @@
   font-weight: 500;
 }
 
+.tree-row.context-active {
+  background: var(--bg-hover);
+  color: var(--accent);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
 .tree-row.is-non-md {
   color: var(--fg-muted);
 }
@@ -327,11 +334,18 @@ details[open] > summary .tree-chevron {
   border-bottom: 1px solid var(--border-subtle);
 }
 
-.search-input {
+.search-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
   flex: 1;
   min-width: 0;
+}
+
+.search-input-wrap .search-input {
+  width: 100%;
   height: 28px;
-  padding: 0 8px;
+  padding: 0 26px 0 8px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
   background: var(--bg-surface);
@@ -340,9 +354,54 @@ details[open] > summary .tree-chevron {
   font-size: 12.5px;
 }
 
-.search-input:focus-visible {
+.search-input-wrap .search-input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.search-input-wrap .search-input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
+}
+
+.search-clear-btn {
+  position: absolute;
+  right: 5px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 100ms ease, color 100ms ease;
+}
+
+.search-clear-btn[hidden] {
+  display: none !important;
+}
+
+.search-clear-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+}
+
+.search-count-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-active);
+  color: var(--accent);
+  margin-left: auto;
+}
+
+.search-count-badge:empty {
+  display: none;
 }
 
 .case-toggle-btn {
@@ -468,7 +527,7 @@ details[open] > summary .tree-chevron {
 
 [focusgroup~="menu"] {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto 1fr auto;
   gap: 1px;
 }
 
@@ -516,6 +575,14 @@ details[open] > summary .tree-chevron {
 
 [focusgroup~="menu"] > button.ctx-danger svg {
   color: var(--danger);
+}
+
+.ctx-shortcut {
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  justify-self: end;
+  padding-left: 12px;
 }
 
 [focusgroup~="menu"] > hr {

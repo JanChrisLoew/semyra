@@ -365,6 +365,53 @@ export class SidebarExplorerController {
       this.openContextMenu(e);
     });
 
+    this.deps.contextPopoverEl.addEventListener('toggle', (evt: Event) => {
+      const toggleEvt = evt as unknown as { newState?: string };
+      if (toggleEvt.newState === 'closed' || !this.deps.contextPopoverEl.matches?.(':popover-open')) {
+        this.deps.fileTreeEl
+          .querySelectorAll('.tree-row.context-active')
+          .forEach((el) => el.classList.remove('context-active'));
+      }
+    });
+
+    this.deps.fileTreeEl.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'F2') {
+        const focusedRow = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.tree-row');
+        if (!focusedRow || !this.deps.fileTreeEl.contains(focusedRow)) return;
+        e.preventDefault();
+        const isDir = Boolean(focusedRow.dataset.dirpath);
+        const path = isDir ? focusedRow.dataset.dirpath! : focusedRow.dataset.filepath!;
+        const name = focusedRow.dataset.entryname ?? (isDir ? 'Ordner' : 'Datei.md');
+        if (path) {
+          this.openEntryDialog('rename', path, name);
+        }
+      } else if (e.key === 'Delete') {
+        const focusedRow = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.tree-row');
+        if (!focusedRow || !this.deps.fileTreeEl.contains(focusedRow)) return;
+        e.preventDefault();
+        const isDir = Boolean(focusedRow.dataset.dirpath);
+        const path = isDir ? focusedRow.dataset.dirpath! : focusedRow.dataset.filepath!;
+        const name = focusedRow.dataset.entryname ?? (isDir ? 'Ordner' : 'Datei.md');
+        if (path) {
+          void this.confirmMoveToRecycleBin({
+            path,
+            parentDir: isDir ? path : (parentDirOfPath(path) ?? this.workspaceTree?.path ?? path),
+            name,
+            isDir,
+            isWorkspaceRoot: false,
+          });
+        }
+      } else if (e.altKey && (e.key === 'r' || e.key === 'R')) {
+        const focusedRow = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.tree-row');
+        if (!focusedRow || !this.deps.fileTreeEl.contains(focusedRow)) return;
+        e.preventDefault();
+        const path = focusedRow.dataset.dirpath || focusedRow.dataset.filepath;
+        if (path) {
+          void backend.revealInExplorer(path);
+        }
+      }
+    });
+
     this.deps.contextPopoverEl.addEventListener('click', (e) => {
       const actionBtn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-ctx-action]');
       if (!actionBtn || actionBtn.disabled || !this.contextTarget) return;
@@ -432,6 +479,12 @@ export class SidebarExplorerController {
     e.preventDefault();
 
     const row = (e.target as HTMLElement).closest<HTMLElement>('.tree-row');
+    this.deps.fileTreeEl
+      .querySelectorAll('.tree-row.context-active')
+      .forEach((r) => r.classList.remove('context-active'));
+    if (row) {
+      row.classList.add('context-active');
+    }
     if (row?.dataset.filepath) {
       const path = row.dataset.filepath;
       this.contextTarget = {
@@ -460,10 +513,10 @@ export class SidebarExplorerController {
       };
     }
 
-    const renameBtn = document.getElementById('ctx-btn-rename') as HTMLButtonElement;
-    const deleteBtn = document.getElementById('ctx-btn-delete') as HTMLButtonElement;
-    renameBtn.disabled = this.contextTarget.isWorkspaceRoot;
-    deleteBtn.disabled = this.contextTarget.isWorkspaceRoot;
+    const renameBtn = document.getElementById('ctx-btn-rename') as HTMLButtonElement | null;
+    const deleteBtn = document.getElementById('ctx-btn-delete') as HTMLButtonElement | null;
+    if (renameBtn) renameBtn.disabled = this.contextTarget.isWorkspaceRoot;
+    if (deleteBtn) deleteBtn.disabled = this.contextTarget.isWorkspaceRoot;
 
     this.deps.contextPopoverEl.style.left = `${e.clientX}px`;
     this.deps.contextPopoverEl.style.top = `${e.clientY}px`;

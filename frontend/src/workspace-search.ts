@@ -2,6 +2,8 @@ import { backend, SearchFileResult } from './api';
 
 export interface WorkspaceSearchDeps {
   searchInputEl: HTMLInputElement;
+  clearBtn?: HTMLButtonElement | null;
+  statusBadgeEl?: HTMLElement | null;
   caseToggleBtn: HTMLElement;
   resultsContainerEl: HTMLElement;
   getWorkspaceRootPath: () => string | null;
@@ -33,8 +35,12 @@ export class WorkspaceSearchController {
   public async runSearch(): Promise<void> {
     const query = this.deps.searchInputEl.value.trim();
     const rootPath = this.deps.getWorkspaceRootPath();
+    this.updateClearBtnState();
 
     if (!rootPath) {
+      if (this.deps.statusBadgeEl) {
+        this.deps.statusBadgeEl.textContent = '';
+      }
       this.deps.resultsContainerEl.replaceChildren();
       const hint = document.createElement('p');
       hint.className = 'muted-hint';
@@ -44,6 +50,9 @@ export class WorkspaceSearchController {
     }
 
     if (!query) {
+      if (this.deps.statusBadgeEl) {
+        this.deps.statusBadgeEl.textContent = '';
+      }
       this.deps.resultsContainerEl.replaceChildren();
       const hint = document.createElement('p');
       hint.className = 'muted-hint';
@@ -63,8 +72,30 @@ export class WorkspaceSearchController {
     }
   }
 
+  private updateClearBtnState(): void {
+    if (this.deps.clearBtn) {
+      this.deps.clearBtn.hidden = !this.deps.searchInputEl.value;
+    }
+  }
+
+  public clearSearch(): void {
+    this.deps.searchInputEl.value = '';
+    this.updateClearBtnState();
+    if (this.deps.statusBadgeEl) {
+      this.deps.statusBadgeEl.textContent = '';
+    }
+    this.deps.resultsContainerEl.replaceChildren();
+    const hint = document.createElement('p');
+    hint.className = 'muted-hint';
+    hint.textContent =
+      'Suchbegriff eingeben, um alle Markdown-Dateien im Ordner zu durchsuchen.';
+    this.deps.resultsContainerEl.appendChild(hint);
+    this.deps.searchInputEl.focus();
+  }
+
   private bindEvents(): void {
     this.deps.searchInputEl.addEventListener('input', () => {
+      this.updateClearBtnState();
       window.clearTimeout(this.debounceTimer);
       this.debounceTimer = window.setTimeout(() => {
         void this.runSearch();
@@ -72,11 +103,18 @@ export class WorkspaceSearchController {
     });
 
     this.deps.searchInputEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
+      if (e.key === 'Escape' && this.deps.searchInputEl.value) {
+        e.preventDefault();
+        this.clearSearch();
+      } else if (e.key === 'Enter') {
         e.preventDefault();
         window.clearTimeout(this.debounceTimer);
         void this.runSearch();
       }
+    });
+
+    this.deps.clearBtn?.addEventListener('click', () => {
+      this.clearSearch();
     });
 
     this.deps.caseToggleBtn.addEventListener('click', () => {
@@ -92,6 +130,10 @@ export class WorkspaceSearchController {
   private renderResults(results: SearchFileResult[]): void {
     this.deps.resultsContainerEl.replaceChildren();
     if (results.length === 0) {
+      if (this.deps.statusBadgeEl) {
+        this.deps.statusBadgeEl.textContent = '0';
+        this.deps.statusBadgeEl.title = 'Keine Treffer gefunden';
+      }
       const hint = document.createElement('p');
       hint.className = 'muted-hint';
       hint.textContent = 'Keine Treffer gefunden.';
@@ -100,6 +142,13 @@ export class WorkspaceSearchController {
     }
 
     const totalHits = results.reduce((acc, f) => acc + f.matches.length, 0);
+    if (this.deps.statusBadgeEl) {
+      this.deps.statusBadgeEl.textContent = String(totalHits);
+      this.deps.statusBadgeEl.title = `${totalHits} Treffer in ${results.length} ${
+        results.length === 1 ? 'Datei' : 'Dateien'
+      }`;
+    }
+
     const summary = document.createElement('div');
     summary.className = 'search-summary';
     summary.textContent = `${totalHits} Treffer in ${results.length} ${results.length === 1 ? 'Datei' : 'Dateien'}`;
