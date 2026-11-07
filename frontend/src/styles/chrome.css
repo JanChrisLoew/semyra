@@ -194,6 +194,7 @@ button {
 }
 
 .tab-slot {
+  position: relative;
   display: inline-flex;
   align-items: center;
   height: 31px;
@@ -205,6 +206,10 @@ button {
   background: transparent;
   color: var(--fg-secondary);
   flex-shrink: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  cursor: grab;
 }
 
 .tab-slot:hover {
@@ -219,21 +224,37 @@ button {
   font-weight: 500;
 }
 
-.tab-slot[draggable="true"] {
-  cursor: grab;
-}
-
 .tab-slot.is-dragging {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: grabbing;
 }
 
-.tab-slot.drop-before {
-  border-left: 2px solid var(--accent);
+.tab-slot.drop-before::before,
+.tab-slot.drop-after::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  width: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  z-index: 10;
+  pointer-events: none;
 }
 
-.tab-slot.drop-after {
-  border-right: 2px solid var(--accent);
+.tab-slot.drop-before::before {
+  left: -1px;
+}
+
+.tab-slot.drop-after::after {
+  right: -1px;
+}
+
+body.is-tab-dragging,
+body.is-tab-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
 }
 
 .tab-select-btn {
@@ -249,7 +270,10 @@ button {
   color: inherit;
   font-size: 12.5px;
   font-weight: inherit;
-  cursor: pointer;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
 }
 
 .tab-select-btn:focus-visible,

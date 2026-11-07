@@ -25,6 +25,7 @@ import { installProgressiveEnhancements } from './polyfills';
 import { safeSetMarkdownHTML } from './sanitizer';
 import { SidebarExplorerController } from './sidebar-explorer';
 import { SyncScrollController } from './sync-scroll';
+import { reorderTabList } from './tab-utils';
 import { bindThemeSystem } from './theme';
 import { estimateTokens } from './token-utils';
 import { WELCOME_MARKDOWN } from './welcome';
@@ -112,7 +113,15 @@ class MarkLiveApp {
     hidePopover?: () => void;
   };
   private tabContextTargetId: string | null = null;
-  private draggedTabId: string | null = null;
+  private tabDragState: {
+    tabId: string;
+    startX: number;
+    startY: number;
+    isDragging: boolean;
+    targetTabId: string | null;
+    isAfter: boolean;
+  } | null = null;
+  private suppressNextTabClick = false;
 
   public async init(): Promise<void> {
     const cmHost = document.getElementById('codemirror-host')!;
@@ -1144,65 +1153,7 @@ class MarkLiveApp {
       const slot = document.createElement('div');
       slot.className = `tab-slot ${isSelected ? 'is-active' : ''}`;
       slot.setAttribute('role', 'presentation');
-      slot.draggable = true;
       slot.dataset.tabId = tab.id;
-
-      slot.addEventListener('dragstart', (e) => {
-        if (!e.dataTransfer) return;
-        this.draggedTabId = tab.id;
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', tab.id);
-        slot.classList.add('is-dragging');
-      });
-
-      slot.addEventListener('dragover', (e) => {
-        if (!this.draggedTabId || this.draggedTabId === tab.id) return;
-        e.preventDefault();
-        e.dataTransfer!.dropEffect = 'move';
-        const rect = slot.getBoundingClientRect();
-        const isAfter = e.clientX > rect.left + rect.width / 2;
-        slot.classList.toggle('drop-after', isAfter);
-        slot.classList.toggle('drop-before', !isAfter);
-      });
-
-      slot.addEventListener('dragleave', () => {
-        slot.classList.remove('drop-before', 'drop-after');
-      });
-
-      slot.addEventListener('drop', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        slot.classList.remove('drop-before', 'drop-after');
-        const sourceId = this.draggedTabId ?? e.dataTransfer?.getData('text/plain');
-        if (!sourceId || sourceId === tab.id) return;
-
-        const sourceIndex = this.tabs.findIndex((t) => t.id === sourceId);
-        let targetIndex = this.tabs.findIndex((t) => t.id === tab.id);
-        if (sourceIndex === -1 || targetIndex === -1) return;
-
-        const rect = slot.getBoundingClientRect();
-        const isAfter = e.clientX > rect.left + rect.width / 2;
-        if (isAfter) {
-          targetIndex++;
-        }
-        if (sourceIndex < targetIndex) {
-          targetIndex--;
-        }
-
-        const [movedTab] = this.tabs.splice(sourceIndex, 1);
-        this.tabs.splice(targetIndex, 0, movedTab);
-
-        this.renderTabBar();
-        this.schedulePrefsSave();
-      });
-
-      slot.addEventListener('dragend', () => {
-        this.draggedTabId = null;
-        slot.classList.remove('is-dragging');
-        for (const el of this.tabBarEl.querySelectorAll('.tab-slot')) {
-          el.classList.remove('drop-before', 'drop-after', 'is-dragging');
-        }
-      });
 
       slot.addEventListener('auxclick', (e) => {
         if (e.button === 1) {
@@ -1221,7 +1172,14 @@ class MarkLiveApp {
       selectBtn.setAttribute('aria-selected', String(isSelected));
       selectBtn.tabIndex = isSelected ? 0 : -1;
       selectBtn.title = tab.path ?? `${tab.name} (Ungespeichert)`;
-      selectBtn.addEventListener('click', () => this.activateTab(tab.id));
+      selectBtn.addEventListener('click', (e) => {
+        if (this.suppressNextTabClick) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        this.activateTab(tab.id);
+      });
 
       const titleSpan = document.createElement('span');
       titleSpan.className = 'tab-title';
@@ -1807,6 +1765,104 @@ class MarkLiveApp {
           break;
       }
     });
+
+    // Tab drag-and-drop reordering via Pointer Events (immune to button click suppression)
+    this.tabBarEl.addEventListener('pointerdown', (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      if ((e.target as HTMLElement).closest('.tab-close-btn')) return;
+
+      const slot = (e.target as HTMLElement).closest<HTMLElement>('.tab-slot');
+      if (!slot || !slot.dataset.tabId) return;
+
+      this.tabDragState = {
+        tabId: slot.dataset.tabId,
+        startX: e.clientX,
+        startY: e.clientY,
+        isDragging: false,
+        targetTabId: null,
+        isAfter: false,
+      };
+    });
+
+    window.addEventListener('pointermove', (e: PointerEvent) => {
+      if (!this.tabDragState) return;
+
+      if (!this.tabDragState.isDragging) {
+        const dist = Math.hypot(e.clientX - this.tabDragState.startX, e.clientY - this.tabDragState.startY);
+        if (dist < 6) return;
+        this.tabDragState.isDragging = true;
+        this.suppressNextTabClick = true;
+        document.body.classList.add('is-tab-dragging');
+
+        const activeSlot = this.tabBarEl.querySelector<HTMLElement>(
+          `.tab-slot[data-tab-id="${this.tabDragState.tabId}"]`,
+        );
+        activeSlot?.classList.add('is-dragging');
+      }
+
+      for (const el of this.tabBarEl.querySelectorAll('.tab-slot')) {
+        el.classList.remove('drop-before', 'drop-after');
+      }
+
+      let targetSlot =
+        (document.elementFromPoint(e.clientX, e.clientY)?.closest('.tab-slot') as HTMLElement | null) ?? null;
+      const slots = Array.from(this.tabBarEl.querySelectorAll<HTMLElement>('.tab-slot'));
+      if (!targetSlot && slots.length > 0) {
+        for (const slot of slots) {
+          const rect = slot.getBoundingClientRect();
+          if (e.clientX >= rect.left && e.clientX <= rect.right) {
+            targetSlot = slot;
+            break;
+          }
+        }
+        if (!targetSlot) {
+          const firstRect = slots[0].getBoundingClientRect();
+          const lastRect = slots[slots.length - 1].getBoundingClientRect();
+          if (e.clientX < firstRect.left) {
+            targetSlot = slots[0];
+          } else if (e.clientX > lastRect.right) {
+            targetSlot = slots[slots.length - 1];
+          }
+        }
+      }
+
+      if (targetSlot && targetSlot.dataset.tabId && targetSlot.dataset.tabId !== this.tabDragState.tabId) {
+        const rect = targetSlot.getBoundingClientRect();
+        const isAfter = e.clientX > rect.left + rect.width / 2;
+        targetSlot.classList.toggle('drop-after', isAfter);
+        targetSlot.classList.toggle('drop-before', !isAfter);
+        this.tabDragState.targetTabId = targetSlot.dataset.tabId;
+        this.tabDragState.isAfter = isAfter;
+      } else {
+        this.tabDragState.targetTabId = null;
+      }
+    });
+
+    const finishTabDrag = () => {
+      if (!this.tabDragState) return;
+      const state = this.tabDragState;
+      this.tabDragState = null;
+
+      document.body.classList.remove('is-tab-dragging');
+      for (const el of this.tabBarEl.querySelectorAll('.tab-slot')) {
+        el.classList.remove('drop-before', 'drop-after', 'is-dragging');
+      }
+
+      if (state.isDragging) {
+        setTimeout(() => {
+          this.suppressNextTabClick = false;
+        }, 80);
+
+        if (state.targetTabId && state.targetTabId !== state.tabId) {
+          this.tabs = reorderTabList(this.tabs, state.tabId, state.targetTabId, state.isAfter);
+          this.renderTabBar();
+          this.schedulePrefsSave();
+        }
+      }
+    };
+
+    window.addEventListener('pointerup', finishTabDrag);
+    window.addEventListener('pointercancel', finishTabDrag);
 
     // Double click empty tab bar space to open a new tab
     const tabStripWrap = document.querySelector('.tab-strip-wrap');
