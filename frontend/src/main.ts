@@ -448,7 +448,7 @@ class MarkLiveApp {
       const res = await backend.savePastedImage(targetBaseDir, mimeType, dataUrl);
       this.editor.insertSnippet(res.markdownSnippet);
       if (this.explorer.hasWorkspace) {
-        void this.explorer.refresh();
+        this.explorer.scheduleRefresh();
       }
     } catch (err) {
       console.error('Bild aus Zwischenablage konnte nicht gespeichert werden:', err);
@@ -473,7 +473,7 @@ class MarkLiveApp {
     if (snippets.length > 0) {
       this.editor.insertSnippet(snippets.join('\n'));
       if (this.explorer.hasWorkspace) {
-        void this.explorer.refresh();
+        this.explorer.scheduleRefresh();
       }
     }
   }
@@ -1250,8 +1250,18 @@ class MarkLiveApp {
           void backend.openExternalUrl(href);
         } else if (/\.md(?:#.*)?$/i.test(href) && this.activeTab?.parentDir) {
           e.preventDefault();
+          const hashIdx = href.indexOf('#');
+          const hashId = hashIdx >= 0 ? decodeURIComponent(href.slice(hashIdx + 1)) : '';
           const joined = resolveRelativeMarkdownPath(this.activeTab.parentDir, href);
-          void this.openFileByPath(joined);
+          void this.openFileByPath(joined).then(() => {
+            if (hashId) {
+              requestAnimationFrame(() => {
+                this.previewContentEl
+                  .querySelector(`#${CSS.escape(hashId)}`)
+                  ?.scrollIntoView({ behavior: 'smooth' });
+              });
+            }
+          });
         }
       }
     });
@@ -1424,7 +1434,7 @@ class MarkLiveApp {
       }
 
       if (this.explorer.hasWorkspace) {
-        void this.explorer.refresh();
+        this.explorer.scheduleRefresh();
       }
     });
 

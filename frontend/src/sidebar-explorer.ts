@@ -36,6 +36,8 @@ export class SidebarExplorerController {
   private workspaceTree: FileTreeNode | null = null;
   private workspaceFilesCache: WorkspaceFileEntry[] | null = null;
   private contextTarget: ContextMenuTarget | null = null;
+  private loadSeq = 0;
+  private refreshDebounceTimer: number | undefined;
   private entryDialogState: { mode: EntryDialogMode; targetPath: string } = {
     mode: 'new-file',
     targetPath: '',
@@ -72,8 +74,10 @@ export class SidebarExplorerController {
   }
 
   public async loadFolder(path: string, persistPrefs = true): Promise<void> {
+    const seq = ++this.loadSeq;
     try {
       const tree = await backend.listTree(path);
+      if (seq !== this.loadSeq) return;
       this.setTree(tree, persistPrefs);
     } catch (err) {
       console.error('Ordnerbaum konnte nicht geladen werden:', err);
@@ -81,20 +85,39 @@ export class SidebarExplorerController {
   }
 
   public async refresh(): Promise<void> {
+    window.clearTimeout(this.refreshDebounceTimer);
     if (!this.workspaceTree) return;
     await this.loadFolder(this.workspaceTree.path, false);
   }
 
+  public scheduleRefresh(delayMs = 220): void {
+    if (!this.workspaceTree) return;
+    window.clearTimeout(this.refreshDebounceTimer);
+    this.refreshDebounceTimer = window.setTimeout(() => {
+      void this.refresh();
+    }, delayMs);
+  }
+
   public setTree(tree: FileTreeNode, persistPrefs = true): void {
+    const isSameRoot =
+      this.workspaceTree !== null &&
+      this.workspaceTree.path.toLowerCase() === tree.path.toLowerCase();
+    const preservedOpenDirs = isSameRoot ? this.collectOpenDirStates() : null;
+
     this.workspaceTree = tree;
     this.workspaceFilesCache = null;
-    this.deps.onWorkspaceFolderLoaded(tree.path, persistPrefs);
+    if (persistPrefs || !isSameRoot) {
+      this.deps.onWorkspaceFolderLoaded(tree.path, persistPrefs);
+    }
 
     this.deps.workspaceTitleEl.textContent = tree.name;
     this.deps.workspaceTitleEl.title = tree.path;
-    document.getElementById('btn-new-folder-file')!.hidden = false;
-    document.getElementById('btn-new-subfolder')!.hidden = false;
-    document.getElementById('btn-refresh-tree')!.hidden = false;
+    const newFileBtn = document.getElementById('btn-new-folder-file');
+    if (newFileBtn) newFileBtn.hidden = false;
+    const newSubBtn = document.getElementById('btn-new-subfolder');
+    if (newSubBtn) newSubBtn.hidden = false;
+    const refreshBtn = document.getElementById('btn-refresh-tree');
+    if (refreshBtn) refreshBtn.hidden = false;
 
     this.deps.fileTreeEl.replaceChildren();
     const children = tree.children ?? [];
@@ -107,9 +130,23 @@ export class SidebarExplorerController {
     }
 
     for (const node of children) {
-      this.deps.fileTreeEl.appendChild(this.renderTreeNode(node, 0));
+      this.deps.fileTreeEl.appendChild(this.renderTreeNode(node, 0, preservedOpenDirs));
     }
     this.highlightActiveFile();
+  }
+
+  private collectOpenDirStates(): Map<string, boolean> {
+    const states = new Map<string, boolean>();
+    for (const details of this.deps.fileTreeEl.querySelectorAll<HTMLDetailsElement>(
+      'details.tree-dir-details',
+    )) {
+      const summary = details.querySelector<HTMLElement>(':scope > summary[data-dirpath]');
+      const dirPath = summary?.dataset.dirpath;
+      if (dirPath) {
+        states.set(dirPath.toLowerCase(), details.open);
+      }
+    }
+    return states;
   }
 
   public highlightActiveFile(): void {
@@ -206,11 +243,16 @@ export class SidebarExplorerController {
     this.deps.fileTreeEl.appendChild(wrap);
   }
 
-  private renderTreeNode(node: FileTreeNode, depth: number): HTMLElement {
+  private renderTreeNode(
+    node: FileTreeNode,
+    depth: number,
+    preservedOpenDirs: Map<string, boolean> | null,
+  ): HTMLElement {
     if (node.isDir) {
       const details = document.createElement('details');
       details.className = 'tree-dir-details';
-      if (depth < 1) details.open = true;
+      const prevOpen = preservedOpenDirs?.get(node.path.toLowerCase());
+      details.open = prevOpen !== undefined ? prevOpen : depth < 1;
 
       const summary = document.createElement('summary');
       summary.className = 'tree-row';
@@ -224,7 +266,7 @@ export class SidebarExplorerController {
       const childrenBox = document.createElement('div');
       childrenBox.className = 'tree-children';
       for (const child of node.children ?? []) {
-        childrenBox.appendChild(this.renderTreeNode(child, depth + 1));
+        childrenBox.appendChild(this.renderTreeNode(child, depth + 1, preservedOpenDirs));
       }
       details.appendChild(childrenBox);
       return details;
@@ -254,16 +296,16 @@ export class SidebarExplorerController {
       void this.deps.onTriggerOpenFolderDialog();
     });
 
-    document.getElementById('btn-refresh-tree')!.addEventListener('click', () => {
+    document.getElementById('btn-refresh-tree')?.addEventListener('click', () => {
       void this.refresh();
     });
 
-    document.getElementById('btn-new-folder-file')!.addEventListener('click', () => {
+    document.getElementById('btn-new-folder-file')?.addEventListener('click', () => {
       if (!this.workspaceTree) return;
       this.openEntryDialog('new-file', this.workspaceTree.path);
     });
 
-    document.getElementById('btn-new-subfolder')!.addEventListener('click', () => {
+    document.getElementById('btn-new-subfolder')?.addEventListener('click', () => {
       if (!this.workspaceTree) return;
       this.openEntryDialog('new-folder', this.workspaceTree.path);
     });
@@ -293,15 +335,16 @@ export class SidebarExplorerController {
       }
     });
 
-    const entryDialog = document.getElementById('new-file-dialog') as HTMLDialogElement;
-    const entryInput = document.getElementById('new-file-name') as HTMLInputElement;
-    const entryError = document.getElementById('new-file-error')!;
+    const entryDialog = document.getElementById('new-file-dialog') as HTMLDialogElement | null;
+    const entryInput = document.getElementById('new-file-name') as HTMLInputElement | null;
+    const entryError = document.getElementById('new-file-error');
 
-    entryDialog.addEventListener('close', () => {
+    entryDialog?.addEventListener('close', () => {
       entryDialog.returnValue = '';
     });
 
-    document.getElementById('new-file-form')!.addEventListener('submit', async (e) => {
+    document.getElementById('new-file-form')?.addEventListener('submit', async (e) => {
+      if (!entryDialog || !entryInput || !entryError) return;
       const submitter = (e as SubmitEvent).submitter as HTMLButtonElement | null;
       if (submitter?.value !== 'create') return;
       e.preventDefault();

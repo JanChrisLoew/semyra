@@ -240,8 +240,40 @@ fn validate_entry_name(name: &str) -> Result<&str, String> {
     if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
         return Err("Name darf nicht leer sein.".to_string());
     }
+    if trimmed.ends_with('.') {
+        return Err("Name darf unter Windows nicht mit einem Punkt enden.".to_string());
+    }
     if trimmed.contains(['/', '\\', ':', '*', '?', '"', '<', '>', '|']) {
         return Err("Name enthält ungültige Zeichen.".to_string());
+    }
+    let stem = trimmed.split('.').next().unwrap_or(trimmed);
+    let upper = stem.to_ascii_uppercase();
+    if matches!(
+        upper.as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    ) {
+        return Err(format!("'{stem}' ist ein reservierter Windows-Gerätename."));
     }
     Ok(trimmed)
 }
@@ -297,6 +329,9 @@ mod tests {
         assert!(validate_entry_name("..").is_err());
         assert!(validate_entry_name("ordner/datei.md").is_err());
         assert!(validate_entry_name("ungueltig:name.md").is_err());
+        assert!(validate_entry_name("con.md").is_err());
+        assert!(validate_entry_name("LPT1").is_err());
+        assert!(validate_entry_name("Notiz.").is_err());
         assert_eq!(validate_entry_name("  Kapitel 1.md  ").unwrap(), "Kapitel 1.md");
     }
 }
