@@ -30,9 +30,11 @@ function syncTaskCheckboxesAndStripChrome(clone: HTMLElement, source: HTMLElemen
     dst.setAttribute('disabled', '');
   });
 
-  // Strip interactive copy buttons, font-dependent `.katex-html` spans, and `<annotation>`
+  // Strip interactive copy buttons, mermaid action toolbars, font-dependent `.katex-html` spans, and `<annotation>`
   // TeX source nodes so native MathML renders once cleanly without raw TeX duplication in Word/Teams.
-  for (const el of clone.querySelectorAll('.copy-code-btn, .katex-html, math annotation')) {
+  for (const el of clone.querySelectorAll(
+    '.copy-code-btn, .mermaid-actions, .katex-html, math annotation',
+  )) {
     el.remove();
   }
 

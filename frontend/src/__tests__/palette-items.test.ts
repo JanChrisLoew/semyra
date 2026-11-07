@@ -106,6 +106,7 @@ describe('palette-items', () => {
     const onReopen = vi.fn();
     const onNext = vi.fn();
     const onPrev = vi.fn();
+    const onToggle = vi.fn();
     const noop = vi.fn();
 
     const cmds = buildPaletteCommandItems({
@@ -142,6 +143,7 @@ describe('palette-items', () => {
       onReopenTab: onReopen,
       onNextTab: onNext,
       onPrevTab: onPrev,
+      onToggleTask: onToggle,
     });
 
     const reopenCmd = cmds.find((c) => c.id === 'cmd:reopen-tab');
@@ -161,5 +163,11 @@ describe('palette-items', () => {
     expect(prevCmd?.shortcut).toBe('Strg+BildAuf');
     prevCmd?.run();
     expect(onPrev).toHaveBeenCalledTimes(1);
+
+    const taskCmd = cmds.find((c) => c.id === 'cmd:toggle-task');
+    expect(taskCmd).toBeDefined();
+    expect(taskCmd?.shortcut).toBe('Alt+C');
+    taskCmd?.run();
+    expect(onToggle).toHaveBeenCalledTimes(1);
   });
 });

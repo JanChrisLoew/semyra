@@ -60,6 +60,43 @@ pub fn is_markdown_path(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+pub fn is_supported_text_path(path: &Path) -> bool {
+    if is_markdown_path(path) {
+        return true;
+    }
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_default();
+    if file_name.starts_with(".env")
+        || file_name == ".gitignore"
+        || file_name == ".editorconfig"
+        || file_name == "dockerfile"
+        || file_name == "license"
+    {
+        return true;
+    }
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "json"
+                    | "yaml"
+                    | "yml"
+                    | "toml"
+                    | "ini"
+                    | "env"
+                    | "csv"
+                    | "tsv"
+                    | "log"
+                    | "xml"
+            )
+        })
+        .unwrap_or(false)
+}
+
 pub fn is_image_path(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())

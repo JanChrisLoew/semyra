@@ -1,5 +1,8 @@
 use super::encoding::{read_text_file, write_text_file, FilePayload};
-use super::{clean_windows_path, is_image_path, is_markdown_path, normalize_existing_path, IGNORED_DIRS};
+use super::{
+    clean_windows_path, is_image_path, is_markdown_path, is_supported_text_path,
+    normalize_existing_path, IGNORED_DIRS,
+};
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
@@ -97,18 +100,7 @@ fn scan_dir_children(
             });
         } else if file_type.is_file() {
             let is_md = is_markdown_path(&path);
-            let show_file = is_md
-                || is_image_path(&path)
-                || path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .map(|ext| {
-                        matches!(
-                            ext.to_ascii_lowercase().as_str(),
-                            "json" | "toml" | "yaml" | "yml"
-                        )
-                    })
-                    .unwrap_or(false);
+            let show_file = is_md || is_image_path(&path) || is_supported_text_path(&path);
             if show_file {
                 *entry_budget += 1;
                 files.push(FileTreeNode {
@@ -175,7 +167,7 @@ fn collect_markdown_files_recursive(
             {
                 subdirs.push(path);
             }
-        } else if ft.is_file() && is_markdown_path(&path) {
+        } else if ft.is_file() && (is_markdown_path(&path) || is_supported_text_path(&path)) {
             files.push(path);
         }
     }
@@ -230,7 +222,19 @@ pub fn create_new_markdown_file(parent_dir: &Path, file_name: &str) -> Result<Fi
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("Neues Dokument");
-    let initial = format!("# {stem}\n\n");
+    let ext = Path::new(&final_name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_default();
+
+    let initial = match ext.as_str() {
+        "json" => "{\n  \n}\n".to_string(),
+        "yaml" | "yml" => "# Konfiguration\n".to_string(),
+        "toml" => "# Konfiguration\n".to_string(),
+        "txt" | "log" | "env" | "ini" => String::new(),
+        _ => format!("# {stem}\n\n"),
+    };
     write_text_file(&full_path, &initial, true)?;
     read_text_file(&full_path)
 }
@@ -333,5 +337,29 @@ mod tests {
         assert!(validate_entry_name("LPT1").is_err());
         assert!(validate_entry_name("Notiz.").is_err());
         assert_eq!(validate_entry_name("  Kapitel 1.md  ").unwrap(), "Kapitel 1.md");
+    }
+
+    #[test]
+    fn creates_clean_templates_for_different_file_types() {
+        let temp = std::env::temp_dir().join(format!(
+            "marklive_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp).unwrap();
+
+        let json = create_new_markdown_file(&temp, "package.json").unwrap();
+        assert!(json.content.contains("{\n"));
+
+        let yaml = create_new_markdown_file(&temp, "config.yaml").unwrap();
+        assert_eq!(yaml.content, "# Konfiguration\n");
+
+        let md = create_new_markdown_file(&temp, "Notizen").unwrap();
+        assert_eq!(md.name, "Notizen.md");
+        assert!(md.content.starts_with("# Notizen\n\n"));
+
+        let _ = fs::remove_dir_all(&temp);
     }
 }

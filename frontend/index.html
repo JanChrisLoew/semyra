@@ -397,6 +397,7 @@
       <div><kbd>Strg</kbd> + <kbd>Umschalt</kbd> + <kbd>F</kbd></div><div>Volltextsuche im Arbeitsordner</div>
       <div><kbd>Tab</kbd> / <kbd>Umschalt</kbd> + <kbd>Tab</kbd></div><div>Nächste / vorherige Tabellenzelle (neue Zeile am Ende)</div>
       <div><kbd>Alt</kbd> + <kbd>Umschalt</kbd> + <kbd>F</kbd></div><div>Markdown-Tabelle sauber ausrichten</div>
+      <div><kbd>Alt</kbd> + <kbd>C</kbd></div><div>Aufgaben-Checkbox an-/abhaken (- [ ] / - [x])</div>
       <div><kbd>Strg</kbd> + <kbd>V</kbd> (Bild / URL / Excel)</div><div>Bild einfügen, Auswahl verlinken oder Tabelle konvertieren</div>
       <div><kbd>Strg</kbd> + <kbd>Umschalt</kbd> + <kbd>K</kbd></div><div>Als formatierten Text kopieren (Word / Teams / Outlook)</div>
       <div><kbd>Strg</kbd> + <kbd>Umschalt</kbd> + <kbd>D</kbd></div><div>Direkt als PDF-Datei exportieren</div>
@@ -410,6 +411,15 @@
         <button type="submit" value="close" class="dialog-btn primary" autofocus>Schließen</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Native Modal Dialog: Mermaid Fullscreen / Lightbox -->
+  <dialog id="mermaid-dialog" class="mermaid-dialog" closedby="any" aria-labelledby="mermaid-dialog-title">
+    <div class="mermaid-dialog-header">
+      <h2 id="mermaid-dialog-title">Mermaid-Diagramm</h2>
+      <form method="dialog"><button type="submit" class="dialog-close-btn" aria-label="Schließen">✕</button></form>
+    </div>
+    <div id="mermaid-dialog-body" class="mermaid-dialog-body scroller"></div>
   </dialog>
 
   <script type="module" src="/src/main.ts"></script>

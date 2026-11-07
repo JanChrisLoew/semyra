@@ -606,12 +606,19 @@ fn handle_api_route(
                     .or_else(dirs::document_dir);
 
                 let mut dlg = rfd::FileDialog::new()
-                    .set_title("Markdown-Datei öffnen")
+                    .set_title("Dokument oder Textdatei öffnen")
                     .add_filter(
-                        "Markdown-Dateien",
-                        &["md", "markdown", "mdown", "mkd", "mdx", "txt"],
+                        "Unterstützte Textdateien",
+                        &[
+                            "md", "markdown", "mdown", "mkd", "mdx", "txt", "json", "yaml",
+                            "yml", "toml", "ini", "env", "csv", "tsv", "log",
+                        ],
                     )
-                    .add_filter("Alle Dateien", &["*"]);
+                    .add_filter(
+                        "Markdown-Dateien (*.md)",
+                        &["md", "markdown", "mdown", "mkd", "mdx"],
+                    )
+                    .add_filter("Alle Dateien (*.*)", &["*"]);
 
                 if let Some(dir) = start_dir {
                     dlg = dlg.set_directory(dir);

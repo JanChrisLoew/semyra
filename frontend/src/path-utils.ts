@@ -40,3 +40,17 @@ export function resolveRelativeMarkdownPath(parentDir: string, relativeHref: str
   }
   return baseParts.join('\\');
 }
+
+export function isMarkdownPath(filePath: string): boolean {
+  return /\.(?:md|markdown|mdown|mkd|mdx)$/i.test(filePath);
+}
+
+export function isImagePath(filePath: string): boolean {
+  return /\.(?:png|jpg|jpeg|gif|webp|bmp|svg)$/i.test(filePath);
+}
+
+export function getFileExtension(filePath: string): string {
+  const base = baseNameOfPath(filePath);
+  const dot = base.lastIndexOf('.');
+  return dot >= 0 ? base.slice(dot + 1).toLowerCase() : '';
+}

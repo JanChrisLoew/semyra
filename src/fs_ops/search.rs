@@ -1,5 +1,8 @@
 use super::encoding::decode_text_bytes;
-use super::{clean_windows_path, is_markdown_path, normalize_existing_path, IGNORED_DIRS};
+use super::{
+    clean_windows_path, is_markdown_path, is_supported_text_path, normalize_existing_path,
+    IGNORED_DIRS,
+};
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
@@ -98,7 +101,7 @@ fn search_dir_recursive(
             {
                 subdirs.push(path);
             }
-        } else if ft.is_file() && is_markdown_path(&path) {
+        } else if ft.is_file() && (is_markdown_path(&path) || is_supported_text_path(&path)) {
             files.push(path);
         }
     }

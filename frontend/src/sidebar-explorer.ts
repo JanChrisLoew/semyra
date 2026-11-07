@@ -1,5 +1,11 @@
 import { backend, FilePayload, FileTreeNode, WorkspaceFileEntry } from './api';
-import { baseNameOfPath, parentDirOfPath } from './path-utils';
+import {
+  baseNameOfPath,
+  getFileExtension,
+  isImagePath,
+  isMarkdownPath,
+  parentDirOfPath,
+} from './path-utils';
 
 type EntryDialogMode = 'new-file' | 'new-folder' | 'rename';
 
@@ -272,20 +278,31 @@ export class SidebarExplorerController {
       return details;
     }
 
+    const isMd = isMarkdownPath(node.name);
+    const isImg = isImagePath(node.name);
+    const ext = getFileExtension(node.name);
+    let icon = '📄';
+    if (isMd) {
+      icon = '📝';
+    } else if (isImg) {
+      icon = '🖼️';
+    } else if (/^(?:json|yaml|yml|toml|ini|env)$/i.test(ext)) {
+      icon = '⚙️';
+    }
+
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = `tree-row ${node.isMarkdown ? '' : 'is-non-md'}`;
+    btn.className = `tree-row ${isMd ? '' : isImg ? 'is-non-md is-image' : 'is-text-entry'}`;
     btn.dataset.filepath = node.path;
     btn.dataset.entryname = node.name;
     btn.title = node.path;
-    const icon = node.isMarkdown ? '📝' : '📄';
     btn.innerHTML = `<span aria-hidden="true">${icon}</span><span></span>`;
     btn.lastElementChild!.textContent = node.name;
     btn.addEventListener('click', () => {
-      if (node.isMarkdown) {
-        void this.deps.onOpenFilePath(node.path);
-      } else {
+      if (isImg) {
         void backend.revealInExplorer(node.path);
+      } else {
+        void this.deps.onOpenFilePath(node.path);
       }
     });
     return btn;

@@ -16,6 +16,7 @@ import {
   foldService,
   HighlightStyle,
   indentOnInput,
+  LanguageDescription,
   syntaxHighlighting,
   syntaxTree,
   unfoldEffect,
@@ -44,6 +45,7 @@ import {
   formatTableAtCursorOrAll,
   navigateMarkdownTableCell,
 } from './markdown-table';
+import { isMarkdownPath } from './path-utils';
 
 const markdownHighlightStyle = HighlightStyle.define([
   { tag: tags.heading1, fontWeight: '700', fontSize: '1.3em' },
@@ -142,7 +144,12 @@ export function formatSmartUrlPaste(
 
 export interface EditorCallbacks {
   onDocChanged: (content: string) => void;
-  onCursorChanged: (line: number, col: number) => void;
+  onCursorChanged: (
+    line: number,
+    col: number,
+    selectedChars: number,
+    selectedWords: number,
+  ) => void;
   onEditorScrolled: () => void;
   onFormatCommand: (cmd: FormatAction) => void;
   onPasteImage: (mimeType: string, dataUrl: string) => void;
@@ -244,6 +251,7 @@ export class MarkdownEditorController {
   private callbacks: EditorCallbacks;
   private wordWrapCompartment = new Compartment();
   private spellcheckCompartment = new Compartment();
+  private languageCompartment = new Compartment();
   private wordWrapEnabled = true;
   private spellcheckEnabled = false;
   private sharedExtensions: Extension;
@@ -376,12 +384,20 @@ export class MarkdownEditorController {
       search({ top: true }),
       highlightSelectionMatches(),
       placeholder('Schreibe hier dein Markdown…'),
-      markdown({
-        base: markdownLanguage,
-        codeLanguages: languages,
-      }),
+      this.languageCompartment.of(
+        markdown({
+          base: markdownLanguage,
+          codeLanguages: languages,
+        }),
+      ),
       syntaxHighlighting(markdownHighlightStyle),
       keymap.of([
+        {
+          key: 'Alt-c',
+          run: () => {
+            return this.toggleCurrentTask();
+          },
+        },
         {
           key: 'Enter',
           run: this.handleSmartEnter,
@@ -504,9 +520,24 @@ export class MarkdownEditorController {
           this.callbacks.onDocChanged(update.state.doc.toString());
         }
         if (update.selectionSet || update.docChanged) {
-          const pos = update.state.selection.main.head;
+          const main = update.state.selection.main;
+          const pos = main.head;
           const lineObj = update.state.doc.lineAt(pos);
-          this.callbacks.onCursorChanged(lineObj.number, pos - lineObj.from + 1);
+          const selLen = Math.abs(main.to - main.from);
+          let selWords = 0;
+          if (selLen > 0) {
+            const selectedText = update.state.sliceDoc(main.from, main.to).trim();
+            if (selectedText.length > 0) {
+              const matched = selectedText.match(/\S+/g);
+              selWords = matched ? matched.length : 0;
+            }
+          }
+          this.callbacks.onCursorChanged(
+            lineObj.number,
+            pos - lineObj.from + 1,
+            selLen,
+            selWords,
+          );
         }
       }),
       EditorView.domEventHandlers({
@@ -617,9 +648,24 @@ export class MarkdownEditorController {
     });
     requestAnimationFrame(() => {
       this.view.scrollDOM.scrollTop = scrollTop;
-      const pos = this.view.state.selection.main.head;
+      const main = this.view.state.selection.main;
+      const pos = main.head;
       const lineObj = this.view.state.doc.lineAt(pos);
-      this.callbacks.onCursorChanged(lineObj.number, pos - lineObj.from + 1);
+      const selLen = Math.abs(main.to - main.from);
+      let selWords = 0;
+      if (selLen > 0) {
+        const selectedText = this.view.state.sliceDoc(main.from, main.to).trim();
+        if (selectedText.length > 0) {
+          const matched = selectedText.match(/\S+/g);
+          selWords = matched ? matched.length : 0;
+        }
+      }
+      this.callbacks.onCursorChanged(
+        lineObj.number,
+        pos - lineObj.from + 1,
+        selLen,
+        selWords,
+      );
     });
   }
 
@@ -723,6 +769,74 @@ export class MarkdownEditorController {
     if (updated !== lineObj.text) {
       this.view.dispatch({
         changes: { from: lineObj.from, to: lineObj.to, insert: updated },
+      });
+    }
+  }
+
+  public toggleCurrentTask(): boolean {
+    const { state } = this.view;
+    const { from, to } = state.selection.main;
+    const startLine = state.doc.lineAt(from);
+    const endLine = state.doc.lineAt(to);
+    let lastLineNum = endLine.number;
+    if (lastLineNum > startLine.number && to === endLine.from) {
+      lastLineNum--;
+    }
+
+    const changes: Array<{ from: number; to: number; insert: string }> = [];
+    for (let l = startLine.number; l <= lastLineNum; l++) {
+      const line = state.doc.line(l);
+      const text = line.text;
+      if (/^(\s*[-*+]\s+)\[ \]\s*/.test(text)) {
+        const replaced = text.replace(/^(\s*[-*+]\s+)\[ \]/, '$1[x]');
+        changes.push({ from: line.from, to: line.to, insert: replaced });
+      } else if (/^(\s*[-*+]\s+)\[[xX]\]\s*/.test(text)) {
+        const replaced = text.replace(/^(\s*[-*+]\s+)\[[xX]\]/, '$1[ ]');
+        changes.push({ from: line.from, to: line.to, insert: replaced });
+      } else if (/^(\s*[-*+]\s+)(?!\[[ xX]\])/.test(text)) {
+        const replaced = text.replace(/^(\s*[-*+]\s+)/, '$1[ ] ');
+        changes.push({ from: line.from, to: line.to, insert: replaced });
+      } else {
+        changes.push({ from: line.from, to: line.to, insert: `- [ ] ${text}` });
+      }
+    }
+
+    if (changes.length > 0) {
+      this.view.dispatch({ changes });
+      return true;
+    }
+    return false;
+  }
+
+  public async setLanguageForFile(fileName: string): Promise<void> {
+    const isMd = isMarkdownPath(fileName);
+    if (isMd) {
+      this.view.dispatch({
+        effects: this.languageCompartment.reconfigure(
+          markdown({
+            base: markdownLanguage,
+            codeLanguages: languages,
+          }),
+        ),
+      });
+      return;
+    }
+
+    const desc = LanguageDescription.matchFilename(languages, fileName);
+    if (desc) {
+      try {
+        const support = await desc.load();
+        this.view.dispatch({
+          effects: this.languageCompartment.reconfigure(support),
+        });
+      } catch {
+        this.view.dispatch({
+          effects: this.languageCompartment.reconfigure([]),
+        });
+      }
+    } else {
+      this.view.dispatch({
+        effects: this.languageCompartment.reconfigure([]),
       });
     }
   }

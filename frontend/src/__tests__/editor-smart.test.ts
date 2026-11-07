@@ -187,4 +187,46 @@ describe('MarkdownEditorController keybindings & folding integration', () => {
     ctrl.view.destroy();
     host.remove();
   });
+
+  it('toggles task checkboxes on Alt+C / toggleCurrentTask', () => {
+    const { host, ctrl } = createController('- [ ] Task eins\n- [x] Task zwei\n- Normaler Punkt\nKeine Liste\n');
+
+    // Cursor on line 1: toggle unchecked -> checked
+    ctrl.view.dispatch({ selection: { anchor: 4 } });
+    expect(ctrl.toggleCurrentTask()).toBe(true);
+    expect(ctrl.view.state.doc.line(1).text).toBe('- [x] Task eins');
+
+    // Toggle checked -> unchecked
+    expect(ctrl.toggleCurrentTask()).toBe(true);
+    expect(ctrl.view.state.doc.line(1).text).toBe('- [ ] Task eins');
+
+    // Cursor on line 3: upgrade bullet -> task checkbox
+    ctrl.view.dispatch({ selection: { anchor: ctrl.view.state.doc.line(3).from } });
+    expect(ctrl.toggleCurrentTask()).toBe(true);
+    expect(ctrl.view.state.doc.line(3).text).toBe('- [ ] Normaler Punkt');
+
+    // Cursor on line 4: prepend task checkbox
+    ctrl.view.dispatch({ selection: { anchor: ctrl.view.state.doc.line(4).from } });
+    expect(ctrl.toggleCurrentTask()).toBe(true);
+    expect(ctrl.view.state.doc.line(4).text).toBe('- [ ] Keine Liste');
+
+    ctrl.view.destroy();
+    host.remove();
+  });
+
+  it('switches editor grammar dynamically via setLanguageForFile', async () => {
+    const { host, ctrl } = createController('{\n  "name": "marklive"\n}\n');
+
+    await ctrl.setLanguageForFile('package.json');
+    expect(ctrl.getContent()).toContain('"name": "marklive"');
+
+    await ctrl.setLanguageForFile('config.yaml');
+    expect(ctrl.getContent()).toContain('"name": "marklive"');
+
+    await ctrl.setLanguageForFile('README.md');
+    expect(ctrl.getContent()).toContain('"name": "marklive"');
+
+    ctrl.view.destroy();
+    host.remove();
+  });
 });

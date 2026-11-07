@@ -14,7 +14,13 @@ import { copyRichPreviewToClipboard, preparePreviewHtmlForExport } from './expor
 import { bindRovingHorizontalKeyNav, syncRovingTabindex } from './navigation-a11y';
 import { CommandPaletteController } from './palette';
 import { buildPaletteCommandItems, buildPaletteFileItems } from './palette-items';
-import { baseNameOfPath, parentDirOfPath, resolveRelativeMarkdownPath } from './path-utils';
+import {
+  baseNameOfPath,
+  getFileExtension,
+  isMarkdownPath,
+  parentDirOfPath,
+  resolveRelativeMarkdownPath,
+} from './path-utils';
 import { installProgressiveEnhancements } from './polyfills';
 import { safeSetMarkdownHTML } from './sanitizer';
 import { SidebarExplorerController } from './sidebar-explorer';
@@ -53,6 +59,7 @@ class MarkLiveApp {
     content: string;
     lineEnding: 'LF' | 'CRLF';
   }> = [];
+  private lastSelection = { chars: 0, words: 0 };
 
   private editor!: MarkdownEditorController;
   private syncScroll!: SyncScrollController;
@@ -103,8 +110,10 @@ class MarkLiveApp {
     const cmHost = document.getElementById('codemirror-host')!;
     this.editor = new MarkdownEditorController(cmHost, '', {
       onDocChanged: (content) => this.handleEditorContentChange(content),
-      onCursorChanged: (line, col) => {
+      onCursorChanged: (line, col, selChars, selWords) => {
         this.statusCursorEl.textContent = `Zeile ${line}, Spalte ${col}`;
+        this.lastSelection = { chars: selChars, words: selWords };
+        this.updateWordCountDisplay();
       },
       onEditorScrolled: () => this.syncScroll.syncEditorToPreview(),
       onFormatCommand: (cmd) => this.editor.applyFormat(cmd),
@@ -241,6 +250,7 @@ class MarkLiveApp {
             },
             onNextTab: () => this.cycleActiveTab(1),
             onPrevTab: () => this.cycleActiveTab(-1),
+            onToggleTask: () => this.editor.toggleCurrentTask(),
           }),
       },
     );
@@ -601,6 +611,7 @@ class MarkLiveApp {
       this.externalBannerEl.hidden = true;
     }
     this.editor.swapState(target.editorState, target.editorScrollTop);
+    void this.editor.setLanguageForFile(target.name);
 
     this.renderTabBar();
     this.explorer.highlightActiveFile();
@@ -944,10 +955,34 @@ class MarkLiveApp {
   ): Promise<void> {
     const seq = ++this.renderSeq;
     try {
-      const res = await backend.renderMarkdown(markdown, baseDir);
+      let markdownToRender = markdown;
+      const tab = this.activeTab;
+      if (tab && !isMarkdownPath(tab.name)) {
+        const ext = getFileExtension(tab.name);
+        const langMap: Record<string, string> = {
+          json: 'json',
+          yaml: 'yaml',
+          yml: 'yaml',
+          toml: 'toml',
+          ini: 'ini',
+          txt: 'text',
+          csv: 'text',
+          log: 'text',
+          env: 'properties',
+          xml: 'xml',
+          js: 'javascript',
+          ts: 'typescript',
+          rs: 'rust',
+          html: 'html',
+          css: 'css',
+        };
+        const lang = langMap[ext] ?? (ext || 'text');
+        markdownToRender = `\`\`\`${lang}\n${markdown}\n\`\`\``;
+      }
+
+      const res = await backend.renderMarkdown(markdownToRender, baseDir);
       if (seq !== this.renderSeq) return;
 
-      const tab = this.activeTab;
       if (tab) {
         tab.outline = res.outline;
         tab.stats = res.stats;
@@ -992,7 +1027,9 @@ class MarkLiveApp {
     if (outline.length === 0) {
       const hint = document.createElement('p');
       hint.className = 'muted-hint';
-      hint.textContent = 'Keine Überschriften im Dokument.';
+      hint.textContent = this.activeTab && !isMarkdownPath(this.activeTab.name)
+        ? 'Keine Überschriften (Text-/Konfigurationsdatei).'
+        : 'Keine Überschriften im Dokument.';
       this.outlineEl.appendChild(hint);
       return;
     }
@@ -1144,7 +1181,7 @@ class MarkLiveApp {
     this.statusSaveBadge.classList.toggle('is-dirty', tab.isDirty);
 
     const { words, readingTimeSec } = tab.stats;
-    this.statusWordsEl.textContent = `${words.toLocaleString('de-DE')} ${words === 1 ? 'Wort' : 'Wörter'}`;
+    this.updateWordCountDisplay();
     if (readingTimeSec < 60) {
       this.statusReadtimeEl.textContent = `${readingTimeSec} Sek. Lesezeit`;
     } else {
@@ -1154,6 +1191,19 @@ class MarkLiveApp {
     this.statusZoomBtn.textContent = `${this.zoomPercent}%`;
     this.statusEolBtn.textContent = tab.lineEnding;
     this.statusEncodingEl.textContent = tab.encoding;
+  }
+
+  private updateWordCountDisplay(): void {
+    const tab = this.activeTab;
+    if (!tab) return;
+    const { words } = tab.stats;
+    if (this.lastSelection.chars > 0) {
+      const selW = this.lastSelection.words;
+      const selC = this.lastSelection.chars;
+      this.statusWordsEl.textContent = `${selW} von ${words.toLocaleString('de-DE')} Wörtern markiert (${selC.toLocaleString('de-DE')} Z.)`;
+    } else {
+      this.statusWordsEl.textContent = `${words.toLocaleString('de-DE')} ${words === 1 ? 'Wort' : 'Wörter'}`;
+    }
   }
 
   private syncWindowMetadata(): void {
@@ -1188,6 +1238,14 @@ class MarkLiveApp {
       dialog.addEventListener('close', onClose);
       dialog.showModal();
     });
+  }
+
+  private openMermaidLightbox(svgHtml: string): void {
+    const dialog = document.getElementById('mermaid-dialog') as HTMLDialogElement | null;
+    const body = document.getElementById('mermaid-dialog-body');
+    if (!dialog || !body) return;
+    body.innerHTML = svgHtml;
+    dialog.showModal();
   }
 
   // ==========================================================================
@@ -1665,6 +1723,32 @@ class MarkLiveApp {
               copyBtn.textContent = 'Kopieren';
             }, 1400);
           });
+        }
+        return;
+      }
+
+      const copyMermaidBtn = target.closest<HTMLButtonElement>('.copy-mermaid-btn');
+      if (copyMermaidBtn) {
+        const wrapper = copyMermaidBtn.closest('.mermaid-wrapper');
+        const svgEl = wrapper?.querySelector('svg');
+        if (svgEl) {
+          void navigator.clipboard.writeText(svgEl.outerHTML).then(() => {
+            copyMermaidBtn.textContent = 'Kopiert ✓';
+            this.showToast('Mermaid-SVG in Zwischenablage kopiert');
+            setTimeout(() => {
+              copyMermaidBtn.textContent = 'SVG kopieren';
+            }, 1400);
+          });
+        }
+        return;
+      }
+
+      const zoomMermaidBtn = target.closest<HTMLButtonElement>('.zoom-mermaid-btn');
+      if (zoomMermaidBtn) {
+        const wrapper = zoomMermaidBtn.closest('.mermaid-wrapper');
+        const svgEl = wrapper?.querySelector('svg');
+        if (svgEl) {
+          this.openMermaidLightbox(svgEl.outerHTML);
         }
         return;
       }

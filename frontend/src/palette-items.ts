@@ -55,6 +55,7 @@ export interface PaletteCommandContext {
   onReopenTab?: () => void;
   onNextTab?: () => void;
   onPrevTab?: () => void;
+  onToggleTask?: () => void;
 }
 
 export async function buildPaletteFileItems(ctx: PaletteFileContext): Promise<PaletteItem[]> {
@@ -225,6 +226,17 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
       shortcut: 'Alt+Umschalt+F',
       run: ctx.onAlignTable,
     },
+    ...(ctx.onToggleTask
+      ? [
+          {
+            id: 'cmd:toggle-task',
+            kind: 'command' as const,
+            label: 'Editor: Aufgabe der Zeile an-/abhaken',
+            shortcut: 'Alt+C',
+            run: ctx.onToggleTask,
+          },
+        ]
+      : []),
     {
       id: 'cmd:view-split',
       kind: 'command',

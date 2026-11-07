@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   baseNameOfPath,
+  getFileExtension,
+  isImagePath,
+  isMarkdownPath,
   parentDirOfPath,
   resolveRelativeMarkdownPath,
 } from '../path-utils';
@@ -32,5 +35,24 @@ describe('path-utils', () => {
     expect(parentDirOfPath('\\\\Server\\Share\\Doc.md')).toBe('\\\\Server\\Share');
     expect(baseNameOfPath('C:/Projekte/Test.md')).toBe('Test.md');
     expect(parentDirOfPath('C:/Projekte/Test.md')).toBe('C:/Projekte');
+  });
+
+  it('correctly classifies Markdown, image, and text extensions', () => {
+    expect(isMarkdownPath('README.md')).toBe(true);
+    expect(isMarkdownPath('C:\\Docs\\spec.markdown')).toBe(true);
+    expect(isMarkdownPath('page.mdx')).toBe(true);
+    expect(isMarkdownPath('config.yaml')).toBe(false);
+    expect(isMarkdownPath('data.json')).toBe(false);
+
+    expect(isImagePath('photo.png')).toBe(true);
+    expect(isImagePath('diagram.svg')).toBe(true);
+    expect(isImagePath('banner.webp')).toBe(true);
+    expect(isImagePath('doc.md')).toBe(false);
+
+    expect(getFileExtension('package.json')).toBe('json');
+    expect(getFileExtension('config.YAML')).toBe('yaml');
+    expect(getFileExtension('Cargo.toml')).toBe('toml');
+    expect(getFileExtension('.env')).toBe('env');
+    expect(getFileExtension('noextension')).toBe('');
   });
 });

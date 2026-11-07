@@ -253,6 +253,52 @@ kbd {
   color: var(--fg-muted);
 }
 
+/* Mermaid Fullscreen Lightbox Dialog */
+.mermaid-dialog {
+  max-width: 90vw;
+  max-height: 85vh;
+  width: 900px;
+  padding: 0;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  color: var(--fg-primary);
+  box-shadow: var(--shadow-flyout);
+}
+
+.mermaid-dialog::backdrop {
+  background: var(--bg-backdrop);
+  backdrop-filter: blur(4px);
+}
+
+.mermaid-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.mermaid-dialog-header h2 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.mermaid-dialog-body {
+  padding: 24px;
+  overflow: auto;
+  max-height: calc(85vh - 58px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mermaid-dialog-body svg {
+  max-width: 100%;
+  height: auto;
+}
+
 /* Clean Print / PDF Output (independent of active Light/Dark app theme or view mode) */
 @media print {
   :root {

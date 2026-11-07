@@ -293,6 +293,7 @@
 }
 
 .mermaid-wrapper {
+  position: relative;
   margin: 1.2em 0;
   padding: 16px;
   border: 1px solid var(--border-subtle);
@@ -300,6 +301,41 @@
   background: var(--bg-subtle);
   text-align: center;
   overflow-x: auto;
+}
+
+.mermaid-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 5;
+}
+
+.mermaid-wrapper:hover .mermaid-actions,
+.mermaid-actions:focus-within {
+  opacity: 1;
+}
+
+.mermaid-action-btn {
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.mermaid-action-btn:hover {
+  background: var(--bg-subtle);
+  color: var(--fg-primary);
+  border-color: var(--border-strong);
 }
 
 /* YAML Frontmatter Collapsible Card */

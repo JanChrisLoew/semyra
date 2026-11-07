@@ -191,6 +191,10 @@ export async function renderMermaidLightInClone(root: HTMLElement): Promise<void
   }
 }
 
+function wrapMermaidHtml(svg: string): string {
+  return `<div class="mermaid-actions"><button type="button" class="mermaid-action-btn copy-mermaid-btn" title="Diagramm als SVG kopieren" aria-label="SVG kopieren">SVG kopieren</button><button type="button" class="mermaid-action-btn zoom-mermaid-btn" title="Diagramm in Großansicht öffnen" aria-label="Vergrößern">Vergrößern</button></div>${svg}`;
+}
+
 async function renderMermaidBlocksCached(
   nodes: NodeListOf<HTMLElement>,
   forceLightTheme = false,
@@ -205,7 +209,7 @@ async function renderMermaidBlocksCached(
     if (!def) continue;
     const cachedSvg = mermaidCache.get(`${theme}::${def}`);
     if (cachedSvg !== undefined) {
-      wrapper.innerHTML = cachedSvg;
+      wrapper.innerHTML = forceLightTheme ? cachedSvg : wrapMermaidHtml(cachedSvg);
     } else {
       hasUncached = true;
     }
@@ -232,7 +236,7 @@ async function renderMermaidBlocksCached(
       const cacheKey = `${theme}::${definition}`;
       const existing = mermaidCache.get(cacheKey);
       if (existing !== undefined) {
-        wrapper.innerHTML = existing;
+        wrapper.innerHTML = forceLightTheme ? existing : wrapMermaidHtml(existing);
         continue;
       }
 
@@ -244,7 +248,7 @@ async function renderMermaidBlocksCached(
           if (oldest !== undefined) mermaidCache.delete(oldest);
         }
         mermaidCache.set(cacheKey, svg);
-        wrapper.innerHTML = svg;
+        wrapper.innerHTML = forceLightTheme ? svg : wrapMermaidHtml(svg);
       } catch {
         // Clean up any orphaned temporary error element Mermaid might have appended
         document.getElementById(`d${id}`)?.remove();
