@@ -66,7 +66,11 @@ describe('MarkdownEditorController keybindings & folding integration', () => {
     Range.prototype.getBoundingClientRect ??= () => new DOMRect(0, 0, 0, 0);
   }
 
-  function createController(doc: string, onCopyRichText = vi.fn()) {
+  function createController(
+    doc: string,
+    onCopyRichText = vi.fn(),
+    onCopyMarkdown = vi.fn(),
+  ) {
     const host = document.createElement('div');
     document.body.appendChild(host);
     const ctrl = new MarkdownEditorController(host, doc, {
@@ -76,8 +80,9 @@ describe('MarkdownEditorController keybindings & folding integration', () => {
       onFormatCommand: vi.fn(),
       onPasteImage: vi.fn(),
       onCopyRichText,
+      onCopyMarkdown,
     });
-    return { host, ctrl, onCopyRichText };
+    return { host, ctrl, onCopyRichText, onCopyMarkdown };
   }
 
   it('does not swallow DE-QWERTZ AltGr characters ([ , ] , \\) and routes Strg+Umschalt+K without mutating text', () => {
@@ -108,6 +113,31 @@ describe('MarkdownEditorController keybindings & folding integration', () => {
     ctrl.view.contentDOM.dispatchEvent(shiftModK);
     expect(onCopyRichText).toHaveBeenCalledTimes(1);
     expect(ctrl.getContent()).toBe('# Kapitel\nZeile bleibt erhalten\n');
+
+    ctrl.view.destroy();
+    host.remove();
+  });
+
+  it('routes Strg+Umschalt+C to onCopyMarkdown without modifying document', () => {
+    const onCopyMarkdown = vi.fn();
+    const { host, ctrl } = createController(
+      '# Notizen\nMein Markdown Text\n',
+      vi.fn(),
+      onCopyMarkdown,
+    );
+
+    const shiftModC = new KeyboardEvent('keydown', {
+      key: 'C',
+      code: 'KeyC',
+      keyCode: 67,
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    ctrl.view.contentDOM.dispatchEvent(shiftModC);
+    expect(onCopyMarkdown).toHaveBeenCalledTimes(1);
+    expect(ctrl.getContent()).toBe('# Notizen\nMein Markdown Text\n');
 
     ctrl.view.destroy();
     host.remove();

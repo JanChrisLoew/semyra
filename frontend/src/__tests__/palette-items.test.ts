@@ -102,11 +102,13 @@ describe('palette-items', () => {
     expect(eolCmd.badge).toBe('LF');
   });
 
-  it('provides tab navigation and reopen commands when optional callbacks are supplied', () => {
+  it('provides tab navigation, markdown copy, and AI context commands when optional callbacks are supplied', () => {
     const onReopen = vi.fn();
     const onNext = vi.fn();
     const onPrev = vi.fn();
     const onToggle = vi.fn();
+    const onCopyMd = vi.fn();
+    const onCopyAi = vi.fn();
     const noop = vi.fn();
 
     const cmds = buildPaletteCommandItems({
@@ -144,7 +146,21 @@ describe('palette-items', () => {
       onNextTab: onNext,
       onPrevTab: onPrev,
       onToggleTask: onToggle,
+      onCopyMarkdown: onCopyMd,
+      onCopyAiContext: onCopyAi,
     });
+
+    const copyMdCmd = cmds.find((c) => c.id === 'cmd:copy-markdown');
+    expect(copyMdCmd).toBeDefined();
+    expect(copyMdCmd?.shortcut).toBe('Strg+Umschalt+C');
+    copyMdCmd?.run();
+    expect(onCopyMd).toHaveBeenCalledTimes(1);
+
+    const copyAiCmd = cmds.find((c) => c.id === 'cmd:copy-ai-context');
+    expect(copyAiCmd).toBeDefined();
+    expect(copyAiCmd?.label).toContain('KI-Kontext');
+    copyAiCmd?.run();
+    expect(onCopyAi).toHaveBeenCalledTimes(1);
 
     const reopenCmd = cmds.find((c) => c.id === 'cmd:reopen-tab');
     expect(reopenCmd).toBeDefined();

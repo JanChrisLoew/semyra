@@ -154,6 +154,7 @@ export interface EditorCallbacks {
   onFormatCommand: (cmd: FormatAction) => void;
   onPasteImage: (mimeType: string, dataUrl: string) => void;
   onCopyRichText?: () => void;
+  onCopyMarkdown?: () => void;
 }
 
 export type FormatAction =
@@ -460,7 +461,7 @@ export class MarkdownEditorController {
         {
           key: 'Mod-Shift-c',
           run: () => {
-            this.applyFormat('codeblock');
+            this.callbacks.onCopyMarkdown?.();
             return true;
           },
         },

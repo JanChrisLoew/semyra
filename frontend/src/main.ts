@@ -26,6 +26,7 @@ import { safeSetMarkdownHTML } from './sanitizer';
 import { SidebarExplorerController } from './sidebar-explorer';
 import { SyncScrollController } from './sync-scroll';
 import { bindThemeSystem } from './theme';
+import { estimateTokens } from './token-utils';
 import { WELCOME_MARKDOWN } from './welcome';
 import { WorkspaceSearchController } from './workspace-search';
 
@@ -93,11 +94,13 @@ class MarkLiveApp {
   private statusSaveBadge = document.getElementById('status-save-badge')!;
   private statusCursorEl = document.getElementById('status-cursor')!;
   private statusWordsEl = document.getElementById('status-words')!;
+  private statusTokensEl = document.getElementById('status-tokens')!;
   private statusReadtimeEl = document.getElementById('status-readtime')!;
   private statusZoomBtn = document.getElementById('status-zoom') as HTMLButtonElement;
   private statusEolBtn = document.getElementById('status-eol') as HTMLButtonElement;
   private statusEncodingEl = document.getElementById('status-encoding')!;
   private statusToastEl = document.getElementById('status-toast')!;
+  private btnCopyMarkdown = document.getElementById('btn-copy-markdown') as HTMLButtonElement | null;
   private dropOverlayEl = document.getElementById('drop-overlay')!;
   private externalBannerEl = document.getElementById('external-banner')!;
   private tabContextMenuEl = document.getElementById('tab-context-menu') as HTMLElement & {
@@ -122,6 +125,9 @@ class MarkLiveApp {
       },
       onCopyRichText: () => {
         void this.copyCurrentTabRichText();
+      },
+      onCopyMarkdown: () => {
+        void this.copyCurrentTabMarkdown();
       },
     });
 
@@ -210,6 +216,12 @@ class MarkLiveApp {
             },
             onCopyRichText: () => {
               void this.copyCurrentTabRichText();
+            },
+            onCopyMarkdown: () => {
+              void this.copyCurrentTabMarkdown();
+            },
+            onCopyAiContext: () => {
+              void this.copyCurrentTabAiContext();
             },
             onExportHtml: () => {
               void this.exportCurrentTabHtml();
@@ -1201,12 +1213,18 @@ class MarkLiveApp {
     const tab = this.activeTab;
     if (!tab) return;
     const { words } = tab.stats;
+    const totalTokens = estimateTokens(tab.currentContent);
     if (this.lastSelection.chars > 0) {
       const selW = this.lastSelection.words;
       const selC = this.lastSelection.chars;
+      const selTokens = Math.ceil(Math.max(selC / 3.7, selW * 1.25));
       this.statusWordsEl.textContent = `${selW} von ${words.toLocaleString('de-DE')} Wörtern markiert (${selC.toLocaleString('de-DE')} Z.)`;
+      this.statusTokensEl.textContent = `~${selTokens.toLocaleString('de-DE')} Tokens (~${totalTokens.toLocaleString('de-DE')})`;
+      this.statusTokensEl.title = `Auswahl: ~${selTokens.toLocaleString('de-DE')} Tokens · Gesamtdokument: ~${totalTokens.toLocaleString('de-DE')} Tokens`;
     } else {
       this.statusWordsEl.textContent = `${words.toLocaleString('de-DE')} ${words === 1 ? 'Wort' : 'Wörter'}`;
+      this.statusTokensEl.textContent = `~${totalTokens.toLocaleString('de-DE')} Tokens`;
+      this.statusTokensEl.title = 'Geschätzter LLM-Token-Verbrauch für Prompts (GPT / Claude / Gemini)';
     }
   }
 
@@ -1415,6 +1433,37 @@ class MarkLiveApp {
     }
   }
 
+  private async copyCurrentTabMarkdown(): Promise<void> {
+    const tab = this.activeTab;
+    if (!tab) return;
+    try {
+      await navigator.clipboard.writeText(tab.currentContent);
+      this.showToast(isMarkdownPath(tab.name) ? 'Markdown in Zwischenablage kopiert' : 'Quelltext in Zwischenablage kopiert');
+    } catch (err) {
+      console.error('Markdown konnte nicht kopiert werden:', err);
+      this.showToast('Kopieren in die Zwischenablage fehlgeschlagen');
+    }
+  }
+
+  private async copyCurrentTabAiContext(): Promise<void> {
+    const tab = this.activeTab;
+    if (!tab) return;
+    try {
+      let fence = '```';
+      while (tab.currentContent.includes(fence)) {
+        fence += '`';
+      }
+      const ext = getFileExtension(tab.name) || 'markdown';
+      const body = tab.currentContent.endsWith('\n') ? tab.currentContent : `${tab.currentContent}\n`;
+      const payload = `${fence}${ext}:${tab.name}\n${body}${fence}\n`;
+      await navigator.clipboard.writeText(payload);
+      this.showToast(`Als KI-Kontext (${tab.name}) kopiert`);
+    } catch (err) {
+      console.error('KI-Kontext konnte nicht kopiert werden:', err);
+      this.showToast('Kopieren in die Zwischenablage fehlgeschlagen');
+    }
+  }
+
   private async exportCurrentTabHtml(): Promise<void> {
     const tab = this.activeTab;
     if (!tab) return;
@@ -1498,6 +1547,10 @@ class MarkLiveApp {
       if (this.activeTab) void this.saveTab(this.activeTab, true);
     });
 
+    document.getElementById('btn-copy-markdown')?.addEventListener('click', () => {
+      void this.copyCurrentTabMarkdown();
+    });
+
     document.getElementById('btn-copy-rich')!.addEventListener('click', () => {
       void this.copyCurrentTabRichText();
     });
@@ -1564,6 +1617,22 @@ class MarkLiveApp {
             this.showToast('Dateipfad in Zwischenablage kopiert');
           }
           break;
+        case 'copy-markdown':
+          await navigator.clipboard.writeText(tab.currentContent).catch(() => {});
+          this.showToast(isMarkdownPath(tab.name) ? 'Markdown in Zwischenablage kopiert' : 'Quelltext in Zwischenablage kopiert');
+          break;
+        case 'copy-ai-context': {
+          let fence = '```';
+          while (tab.currentContent.includes(fence)) {
+            fence += '`';
+          }
+          const ext = getFileExtension(tab.name) || 'markdown';
+          const body = tab.currentContent.endsWith('\n') ? tab.currentContent : `${tab.currentContent}\n`;
+          const payload = `${fence}${ext}:${tab.name}\n${body}${fence}\n`;
+          await navigator.clipboard.writeText(payload).catch(() => {});
+          this.showToast(`Als KI-Kontext (${tab.name}) kopiert`);
+          break;
+        }
       }
     });
 
@@ -1916,6 +1985,9 @@ class MarkLiveApp {
         } else if (mod && !e.altKey && e.shiftKey && key === 'k') {
           consume();
           void this.copyCurrentTabRichText();
+        } else if (mod && !e.altKey && e.shiftKey && key === 'c') {
+          consume();
+          void this.copyCurrentTabMarkdown();
         } else if (mod && !e.altKey && e.shiftKey && key === 'd') {
           consume();
           void this.exportCurrentTabPdf();

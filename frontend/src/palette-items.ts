@@ -56,6 +56,8 @@ export interface PaletteCommandContext {
   onNextTab?: () => void;
   onPrevTab?: () => void;
   onToggleTask?: () => void;
+  onCopyMarkdown?: () => void;
+  onCopyAiContext?: () => void;
 }
 
 export async function buildPaletteFileItems(ctx: PaletteFileContext): Promise<PaletteItem[]> {
@@ -192,6 +194,27 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
       shortcut: 'Strg+Umschalt+S',
       run: ctx.onSaveAs,
     },
+    ...(ctx.onCopyMarkdown
+      ? [
+          {
+            id: 'cmd:copy-markdown',
+            kind: 'command' as const,
+            label: 'Zwischenablage: Markdown-Quelltext kopieren',
+            shortcut: 'Strg+Umschalt+C',
+            run: ctx.onCopyMarkdown,
+          },
+        ]
+      : []),
+    ...(ctx.onCopyAiContext
+      ? [
+          {
+            id: 'cmd:copy-ai-context',
+            kind: 'command' as const,
+            label: 'Zwischenablage: Als KI-Kontext kopieren (mit Dateinamen-Block)',
+            run: ctx.onCopyAiContext,
+          },
+        ]
+      : []),
     {
       id: 'cmd:copy-rich',
       kind: 'command',

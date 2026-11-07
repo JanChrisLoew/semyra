@@ -74,6 +74,7 @@ pub fn is_supported_text_path(path: &Path) -> bool {
         || file_name == ".editorconfig"
         || file_name == "dockerfile"
         || file_name == "license"
+        || file_name == ".cursorrules"
     {
         return true;
     }

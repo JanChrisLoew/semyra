@@ -408,6 +408,11 @@ button {
   color: var(--fg-muted);
 }
 
+.status-tokens {
+  color: var(--fg-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
 .status-action-btn {
   border: 0;
   background: transparent;

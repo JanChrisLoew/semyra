@@ -74,7 +74,13 @@ fn scan_dir_children(
         let Some(name_str) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        if name_str.starts_with('.') && name_str != ".github" {
+        if name_str.starts_with('.')
+            && name_str != ".github"
+            && !matches!(
+                name_str.to_ascii_lowercase().as_str(),
+                ".cursorrules" | ".env" | ".gitignore" | ".editorconfig"
+            )
+        {
             continue;
         }
 
@@ -154,7 +160,12 @@ fn collect_markdown_files_recursive(
         let Some(name_str) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        if name_str.starts_with('.') {
+        if name_str.starts_with('.')
+            && !matches!(
+                name_str.to_ascii_lowercase().as_str(),
+                ".cursorrules" | ".env" | ".gitignore" | ".editorconfig"
+            )
+        {
             continue;
         }
         let Ok(ft) = entry.file_type() else {
@@ -207,7 +218,9 @@ fn collect_markdown_files_recursive(
 
 pub fn create_new_markdown_file(parent_dir: &Path, file_name: &str) -> Result<FilePayload, String> {
     let trimmed = validate_entry_name(file_name)?;
-    let final_name = if Path::new(trimmed).extension().is_some() {
+    let final_name = if Path::new(trimmed).extension().is_some()
+        || (trimmed.starts_with('.') && trimmed.len() > 1)
+    {
         trimmed.to_string()
     } else {
         format!("{trimmed}.md")
@@ -228,12 +241,34 @@ pub fn create_new_markdown_file(parent_dir: &Path, file_name: &str) -> Result<Fi
         .map(|s| s.to_ascii_lowercase())
         .unwrap_or_default();
 
-    let initial = match ext.as_str() {
-        "json" => "{\n  \n}\n".to_string(),
-        "yaml" | "yml" => "# Konfiguration\n".to_string(),
-        "toml" => "# Konfiguration\n".to_string(),
-        "txt" | "log" | "env" | "ini" => String::new(),
-        _ => format!("# {stem}\n\n"),
+    let lower_name = final_name.to_ascii_lowercase();
+    let lower_stem = stem.to_ascii_lowercase();
+
+    let initial = if lower_name == "skill.md" || (lower_stem == "skill" && ext == "md") {
+        format!(
+            "---\nname: {stem}\ndescription: Beschreibe hier die F\u{e4}higkeit und wann sie genutzt werden soll.\n---\n\n# {stem}\n\n## Anweisungen\n- Schritt 1\n- Schritt 2\n"
+        )
+    } else if (matches!(
+        lower_stem.as_str(),
+        "prompt" | "system-prompt" | "system_prompt" | "instructions"
+    ) || lower_name == "prompt.md"
+        || lower_name == "system-prompt.md"
+        || lower_name == "instructions.md")
+        && ext == "md"
+    {
+        format!(
+            "# System-Prompt: {stem}\n\n## Rolle & Ziel\nDu bist ein spezialisierter Assistent f\u{fc}r...\n\n## Richtlinien & Einschr\u{e4}nkungen\n- Pr\u{e4}zise und direkte Antworten\n- Schritt-f\u{fc}r-Schritt-Vorgehen bei komplexen Aufgaben\n\n## Kontext & Beispiele\n"
+        )
+    } else if lower_name == ".cursorrules" {
+        "# Cursor & KI-Regeln\n\n- Bevorzuge TypeScript und Rust\n- Halte UI-Komponenten modular und barrierefrei\n\n## Architektur\n".to_string()
+    } else {
+        match ext.as_str() {
+            "json" => "{\n  \n}\n".to_string(),
+            "yaml" | "yml" => "# Konfiguration\n".to_string(),
+            "toml" => "# Konfiguration\n".to_string(),
+            "txt" | "log" | "env" | "ini" => String::new(),
+            _ => format!("# {stem}\n\n"),
+        }
     };
     write_text_file(&full_path, &initial, true)?;
     read_text_file(&full_path)
@@ -250,7 +285,7 @@ fn validate_entry_name(name: &str) -> Result<&str, String> {
     if trimmed.contains(['/', '\\', ':', '*', '?', '"', '<', '>', '|']) {
         return Err("Name enthält ungültige Zeichen.".to_string());
     }
-    let stem = trimmed.split('.').next().unwrap_or(trimmed);
+    let stem = trimmed.split('.').find(|s| !s.is_empty()).unwrap_or(trimmed);
     let upper = stem.to_ascii_uppercase();
     if matches!(
         upper.as_str(),
@@ -359,6 +394,20 @@ mod tests {
         let md = create_new_markdown_file(&temp, "Notizen").unwrap();
         assert_eq!(md.name, "Notizen.md");
         assert!(md.content.starts_with("# Notizen\n\n"));
+
+        let skill = create_new_markdown_file(&temp, "SKILL.md").unwrap();
+        assert_eq!(skill.name, "SKILL.md");
+        assert!(skill.content.starts_with("---\nname: SKILL\n"));
+        assert!(skill.content.contains("## Anweisungen\n"));
+
+        let prompt = create_new_markdown_file(&temp, "system-prompt.md").unwrap();
+        assert_eq!(prompt.name, "system-prompt.md");
+        assert!(prompt.content.starts_with("# System-Prompt: system-prompt\n"));
+        assert!(prompt.content.contains("## Rolle & Ziel\n"));
+
+        let cursor = create_new_markdown_file(&temp, ".cursorrules").unwrap();
+        assert_eq!(cursor.name, ".cursorrules");
+        assert!(cursor.content.starts_with("# Cursor & KI-Regeln\n"));
 
         let _ = fs::remove_dir_all(&temp);
     }
