@@ -302,6 +302,7 @@ class MarkLiveApp {
             onShowDocStats: () => this.openDocStatsPopover(),
             formatBarVisible: this.formatBarVisible,
             onToggleFormatBar: () => this.toggleFormatBar(),
+            onScrollPreviewTop: () => this.previewPaneEl.scrollTo({ top: 0, behavior: 'smooth' }),
             onToggleWordWrap: () => this.toggleWordWrap(),
             onToggleSpellcheck: () => {
               this.editor.setSpellcheck(!this.editor.isSpellcheckEnabled());
@@ -2208,8 +2209,20 @@ class MarkLiveApp {
     document.getElementById('status-tokens')?.addEventListener('click', openStats);
     document.getElementById('status-readtime')?.addEventListener('click', openStats);
 
-    this.previewPaneEl.addEventListener('scroll', () => this.syncScroll.syncPreviewToEditor(), {
-      passive: true,
+    this.previewPaneEl.addEventListener(
+      'scroll',
+      () => {
+        this.syncScroll.syncPreviewToEditor();
+        const isScrolled = this.previewPaneEl.scrollTop > 220;
+        this.previewPaneEl.classList.toggle('is-scrolled', isScrolled);
+      },
+      {
+        passive: true,
+      },
+    );
+
+    document.getElementById('btn-scroll-top')?.addEventListener('click', () => {
+      this.previewPaneEl.scrollTo({ top: 0, behavior: 'smooth' });
     });
 
     this.previewContentEl.addEventListener('change', (e) => {

@@ -67,6 +67,7 @@ export interface PaletteCommandContext {
   onToggleSplitOrientation?: () => void;
   onShowDocStats?: () => void;
   onToggleFormatBar?: () => void;
+  onScrollPreviewTop?: () => void;
   formatBarVisible?: boolean;
   splitOrientation?: 'vertical' | 'horizontal';
 }
@@ -383,6 +384,16 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
             label: `Ansicht: Formatierungsleiste ${ctx.formatBarVisible === false ? 'einblenden' : 'ausblenden'}`,
             shortcut: 'Alt+Umschalt+R',
             run: () => ctx.onToggleFormatBar?.(),
+          },
+        ]
+      : []),
+    ...(ctx.onScrollPreviewTop
+      ? [
+          {
+            id: 'cmd:scroll-preview-top',
+            kind: 'command' as const,
+            label: 'Vorschau: Zum Seitenanfang scrollen',
+            run: () => ctx.onScrollPreviewTop?.(),
           },
         ]
       : []),

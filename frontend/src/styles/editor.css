@@ -134,6 +134,7 @@
 }
 
 .preview-pane {
+  position: relative;
   flex: 1;
   min-width: 220px;
   height: 100%;
@@ -141,6 +142,66 @@
   overflow-x: hidden;
   padding: 28px 38px 64px 38px;
   user-select: text;
+  container-type: scroll-state;
+}
+
+/* Floating "Back to Top" Pill (scroll-position-aware-elements) */
+.preview-scroll-top-btn {
+  position: sticky;
+  bottom: 24px;
+  float: right;
+  margin-top: -36px;
+  margin-right: 12px;
+  z-index: 25;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--fg-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(10px);
+  transition: opacity 180ms ease, transform 180ms ease, visibility 180ms ease, background-color 120ms ease, color 120ms ease;
+  pointer-events: none;
+}
+
+.preview-scroll-top-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.preview-pane.is-scrolled .preview-scroll-top-btn {
+  opacity: 0.92;
+  visibility: visible;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+@container scroll-state(scrollable: top) {
+  .preview-scroll-top-btn {
+    opacity: 0.92;
+    visibility: visible;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+}
+
+.preview-scroll-top-btn:hover {
+  opacity: 1;
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+  border-color: var(--border-strong);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
 }
 
 /* Horizontal Split Orientation */
@@ -189,6 +250,7 @@
   margin: 0 auto;
 }
 
+/* Full Reading View Mode (Lesen) - Centered Document Sheet */
 .app-shell[data-view="preview"] .editor-pane,
 .app-shell[data-view="preview"] .split-resizer,
 .app-shell[data-view="preview"] .format-bar {
@@ -196,6 +258,45 @@
 }
 .app-shell[data-view="preview"] .preview-pane {
   width: 100%;
+  background: var(--bg-chrome);
+  padding: 36px 24px 96px 24px;
+}
+.app-shell[data-view="preview"] .markdown-body {
+  max-width: 860px;
+  margin: 0 auto;
+  min-height: calc(100vh - 170px);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 48px 56px 64px 56px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+}
+
+@media (max-width: 768px) {
+  .app-shell[data-view="preview"] .preview-pane {
+    padding: 12px 8px 60px 8px;
+  }
+  .app-shell[data-view="preview"] .markdown-body {
+    padding: 24px 20px 40px 20px;
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+  }
+}
+
+/* Split-View Mode: flows seamlessly in right half */
+.app-shell[data-view="split"] .preview-pane {
+  background: var(--bg-surface);
+  padding: 28px 36px 64px 36px;
+}
+.app-shell[data-view="split"] .markdown-body {
+  max-width: 860px;
+  margin: 0 auto;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
 }
 
 /* Split Orientation context sensitivity: only visible in split mode */
