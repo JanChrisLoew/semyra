@@ -149,7 +149,7 @@ fn build_webview_with_context<'a>(
     let new_win_proxy = proxy;
 
     let builder = WebViewBuilder::new_with_web_context(web_context)
-        .with_transparent(true)
+        .with_transparent(false)
         .with_clipboard(true)
         .with_devtools(cfg!(debug_assertions))
         .with_asynchronous_custom_protocol("marklive".into(), move |_webview_id, req, responder| {
@@ -312,7 +312,7 @@ fn main() {
         .with_min_inner_size(LogicalSize::new(760.0, 480.0))
         .with_maximized(prefs.maximized)
         .with_window_icon(generate_window_rgba_icon(32))
-        .with_transparent(true);
+        .with_transparent(false);
 
     if let (Some(x), Some(y)) = (prefs.x, prefs.y) {
         if is_position_visible_on_monitors(
@@ -332,9 +332,7 @@ fn main() {
 
     #[cfg(target_os = "windows")]
     {
-        if window_vibrancy::apply_mica(&window, None).is_err() {
-            let _ = window_vibrancy::apply_acrylic(&window, Some((18, 18, 24, 210)));
-        }
+        let _ = window_vibrancy::apply_mica(&window, None);
     }
 
     let profile_subdir = if cfg!(debug_assertions) {

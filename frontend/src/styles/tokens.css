@@ -3,15 +3,15 @@
    ========================================================================== */
 
 :root {
-  /* Raw Light / Dark Palette Tokens */
-  --bg-chrome-light: rgba(243, 245, 249, 0.82);
-  --bg-chrome-dark: rgba(24, 26, 32, 0.80);
+  /* Raw Light / Dark Palette Tokens (100% solid, opaque surfaces to prevent desktop wallpaper & window bleed-through) */
+  --bg-chrome-light: #f3f5f9;
+  --bg-chrome-dark: #181a20;
 
-  --bg-sidebar-light: rgba(246, 248, 252, 0.78);
-  --bg-sidebar-dark: rgba(28, 31, 38, 0.76);
+  --bg-sidebar-light: #f8fafc;
+  --bg-sidebar-dark: #1c1f26;
 
-  --bg-surface-light: rgba(255, 255, 255, 0.94);
-  --bg-surface-dark: rgba(20, 22, 28, 0.92);
+  --bg-surface-light: #ffffff;
+  --bg-surface-dark: #14161c;
 
   --bg-elevated-light: #ffffff;
   --bg-elevated-dark: #232731;
@@ -193,7 +193,7 @@ body {
   font-family: var(--font-ui);
   font-size: 14px;
   color: var(--fg-primary);
-  background: transparent;
+  background: var(--bg-surface);
   user-select: none;
 }
 
