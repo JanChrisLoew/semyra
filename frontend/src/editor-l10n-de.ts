@@ -23,8 +23,13 @@ export const germanCodeMirrorPhrases: Record<string, string> = {
   'on line': 'in Zeile',
 
   // @codemirror/language (foldGutter)
+  to: 'bis',
   'folded code': 'Abschnitt eingeklappt',
   unfold: 'Abschnitt ausklappen',
   'Fold line': 'Abschnitt einklappen',
   'Unfold line': 'Abschnitt ausklappen',
+
+  // @codemirror/commands & @codemirror/view
+  'Selection deleted': 'Auswahl gelöscht',
+  'Control character': 'Steuerzeichen',
 };

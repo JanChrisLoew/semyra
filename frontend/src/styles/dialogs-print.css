@@ -273,6 +273,8 @@ kbd {
   .workspace-area,
   .split-container,
   .preview-pane {
+    position: static !important;
+    visibility: visible !important;
     height: auto !important;
     width: 100% !important;
     overflow: visible !important;

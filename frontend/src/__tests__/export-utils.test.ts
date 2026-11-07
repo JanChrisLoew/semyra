@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildOfficeFriendlyHtml, preparePreviewHtmlForExport } from '../export-utils';
+import {
+  buildOfficeFriendlyHtml,
+  extractCleanPreviewPlainText,
+  preparePreviewHtmlForExport,
+} from '../export-utils';
 
 describe('export-utils', () => {
-  it('strips interactive copy buttons and duplicate .katex-html spans while syncing checkboxes without mutating live DOM', () => {
+  it('strips interactive copy buttons, .katex-html, and <annotation> TeX source while unwrapping <semantics> without mutating live DOM', async () => {
     const host = document.createElement('article');
     host.innerHTML = `
       <div class="code-block-wrapper">
@@ -10,7 +14,7 @@ describe('export-utils', () => {
         <pre><code>fn main() {}</code></pre>
       </div>
       <p class="math-inline">
-        <span class="katex"><span class="katex-mathml"><math><mi>E</mi></math></span><span class="katex-html" aria-hidden="true">E</span></span>
+        <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>E</mi><mo>=</mo><mi>m</mi></mrow><annotation encoding="application/x-tex">E=m</annotation></semantics></math></span><span class="katex-html" aria-hidden="true">E=m</span></span>
       </p>
       <ul>
         <li><input type="checkbox" class="task-checkbox"> Offen</li>
@@ -21,17 +25,26 @@ describe('export-utils', () => {
     const boxes = host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
     boxes[1].checked = true;
 
-    const exported = preparePreviewHtmlForExport(host);
+    const exported = await preparePreviewHtmlForExport(host);
+    const plain = extractCleanPreviewPlainText(host, 'Fallback');
 
-    // Live DOM still retains its copy button and KaTeX HTML tree
+    // Live DOM still retains its copy button, KaTeX HTML tree, and annotation
     expect(host.querySelector('.copy-code-btn')).not.toBeNull();
     expect(host.querySelector('.katex-html')).not.toBeNull();
-    // Exported HTML strips copy button & duplicate .katex-html, preserves MathML + SVG + checked state
+    expect(host.querySelector('math annotation')).not.toBeNull();
+    // Exported HTML strips copy button, duplicate .katex-html, and raw TeX <annotation>
     expect(exported).not.toContain('copy-code-btn');
     expect(exported).not.toContain('katex-html');
-    expect(exported).toContain('<math><mi>E</mi></math>');
+    expect(exported).not.toContain('<annotation');
+    expect(exported).not.toContain('<semantics>');
+    expect(exported).toContain('<mrow><mi>E</mi><mo>=</mo><mi>m</mi></mrow>');
     expect(exported).toContain('<svg>');
     expect(exported).toContain('checked=""');
+
+    // Plain-text clipboard fallback never leaks "Kopieren" or tripled KaTeX strings
+    expect(plain).not.toContain('Kopieren');
+    expect(plain).toContain('fn main() {}');
+    expect(plain.match(/E=m/g)?.length ?? 0).toBe(1);
   });
 
   it('builds Office-friendly HTML with column alignments, GFM alert colors, stripped code headers, and base64 assets', async () => {

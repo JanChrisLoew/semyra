@@ -499,16 +499,98 @@ export function navigateMarkdownTableCell(
   };
 }
 
+function escapeUnescapedPipes(text: string): string {
+  const pipes = findUnescapedPipes(text);
+  if (pipes.length === 0) return text;
+  let out = '';
+  let last = 0;
+  for (const idx of pipes) {
+    out += `${text.slice(last, idx)}\\|`;
+    last = idx + 1;
+  }
+  out += text.slice(last);
+  return out;
+}
+
 function sanitizeCellText(raw: string): string {
-  return raw
+  const joined = raw
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .split('\n')
     .map((part) => part.trim())
     .filter((part, idx, arr) => part.length > 0 || arr.length === 1)
-    .join('<br>')
-    .replace(/(?<!\\)\|/g, '\\|')
-    .trim();
+    .join('<br>');
+  return escapeUnescapedPipes(joined).trim();
+}
+
+function extractHtmlCellText(cell: Element): string {
+  const clone = cell.cloneNode(true) as Element;
+  for (const br of Array.from(clone.querySelectorAll('br'))) {
+    br.replaceWith('\n');
+  }
+  for (const block of Array.from(clone.querySelectorAll('p, div, li'))) {
+    if (block.nextSibling) {
+      block.append('\n');
+    }
+  }
+  return clone.textContent ?? '';
+}
+
+function parseClipboardTsvGrid(plainData: string): string[][] | null {
+  const normalized = plainData.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const rows: string[][] = [];
+  let currentRow: string[] = [];
+  let currentCell = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < normalized.length; i++) {
+    const ch = normalized[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (normalized[i + 1] === '"') {
+          currentCell += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        currentCell += ch;
+      }
+      continue;
+    }
+
+    if (ch === '"' && currentCell.length === 0) {
+      inQuotes = true;
+    } else if (ch === '\t') {
+      currentRow.push(currentCell);
+      currentCell = '';
+    } else if (ch === '\n') {
+      currentRow.push(currentCell);
+      rows.push(currentRow);
+      currentRow = [];
+      currentCell = '';
+    } else {
+      currentCell += ch;
+    }
+  }
+
+  if (inQuotes) return null;
+  if (currentCell.length > 0 || currentRow.length > 0) {
+    currentRow.push(currentCell);
+    rows.push(currentRow);
+  }
+
+  // Trim trailing empty newline row that spreadsheets append on Ctrl+C
+  if (rows.length > 1 && rows[rows.length - 1].length === 1 && rows[rows.length - 1][0] === '') {
+    rows.pop();
+  }
+
+  if (rows.length < 2) return null;
+  const colCount = rows[0].length;
+  if (colCount < 2 || !rows.every((r) => r.length === colCount)) {
+    return null;
+  }
+  return rows;
 }
 
 function buildMarkdownTableFromGrid(grid: string[][]): string | null {
@@ -554,7 +636,7 @@ export function convertClipboardToMarkdownTable(
           if (cells.length === 0) continue;
           const rowValues: string[] = [];
           for (const cell of cells) {
-            rowValues.push(cell.textContent ?? '');
+            rowValues.push(extractHtmlCellText(cell));
             const colspan = Math.min(12, Math.max(1, Number(cell.getAttribute('colspan')) || 1));
             for (let k = 1; k < colspan; k++) {
               rowValues.push('');
@@ -573,17 +655,9 @@ export function convertClipboardToMarkdownTable(
   }
 
   if (plainData && plainData.includes('\t')) {
-    const rawLines = plainData.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-    // Trim trailing empty newline that spreadsheets append on Ctrl+C
-    if (rawLines.length > 1 && rawLines[rawLines.length - 1] === '') {
-      rawLines.pop();
-    }
-    if (rawLines.length >= 2 && rawLines.every((l) => l.includes('\t'))) {
-      const grid = rawLines.map((l) => l.split('\t'));
-      const firstCols = grid[0].length;
-      if (firstCols >= 2 && grid.every((r) => r.length === firstCols)) {
-        return buildMarkdownTableFromGrid(grid);
-      }
+    const grid = parseClipboardTsvGrid(plainData);
+    if (grid) {
+      return buildMarkdownTableFromGrid(grid);
     }
   }
 

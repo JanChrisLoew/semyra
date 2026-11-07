@@ -134,7 +134,7 @@ describe('MarkdownEditorController keybindings & folding integration', () => {
     });
     expect(afterJumpFolds).toBe(0);
 
-    // Strg+H opens the German search & replace bar
+    // Strg+H opens the German search & replace bar and focuses the Replace field
     const ctrlH = new KeyboardEvent('keydown', {
       key: 'h',
       ctrlKey: true,
@@ -145,6 +145,20 @@ describe('MarkdownEditorController keybindings & folding integration', () => {
     const searchPanel = ctrl.view.dom.querySelector('.cm-search');
     expect(searchPanel).not.toBeNull();
     expect(searchPanel!.textContent).toContain('Ersetzen');
+    const replaceInput = ctrl.view.dom.querySelector<HTMLInputElement>(
+      '.cm-search input[name="replace"]',
+    );
+    expect(replaceInput).not.toBeNull();
+    expect(document.activeElement).toBe(replaceInput);
+
+    // Folded scrollToSourceLine increases monotonically without per-line sawtooth jitter
+    ctrl.view.dispatch({ selection: { anchor: 0 } });
+    expect(foldCode(ctrl.view)).toBe(true);
+    ctrl.scrollToSourceLine(1.5);
+    const topEarly = ctrl.view.scrollDOM.scrollTop;
+    ctrl.scrollToSourceLine(3.2);
+    const topLate = ctrl.view.scrollDOM.scrollTop;
+    expect(topLate).toBeGreaterThanOrEqual(topEarly);
 
     ctrl.view.destroy();
     host.remove();

@@ -88,30 +88,32 @@ describe('markdown-table', () => {
     expect(step4.selection.anchor).toBe(step4.selection.head);
   });
 
-  it('converts HTML <table> and spreadsheet TSV clipboard data into aligned GFM tables', () => {
+  it('converts HTML <table> (<br> & <p> multiline) and RFC-4180 quoted TSV clipboard data into aligned GFM tables', () => {
     const html = `
       <table>
         <tr><th>Feature</th><th>Shortcut</th></tr>
-        <tr><td>Suche | Filter</td><td>Strg+F\nStrg+H</td></tr>
+        <tr><td>Suche | Filter</td><td>Strg+F<br>Strg+H</td></tr>
+        <tr><td>C:\\Temp\\\\|Pfad</td><td><p>Zeile 1</p><p>Zeile 2</p></td></tr>
       </table>
     `;
     const fromHtml = convertClipboardToMarkdownTable(html, 'Feature\tShortcut');
     expect(fromHtml).toBe(
       [
-        '| Feature         | Shortcut         |',
-        '| --------------- | ---------------- |',
-        '| Suche \\| Filter | Strg+F<br>Strg+H |',
+        '| Feature         | Shortcut           |',
+        '| --------------- | ------------------ |',
+        '| Suche \\| Filter | Strg+F<br>Strg+H   |',
+        '| C:\\Temp\\\\\\|Pfad | Zeile 1<br>Zeile 2 |',
       ].join('\n'),
     );
 
-    const tsv = 'Quartal\tUmsatz\nQ1\t1200 €\nQ2\t1850 €\n';
+    const tsv = 'Quartal\tNotiz\nQ1\t"Umsatz +12%\nRekord"\nQ2\t1850 €\n';
     const fromTsv = convertClipboardToMarkdownTable(undefined, tsv);
     expect(fromTsv).toBe(
       [
-        '| Quartal | Umsatz |',
-        '| ------- | ------ |',
-        '| Q1      | 1200 € |',
-        '| Q2      | 1850 € |',
+        '| Quartal | Notiz                 |',
+        '| ------- | --------------------- |',
+        '| Q1      | Umsatz +12%<br>Rekord |',
+        '| Q2      | 1850 €                |',
       ].join('\n'),
     );
 

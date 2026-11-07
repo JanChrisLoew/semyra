@@ -7,6 +7,8 @@
  * local images, while stripping interactive editor-only chrome (`.copy-code-btn`).
  */
 
+import { renderMermaidLightInClone } from './sanitizer';
+
 const ALERT_COLORS: Record<string, string> = {
   'gfm-alert-note': '#2f81f7',
   'gfm-alert-tip': '#2da44e',
@@ -28,20 +30,32 @@ function syncTaskCheckboxesAndStripChrome(clone: HTMLElement, source: HTMLElemen
     dst.setAttribute('disabled', '');
   });
 
-  // Strip interactive copy buttons and font-dependent `.katex-html` spans
-  // so native `<math>` (MathML) renders cleanly once without external fonts/CSS.
-  for (const el of clone.querySelectorAll('.copy-code-btn, .katex-html')) {
+  // Strip interactive copy buttons, font-dependent `.katex-html` spans, and `<annotation>`
+  // TeX source nodes so native MathML renders once cleanly without raw TeX duplication in Word/Teams.
+  for (const el of clone.querySelectorAll('.copy-code-btn, .katex-html, math annotation')) {
     el.remove();
+  }
+
+  // Unwrap `<semantics>` inside `<math>` so pure Presentation MathML `<mrow>` sits directly under `<math>`
+  for (const sem of Array.from(clone.querySelectorAll('math semantics'))) {
+    const parent = sem.parentNode;
+    if (!parent) continue;
+    while (sem.firstChild) {
+      parent.insertBefore(sem.firstChild, sem);
+    }
+    sem.remove();
   }
 }
 
 /**
- * Prepares the live `#preview-content` DOM for standalone 1-file HTML export,
- * preserving client-rendered KaTeX MathML and Mermaid `<svg>` diagrams.
+ * Prepares a detached clone of `#preview-content` for standalone 1-file HTML export,
+ * preserving client-rendered KaTeX MathML and rendering crisp light-theme Mermaid SVGs
+ * without mutating or flashing the live preview DOM.
  */
-export function preparePreviewHtmlForExport(previewEl: HTMLElement): string {
+export async function preparePreviewHtmlForExport(previewEl: HTMLElement): Promise<string> {
   const clone = previewEl.cloneNode(true) as HTMLElement;
   syncTaskCheckboxesAndStripChrome(clone, previewEl);
+  await renderMermaidLightInClone(clone);
   return clone.innerHTML;
 }
 
@@ -101,6 +115,7 @@ export async function buildOfficeFriendlyHtml(
     hdr.remove();
   }
 
+  await renderMermaidLightInClone(clone);
   await inlineLocalAssetImagesInDom(clone, fetchFn);
 
   for (const table of clone.querySelectorAll<HTMLElement>('table')) {
@@ -168,14 +183,31 @@ export async function buildOfficeFriendlyHtml(
 }
 
 /**
- * Copies rendered HTML + plain text fallback into the system clipboard.
+ * Extracts clean plain-text representation from a preview DOM element without
+ * leaking `.copy-code-btn` ("Kopieren") labels or duplicated KaTeX `.katex-html` / `<annotation>` text.
+ */
+export function extractCleanPreviewPlainText(
+  previewEl: HTMLElement,
+  fallbackPlain: string,
+): string {
+  const clone = previewEl.cloneNode(true) as HTMLElement;
+  syncTaskCheckboxesAndStripChrome(clone, previewEl);
+  for (const hdr of clone.querySelectorAll('.code-block-header')) {
+    hdr.remove();
+  }
+  const text = clone.textContent?.replace(/\n{3,}/g, '\n\n').trim();
+  return text || fallbackPlain;
+}
+
+/**
+ * Copies rendered HTML + clean plain-text fallback into the system clipboard.
  */
 export async function copyRichPreviewToClipboard(
   previewEl: HTMLElement,
   fallbackPlain: string,
 ): Promise<void> {
   const html = await buildOfficeFriendlyHtml(previewEl);
-  const plain = previewEl.innerText?.trim() || fallbackPlain;
+  const plain = extractCleanPreviewPlainText(previewEl, fallbackPlain);
 
   if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
     const item = new ClipboardItem({

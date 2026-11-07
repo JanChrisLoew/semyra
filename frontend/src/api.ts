@@ -198,11 +198,14 @@ export const backend = {
       renderedHtml,
     }),
 
-  exportPdfDialog: (title: string, defaultDir: string | null) =>
-    postJson<{ exported: boolean; path?: string }>('dialog/export-pdf', {
+  pickPdfSavePath: (title: string, defaultDir: string | null) =>
+    postJson<{ chosen: boolean; token?: number }>('dialog/pick-pdf-target', {
       title,
       defaultDir,
     }),
+
+  executePdfExport: (token: number) =>
+    postJson<{ exported: boolean; path?: string }>('export-pdf', { token }),
 
   setWindowState: (opts: {
     title?: string;

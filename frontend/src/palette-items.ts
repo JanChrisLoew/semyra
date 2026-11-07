@@ -44,6 +44,7 @@ export interface PaletteCommandContext {
   onToggleLineEnding: () => void;
   onZoomDelta: (delta: number) => void;
   onZoomReset: () => void;
+  onOpenEditorReplace?: () => void;
   onOpenSearchPanel: () => void;
   onOpenOutlinePanel: () => void;
   onToggleZen: () => void;
@@ -265,6 +266,17 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
       shortcut: 'Strg+0',
       run: ctx.onZoomReset,
     },
+    ...(ctx.onOpenEditorReplace
+      ? [
+          {
+            id: 'cmd:editor-replace',
+            kind: 'command' as const,
+            label: 'Suche: Suchen & Ersetzen im Dokument öffnen',
+            shortcut: 'Strg+H',
+            run: ctx.onOpenEditorReplace,
+          },
+        ]
+      : []),
     {
       id: 'cmd:search-workspace',
       kind: 'command',

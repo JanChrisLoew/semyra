@@ -43,6 +43,8 @@ pub struct AppStateInner {
     pub allowed_roots: HashSet<PathBuf>,
     pub watched_paths: HashSet<PathBuf>,
     pub recent_self_writes: HashMap<PathBuf, Instant>,
+    pub pending_pdf_exports: HashMap<u64, PathBuf>,
+    pub next_pdf_token: u64,
     pub has_unsaved_changes: bool,
     pub watcher: Option<RecommendedWatcher>,
 }
@@ -108,6 +110,8 @@ impl AppState {
             allowed_roots,
             watched_paths: HashSet::new(),
             recent_self_writes: HashMap::new(),
+            pending_pdf_exports: HashMap::new(),
+            next_pdf_token: 1,
             has_unsaved_changes: false,
             watcher: None,
         }));

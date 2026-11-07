@@ -115,9 +115,15 @@ struct ExportHtmlReq {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ExportPdfReq {
+struct PickPdfTargetReq {
     title: String,
     default_dir: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExecutePdfExportReq {
+    token: u64,
 }
 
 #[derive(Deserialize)]
@@ -736,6 +742,13 @@ fn handle_api_route(
                     .default_dir
                     .as_ref()
                     .map(PathBuf::from)
+                    .or_else(|| {
+                        state
+                            .inner
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.workspace_folder.clone())
+                    })
                     .or_else(dirs::document_dir);
 
                 let mut dlg = rfd::FileDialog::new()
@@ -778,8 +791,8 @@ fn handle_api_route(
             });
         }
 
-        "dialog/export-pdf" => {
-            let Ok(req) = serde_json::from_slice::<ExportPdfReq>(&body) else {
+        "dialog/pick-pdf-target" => {
+            let Ok(req) = serde_json::from_slice::<PickPdfTargetReq>(&body) else {
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige PDF-Export-Anfrage"));
                 return;
             };
@@ -813,41 +826,78 @@ fn handle_api_route(
 
                 if let Some(chosen) = dlg.save_file() {
                     let cleaned = clean_windows_path(&chosen);
-                    let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
-                    if state
-                        .proxy
-                        .send_event(UserEvent::ExportPdf {
-                            target_path: cleaned.clone(),
-                            done_tx,
-                        })
-                        .is_err()
-                    {
+                    let Ok(mut guard) = state.inner.lock() else {
                         responder.respond(err_json(
                             StatusCode::INTERNAL_SERVER_ERROR,
-                            "Hauptfenster konnte für den PDF-Export nicht erreicht werden.",
+                            "Interner Status für PDF-Export gesperrt.",
                         ));
                         return;
-                    }
-
-                    match done_rx.recv_timeout(std::time::Duration::from_secs(30)) {
-                        Ok(Ok(())) => {
-                            let final_path =
-                                normalize_existing_path(&cleaned).to_string_lossy().into_owned();
-                            responder.respond(ok_json(&serde_json::json!({
-                                "exported": true,
-                                "path": final_path
-                            })));
-                        }
-                        Ok(Err(err)) => {
-                            responder.respond(err_json(StatusCode::INTERNAL_SERVER_ERROR, err))
-                        }
-                        Err(_) => responder.respond(err_json(
-                            StatusCode::GATEWAY_TIMEOUT,
-                            "Zeitüberschreitung beim Erstellen der PDF-Datei.",
-                        )),
-                    }
+                    };
+                    let token = guard.next_pdf_token;
+                    guard.next_pdf_token = guard.next_pdf_token.wrapping_add(1);
+                    guard.pending_pdf_exports.insert(token, cleaned);
+                    responder.respond(ok_json(&serde_json::json!({
+                        "chosen": true,
+                        "token": token
+                    })));
                 } else {
-                    responder.respond(ok_json(&serde_json::json!({ "exported": false })));
+                    responder.respond(ok_json(&serde_json::json!({ "chosen": false })));
+                }
+            });
+        }
+
+        "export-pdf" => {
+            let Ok(req) = serde_json::from_slice::<ExecutePdfExportReq>(&body) else {
+                responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige PDF-Export-Anfrage"));
+                return;
+            };
+            let target_opt = state
+                .inner
+                .lock()
+                .ok()
+                .and_then(|mut g| g.pending_pdf_exports.remove(&req.token));
+
+            let Some(cleaned) = target_opt else {
+                responder.respond(err_json(
+                    StatusCode::FORBIDDEN,
+                    "Ungültiges oder bereits eingelöstes PDF-Export-Token.",
+                ));
+                return;
+            };
+
+            std::thread::spawn(move || {
+                let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
+                if state
+                    .proxy
+                    .send_event(UserEvent::ExportPdf {
+                        target_path: cleaned.clone(),
+                        done_tx,
+                    })
+                    .is_err()
+                {
+                    responder.respond(err_json(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Hauptfenster konnte für den PDF-Export nicht erreicht werden.",
+                    ));
+                    return;
+                }
+
+                match done_rx.recv_timeout(std::time::Duration::from_secs(30)) {
+                    Ok(Ok(())) => {
+                        let final_path =
+                            normalize_existing_path(&cleaned).to_string_lossy().into_owned();
+                        responder.respond(ok_json(&serde_json::json!({
+                            "exported": true,
+                            "path": final_path
+                        })));
+                    }
+                    Ok(Err(err)) => {
+                        responder.respond(err_json(StatusCode::INTERNAL_SERVER_ERROR, err))
+                    }
+                    Err(_) => responder.respond(err_json(
+                        StatusCode::GATEWAY_TIMEOUT,
+                        "Zeitüberschreitung beim Erstellen der PDF-Datei.",
+                    )),
                 }
             });
         }

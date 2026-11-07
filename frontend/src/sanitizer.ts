@@ -180,6 +180,17 @@ export async function safeSetMarkdownHTML(
   reconcileChildren(container, staging);
 }
 
+/**
+ * Re-renders any `[data-mermaid]` diagram blocks inside a detached export/clipboard
+ * clone using Mermaid's light `'default'` theme without touching the live preview DOM.
+ */
+export async function renderMermaidLightInClone(root: HTMLElement): Promise<void> {
+  const mermaidNodes = root.querySelectorAll<HTMLElement>('.mermaid-wrapper[data-mermaid]');
+  if (mermaidNodes.length > 0) {
+    await renderMermaidBlocksCached(mermaidNodes, true);
+  }
+}
+
 async function renderMermaidBlocksCached(
   nodes: NodeListOf<HTMLElement>,
   forceLightTheme = false,

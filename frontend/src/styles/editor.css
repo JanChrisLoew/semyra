@@ -45,8 +45,17 @@
 
 /* View Modes */
 .app-shell[data-view="editor"] .split-resizer,
-.app-shell[data-view="editor"] .preview-pane {
+.app-shell[data-view="editor"]:not([data-print-prep="true"]) .preview-pane {
   display: none;
+}
+.app-shell[data-view="editor"][data-print-prep="true"] .preview-pane {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 820px;
+  height: auto;
+  visibility: hidden;
+  pointer-events: none;
 }
 .app-shell[data-view="editor"] .editor-pane {
   width: 100%;

@@ -484,15 +484,8 @@ export class MarkdownEditorController {
         },
         {
           key: 'Mod-h',
-          run: (view) => {
-            openSearchPanel(view);
-            requestAnimationFrame(() => {
-              const replaceInput = view.dom.querySelector<HTMLInputElement>(
-                '.cm-search input[name="replace"]',
-              );
-              replaceInput?.focus();
-              replaceInput?.select();
-            });
+          run: () => {
+            this.openSearch(true);
             return true;
           },
         },
@@ -665,15 +658,39 @@ export class MarkdownEditorController {
   }
 
   /**
-   * Scrolls editor smoothly to a fractional 1-based source line.
+   * Opens CodeMirror's localized search panel (`replace = false`) or search-and-replace
+   * panel (`replace = true`), moving focus directly into the requested input field.
+   */
+  public openSearch(replace = false): void {
+    openSearchPanel(this.view);
+    const selector = replace
+      ? '.cm-search input[name="replace"]'
+      : '.cm-search input[name="search"]';
+    const focusTarget = () => {
+      const input = this.view.dom.querySelector<HTMLInputElement>(selector);
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    };
+    focusTarget();
+    requestAnimationFrame(focusTarget);
+  }
+
+  /**
+   * Scrolls editor smoothly to a fractional 1-based source line, symmetrically
+   * interpolating across collapsed/folded multi-line blocks without jitter.
    */
   public scrollToSourceLine(fractionalLine: number): void {
     const totalLines = this.view.state.doc.lines;
     const clamped = Math.max(1, Math.min(totalLines, fractionalLine));
     const lineNum = Math.floor(clamped);
-    const frac = clamped - lineNum;
     const lineObj = this.view.state.doc.line(lineNum);
     const block = this.view.lineBlockAt(lineObj.from);
+    const startLine = this.view.state.doc.lineAt(block.from).number;
+    const endLine = this.view.state.doc.lineAt(block.to).number;
+    const lineSpan = Math.max(1, endLine - startLine + 1);
+    const frac = Math.max(0, Math.min(1, (clamped - startLine) / lineSpan));
     this.view.scrollDOM.scrollTop = block.top + block.height * frac;
   }
 

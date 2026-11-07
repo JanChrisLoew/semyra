@@ -196,7 +196,9 @@ class MarkLiveApp {
             onExportPdf: () => {
               void this.exportCurrentTabPdf();
             },
-            onPrint: () => window.print(),
+            onPrint: () => {
+              void this.printCurrentTab();
+            },
             onAlignTable: () => this.alignActiveMarkdownTables(),
             onSetViewMode: (mode) => this.setViewMode(mode),
             onToggleWordWrap: () => this.toggleWordWrap(),
@@ -209,6 +211,7 @@ class MarkLiveApp {
             onToggleLineEnding: () => this.toggleActiveTabLineEnding(),
             onZoomDelta: (delta) => this.setZoomPercent(this.zoomPercent + delta),
             onZoomReset: () => this.setZoomPercent(100),
+            onOpenEditorReplace: () => this.openEditorReplacePanel(),
             onOpenSearchPanel: () => this.switchSidebarPanel('search'),
             onOpenOutlinePanel: () => this.switchSidebarPanel('outline'),
             onToggleZen: () => this.appEl.classList.toggle('is-zen'),
@@ -1092,6 +1095,13 @@ class MarkLiveApp {
     }
   }
 
+  private openEditorReplacePanel(): void {
+    if (this.appEl.getAttribute('data-view') === 'preview') {
+      this.setViewMode('split');
+    }
+    this.editor.openSearch(true);
+  }
+
   private async withLightPaperPreview<T>(fn: () => Promise<T>): Promise<T> {
     const tab = this.activeTab;
     await this.flushActivePreviewRender();
@@ -1110,9 +1120,10 @@ class MarkLiveApp {
       metaScheme === 'dark' ||
       (metaScheme !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
 
-    // Temporarily expose preview pane if in editor-only view so lazy images decode properly
+    // Expose preview pane offscreen when in editor-only mode so images decode & Mermaid measures
+    // without visibly resizing `.editor-pane` on screen.
     if (prevView === 'editor') {
-      this.appEl.setAttribute('data-view', 'split');
+      this.appEl.setAttribute('data-print-prep', 'true');
     }
     if (hasMermaid && isDarkActive) {
       await this.renderPreviewImmediate(tab.currentContent, baseDir, undefined, true);
@@ -1131,9 +1142,7 @@ class MarkLiveApp {
     try {
       return await fn();
     } finally {
-      if (prevView === 'editor') {
-        this.appEl.setAttribute('data-view', 'editor');
-      }
+      this.appEl.removeAttribute('data-print-prep');
       if (hasMermaid && isDarkActive) {
         await this.renderPreviewImmediate(tab.currentContent, baseDir);
       }
@@ -1144,9 +1153,8 @@ class MarkLiveApp {
     const tab = this.activeTab;
     if (!tab) return;
     try {
-      await this.withLightPaperPreview(async () => {
-        await copyRichPreviewToClipboard(this.previewContentEl, tab.currentContent);
-      });
+      await this.flushActivePreviewRender();
+      await copyRichPreviewToClipboard(this.previewContentEl, tab.currentContent);
       this.showToast('Als formatierter Text in die Zwischenablage kopiert');
     } catch (err) {
       console.error('Formatierter Text konnte nicht kopiert werden:', err);
@@ -1160,7 +1168,7 @@ class MarkLiveApp {
     const baseDir = tab.parentDir ?? this.explorer.rootPath;
     try {
       await this.flushActivePreviewRender();
-      const renderedHtml = preparePreviewHtmlForExport(this.previewContentEl);
+      const renderedHtml = await preparePreviewHtmlForExport(this.previewContentEl);
       const res = await backend.exportHtmlDialog(
         tab.name,
         tab.currentContent,
@@ -1182,15 +1190,29 @@ class MarkLiveApp {
     if (!tab) return;
     const baseDir = tab.parentDir ?? this.explorer.rootPath;
     try {
-      const res = await this.withLightPaperPreview(() =>
-        backend.exportPdfDialog(tab.name, baseDir),
-      );
+      const pick = await backend.pickPdfSavePath(tab.name, baseDir);
+      if (!pick.chosen || pick.token === undefined) {
+        return;
+      }
+      const token = pick.token;
+      const res = await this.withLightPaperPreview(() => backend.executePdfExport(token));
       if (res.exported && res.path) {
         this.showToast(`PDF exportiert: ${baseNameOfPath(res.path)}`);
       }
     } catch (err) {
       console.error('PDF-Export fehlgeschlagen:', err);
       this.showToast('PDF-Export fehlgeschlagen');
+    }
+  }
+
+  private async printCurrentTab(): Promise<void> {
+    try {
+      await this.withLightPaperPreview(async () => {
+        window.print();
+      });
+    } catch (err) {
+      console.error('Druckvorbereitung fehlgeschlagen:', err);
+      window.print();
     }
   }
 
@@ -1236,7 +1258,7 @@ class MarkLiveApp {
     });
 
     document.getElementById('btn-print')!.addEventListener('click', () => {
-      window.print();
+      void this.printCurrentTab();
     });
 
     for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-set-view]')) {
@@ -1478,12 +1500,19 @@ class MarkLiveApp {
         if (e.getModifierState?.('AltGraph') || (e.ctrlKey && e.altKey)) {
           return;
         }
-        if (document.querySelector('dialog[open]:not(#palette-dialog)')) {
-          return;
-        }
-
         const mod = e.ctrlKey || e.metaKey;
         const key = e.key.toLowerCase();
+        const openDialogs = document.querySelectorAll('dialog[open]');
+        if (openDialogs.length > 0) {
+          const onlyPaletteOpen =
+            openDialogs.length === 1 && openDialogs[0].id === 'palette-dialog';
+          const isPaletteSwitch =
+            mod && !e.altKey && ((key === 'e' && !e.shiftKey) || (key === 'p' && e.shiftKey));
+          if (!onlyPaletteOpen || !isPaletteSwitch) {
+            return;
+          }
+        }
+
         const consume = () => {
           e.preventDefault();
           e.stopPropagation();
@@ -1495,6 +1524,9 @@ class MarkLiveApp {
         } else if (mod && !e.altKey && e.shiftKey && key === 'p') {
           consume();
           this.palette.open('commands');
+        } else if (mod && !e.altKey && !e.shiftKey && key === 'h') {
+          consume();
+          this.openEditorReplacePanel();
         } else if (mod && !e.altKey && !e.shiftKey && key === 'n') {
           consume();
           newTabFn();
@@ -1521,7 +1553,7 @@ class MarkLiveApp {
           void this.exportCurrentTabPdf();
         } else if (mod && !e.altKey && !e.shiftKey && key === 'p') {
           consume();
-          window.print();
+          void this.printCurrentTab();
         } else if (mod && !e.altKey && !e.shiftKey && key === 'w') {
           consume();
           if (this.activeTab) void this.requestCloseTab(this.activeTab.id);
