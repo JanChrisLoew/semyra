@@ -543,6 +543,17 @@ export class MarkdownEditorController {
         ...searchKeymap.filter((k) => k.key !== 'Mod-Alt-g'),
         ...historyKeymap,
       ]),
+      EditorView.theme({
+        '.cm-content': {
+          caretColor: 'var(--fg-primary)',
+        },
+        '.cm-cursor, .cm-cursor-primary, .cm-cursor-secondary': {
+          borderLeftColor: 'var(--fg-primary)',
+        },
+        '.cm-dropCursor': {
+          borderLeftColor: 'var(--accent)',
+        },
+      }),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           this.callbacks.onDocChanged(update.state.doc.toString());

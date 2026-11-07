@@ -105,7 +105,17 @@
 
 .codemirror-host .cm-content {
   padding: 0 18px;
-  caret-color: var(--accent);
+  caret-color: var(--fg-primary);
+}
+
+.codemirror-host .cm-cursor,
+.codemirror-host .cm-cursor-primary,
+.codemirror-host .cm-cursor-secondary {
+  border-left: 1.5px solid var(--fg-primary) !important;
+}
+
+.codemirror-host .cm-dropCursor {
+  border-left: 2px solid var(--accent) !important;
 }
 
 .codemirror-host .cm-gutters {
