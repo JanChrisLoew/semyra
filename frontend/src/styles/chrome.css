@@ -16,26 +16,42 @@
   border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-chrome);
   flex-shrink: 0;
-}
-
-.toolbar-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
+  height: 38px;
+  position: relative;
+  z-index: 20;
 }
 
 .primary-bar {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 10px;
+  height: 38px;
+  flex-wrap: nowrap;
 }
 
-.format-bar {
-  padding-top: 2px;
-  padding-bottom: 6px;
-  border-top: 1px solid var(--border-subtle);
-  overflow-x: auto;
-  scrollbar-width: none;
+.header-left-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+}
+
+.header-center-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.header-right-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .toolbar-group {
@@ -173,15 +189,18 @@ button {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
-/* Tab Strip */
+/* Multi-file Tab Strip integrated in Header Row */
 .tab-strip-wrap {
   display: flex;
-  align-items: center;
-  background: var(--bg-subtle);
-  border-top: 1px solid var(--border-subtle);
-  padding: 4px 8px 0 8px;
-  gap: 4px;
-  min-height: 36px;
+  align-items: flex-end;
+  background: transparent;
+  border-top: none;
+  padding: 0;
+  gap: 3px;
+  height: 100%;
+  flex: 1;
+  min-width: 100px;
+  overflow: hidden;
 }
 
 .tab-bar {
@@ -191,21 +210,24 @@ button {
   overflow-x: auto;
   scrollbar-width: none;
   flex: 1;
+  min-width: 0;
+  height: 100%;
 }
 
 .tab-slot {
   position: relative;
   display: inline-flex;
   align-items: center;
-  height: 31px;
-  max-width: 235px;
+  height: 30px;
+  max-width: 220px;
+  min-width: 60px;
   padding: 0 5px 0 0;
-  border-radius: 7px 7px 0 0;
+  border-radius: 6px 6px 0 0;
   border: 1px solid transparent;
   border-bottom: none;
   background: transparent;
   color: var(--fg-secondary);
-  flex-shrink: 0;
+  flex-shrink: 1;
   user-select: none;
   -webkit-user-select: none;
   touch-action: none;
@@ -221,6 +243,9 @@ button {
   background: var(--bg-surface);
   color: var(--fg-primary);
   border-color: var(--border-subtle);
+  border-bottom: 1px solid var(--bg-surface);
+  margin-bottom: -1px;
+  z-index: 2;
   font-weight: 500;
 }
 
@@ -334,7 +359,7 @@ body.is-tab-dragging * {
 .tab-add-btn {
   width: 26px;
   height: 26px;
-  margin-bottom: 3px;
+  margin-bottom: 2px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -342,6 +367,9 @@ body.is-tab-dragging * {
   font-size: 16px;
   cursor: pointer;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .tab-add-btn:hover {
@@ -532,5 +560,162 @@ body.is-tab-dragging * {
 @media (prefers-reduced-motion: reduce) {
   .status-toast {
     transition: none;
+  }
+}
+
+/* ==========================================================================
+   Share, Copy & Export Popover Menu (modern-web-guidance)
+   ========================================================================== */
+
+.share-trigger {
+  gap: 5px;
+  font-weight: 500;
+}
+
+.dropdown-chevron {
+  font-size: 10px;
+  opacity: 0.7;
+  line-height: 1;
+  transition: transform 120ms ease;
+}
+
+.share-trigger[aria-expanded="true"] .dropdown-chevron {
+  transform: rotate(180deg);
+}
+
+.share-popover {
+  min-width: 270px;
+  max-width: 340px;
+  padding: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  color: var(--fg-primary);
+  margin: 4px 0 0 0;
+  inset: auto;
+  position-area: block-end span-inline-start;
+  position-try-fallbacks: flip-inline, flip-block;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  z-index: 1000;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .share-popover {
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity 120ms ease, transform 120ms ease, display 120ms allow-discrete, overlay 120ms allow-discrete;
+  }
+  .share-popover:popover-open {
+    opacity: 1;
+    transform: translateY(0);
+    @starting-style {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+  }
+}
+
+.share-popover .menu-section-header {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-muted);
+  padding: 6px 10px 4px 10px;
+  user-select: none;
+}
+
+.share-popover .menu-divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 4px 6px;
+}
+
+.share-popover .menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-primary);
+  font-size: 12.5px;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 100ms ease;
+}
+
+.share-popover .menu-item:hover,
+.share-popover .menu-item:focus-visible {
+  background: var(--bg-hover);
+  outline: none;
+}
+
+.share-popover .menu-item svg {
+  width: 15px;
+  height: 15px;
+  color: var(--fg-secondary);
+  flex-shrink: 0;
+}
+
+.share-popover .menu-item:hover svg {
+  color: var(--fg-primary);
+}
+
+.share-popover .menu-item-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.share-popover .menu-item-shortcut {
+  font-size: 11px;
+  color: var(--fg-muted);
+  font-family: inherit;
+  margin-left: 12px;
+}
+
+/* Status Bar Document Summary */
+.status-doc-summary {
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--fg-secondary);
+  transition: color 120ms ease;
+}
+
+.status-doc-summary:hover {
+  color: var(--fg-primary);
+}
+
+/* Top Chrome Responsive Rules */
+@media (max-width: 1280px) {
+  .palette-trigger-btn span,
+  .palette-trigger-btn kbd {
+    display: none;
+  }
+  .palette-trigger-btn {
+    padding: 0 8px;
+    width: 30px;
+  }
+}
+
+@media (max-width: 1120px) {
+  #btn-open-file span,
+  #btn-open-folder span,
+  #btn-save span {
+    display: none;
+  }
+  #btn-open-file,
+  #btn-open-folder,
+  #btn-save {
+    padding: 0;
+    width: 30px;
   }
 }

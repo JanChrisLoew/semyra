@@ -11,12 +11,112 @@
 }
 
 .editor-pane {
+  position: relative;
   width: var(--split-ratio);
   min-width: 220px;
   height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* Contextual Format Bar embedded in Editor Pane */
+.editor-format-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 8px;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  min-height: 32px;
+  gap: 4px;
+}
+
+.editor-format-bar.is-collapsed {
+  display: none !important;
+}
+
+.format-buttons-scroll {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex: 1;
+  min-width: 0;
+}
+
+.format-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  padding-left: 4px;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.format-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background-color 100ms ease, color 100ms ease;
+}
+
+.format-toggle-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+}
+
+.format-toggle-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.format-expand-btn {
+  position: absolute;
+  top: 8px;
+  right: 14px;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--fg-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  opacity: 0.65;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.format-expand-btn[hidden] {
+  display: none !important;
+}
+
+.format-expand-btn:hover,
+.format-expand-btn:focus-visible {
+  opacity: 1;
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+}
+
+.format-expand-btn svg {
+  width: 12px;
+  height: 12px;
 }
 
 .split-resizer {
@@ -96,6 +196,11 @@
 }
 .app-shell[data-view="preview"] .preview-pane {
   width: 100%;
+}
+
+/* Split Orientation context sensitivity: only visible in split mode */
+.app-shell:not([data-view="split"]) #btn-toggle-split-orientation {
+  display: none !important;
 }
 
 /* Zen Mode: Pure distraction-free writing canvas */

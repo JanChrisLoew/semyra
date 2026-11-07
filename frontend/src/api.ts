@@ -71,6 +71,7 @@ export interface UiSessionPrefs {
   autoSave: boolean;
   wordWrap: boolean;
   spellcheck: boolean;
+  formatBarVisible?: boolean;
   recentFiles: string[];
   recentFolders: string[];
   sessionFiles: string[];

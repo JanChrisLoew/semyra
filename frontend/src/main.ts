@@ -96,13 +96,15 @@ class MarkLiveApp {
   private statusPathBtn = document.getElementById('status-filepath') as HTMLButtonElement;
   private statusSaveBadge = document.getElementById('status-save-badge')!;
   private statusCursorEl = document.getElementById('status-cursor')!;
-  private statusWordsEl = document.getElementById('status-words')!;
-  private statusTokensEl = document.getElementById('status-tokens')!;
-  private statusReadtimeEl = document.getElementById('status-readtime')!;
+  private statusDocSummaryBtn = document.getElementById('status-doc-summary') as HTMLButtonElement | null;
+  private statusWordsEl = document.getElementById('status-words');
+  private statusTokensEl = document.getElementById('status-tokens');
+  private statusReadtimeEl = document.getElementById('status-readtime');
   private statusZoomBtn = document.getElementById('status-zoom') as HTMLButtonElement;
   private statusEolBtn = document.getElementById('status-eol') as HTMLButtonElement;
   private statusEncodingEl = document.getElementById('status-encoding')!;
   private statusToastEl = document.getElementById('status-toast')!;
+  private formatBarVisible = true;
   private btnCopyMarkdown = document.getElementById('btn-copy-markdown') as HTMLButtonElement | null;
   private dropOverlayEl = document.getElementById('drop-overlay')!;
   private externalBannerEl = document.getElementById('external-banner')!;
@@ -298,6 +300,8 @@ class MarkLiveApp {
             splitOrientation: this.splitOrientation,
             onToggleSplitOrientation: () => this.toggleSplitOrientation(),
             onShowDocStats: () => this.openDocStatsPopover(),
+            formatBarVisible: this.formatBarVisible,
+            onToggleFormatBar: () => this.toggleFormatBar(),
             onToggleWordWrap: () => this.toggleWordWrap(),
             onToggleSpellcheck: () => {
               this.editor.setSpellcheck(!this.editor.isSpellcheckEnabled());
@@ -430,8 +434,35 @@ class MarkLiveApp {
 
     this.editor.setSpellcheck(prefs.spellcheck);
 
+    if (typeof prefs.formatBarVisible === 'boolean') {
+      this.formatBarVisible = prefs.formatBarVisible;
+    }
+    this.applyFormatBarVisibility();
+
     this.recentFiles = prefs.recentFiles ?? [];
     this.recentFolders = prefs.recentFolders ?? [];
+  }
+
+  public toggleFormatBar(): void {
+    this.formatBarVisible = !this.formatBarVisible;
+    this.applyFormatBarVisibility();
+    this.schedulePrefsSave();
+    this.showToast(
+      this.formatBarVisible
+        ? 'Formatierungsleiste eingeblendet'
+        : 'Formatierungsleiste ausgeblendet',
+    );
+  }
+
+  private applyFormatBarVisibility(): void {
+    const bar = document.getElementById('format-bar');
+    const expandBtn = document.getElementById('btn-expand-format-bar');
+    if (bar) {
+      bar.classList.toggle('is-collapsed', !this.formatBarVisible);
+    }
+    if (expandBtn) {
+      expandBtn.hidden = this.formatBarVisible;
+    }
   }
 
   private setSplitRatio(pct: number, persist = true): void {
@@ -567,6 +598,7 @@ class MarkLiveApp {
       autoSave: this.autoSaveEnabled,
       wordWrap: this.editor.isWordWrapEnabled(),
       spellcheck: this.editor.isSpellcheckEnabled(),
+      formatBarVisible: this.formatBarVisible,
       recentFiles: this.recentFiles,
       recentFolders: this.recentFolders,
       sessionFiles,
@@ -1372,11 +1404,13 @@ class MarkLiveApp {
 
     const { words, readingTimeSec } = tab.stats;
     this.updateWordCountDisplay();
-    if (readingTimeSec < 60) {
-      this.statusReadtimeEl.textContent = `${readingTimeSec} Sek. Lesezeit`;
-    } else {
-      const mins = Math.ceil(readingTimeSec / 60);
-      this.statusReadtimeEl.textContent = `~${mins} Min. Lesezeit`;
+    if (this.statusReadtimeEl) {
+      if (readingTimeSec < 60) {
+        this.statusReadtimeEl.textContent = `${readingTimeSec} Sek. Lesezeit`;
+      } else {
+        const mins = Math.ceil(readingTimeSec / 60);
+        this.statusReadtimeEl.textContent = `~${mins} Min. Lesezeit`;
+      }
     }
     this.statusZoomBtn.textContent = `${this.zoomPercent}%`;
     this.statusEolBtn.textContent = tab.lineEnding;
@@ -1386,19 +1420,43 @@ class MarkLiveApp {
   private updateWordCountDisplay(): void {
     const tab = this.activeTab;
     if (!tab) return;
-    const { words } = tab.stats;
+    const { words, readingTimeSec } = tab.stats;
     const totalTokens = estimateTokens(tab.currentContent);
-    if (this.lastSelection.chars > 0) {
-      const selW = this.lastSelection.words;
-      const selC = this.lastSelection.chars;
-      const selTokens = Math.ceil(Math.max(selC / 3.7, selW * 1.25));
-      this.statusWordsEl.textContent = `${selW} von ${words.toLocaleString('de-DE')} Wörtern markiert (${selC.toLocaleString('de-DE')} Z.)`;
-      this.statusTokensEl.textContent = `~${selTokens.toLocaleString('de-DE')} Tokens (~${totalTokens.toLocaleString('de-DE')})`;
-      this.statusTokensEl.title = `Auswahl: ~${selTokens.toLocaleString('de-DE')} Tokens · Gesamtdokument: ~${totalTokens.toLocaleString('de-DE')} Tokens`;
-    } else {
-      this.statusWordsEl.textContent = `${words.toLocaleString('de-DE')} ${words === 1 ? 'Wort' : 'Wörter'}`;
-      this.statusTokensEl.textContent = `~${totalTokens.toLocaleString('de-DE')} Tokens`;
-      this.statusTokensEl.title = 'Geschätzter LLM-Token-Verbrauch für Prompts (GPT / Claude / Gemini)';
+    const readingTimeStr = readingTimeSec < 60
+      ? `${readingTimeSec} Sek. Lesezeit`
+      : `~${Math.ceil(readingTimeSec / 60)} Min. Lesezeit`;
+
+    if (this.statusDocSummaryBtn) {
+      if (this.lastSelection.chars > 0) {
+        const selW = this.lastSelection.words;
+        const selC = this.lastSelection.chars;
+        const selTokens = Math.ceil(Math.max(selC / 3.7, selW * 1.25));
+        this.statusDocSummaryBtn.textContent = `${selW} von ${words.toLocaleString('de-DE')} Wörtern · ~${selTokens.toLocaleString('de-DE')} Tokens`;
+        this.statusDocSummaryBtn.title = `Auswahl: ${selW.toLocaleString('de-DE')} Wörter (${selC.toLocaleString('de-DE')} Z.), ~${selTokens.toLocaleString('de-DE')} Tokens · Dokument: ${words.toLocaleString('de-DE')} Wörter (~${totalTokens.toLocaleString('de-DE')} Tokens, ${readingTimeStr}) · Klicken für Details`;
+      } else {
+        this.statusDocSummaryBtn.textContent = `${words.toLocaleString('de-DE')} ${words === 1 ? 'Wort' : 'Wörter'} · ~${totalTokens.toLocaleString('de-DE')} Tokens`;
+        this.statusDocSummaryBtn.title = `Dokument-Statistiken: ${words.toLocaleString('de-DE')} Wörter · ~${totalTokens.toLocaleString('de-DE')} Tokens · ${readingTimeStr} · Klicken für Details`;
+      }
+    }
+
+    if (this.statusWordsEl) {
+      if (this.lastSelection.chars > 0) {
+        const selW = this.lastSelection.words;
+        const selC = this.lastSelection.chars;
+        this.statusWordsEl.textContent = `${selW} von ${words.toLocaleString('de-DE')} Wörtern markiert (${selC.toLocaleString('de-DE')} Z.)`;
+      } else {
+        this.statusWordsEl.textContent = `${words.toLocaleString('de-DE')} ${words === 1 ? 'Wort' : 'Wörter'}`;
+      }
+    }
+    if (this.statusTokensEl) {
+      if (this.lastSelection.chars > 0) {
+        const selW = this.lastSelection.words;
+        const selC = this.lastSelection.chars;
+        const selTokens = Math.ceil(Math.max(selC / 3.7, selW * 1.25));
+        this.statusTokensEl.textContent = `~${selTokens.toLocaleString('de-DE')} Tokens (~${totalTokens.toLocaleString('de-DE')})`;
+      } else {
+        this.statusTokensEl.textContent = `~${totalTokens.toLocaleString('de-DE')} Tokens`;
+      }
     }
   }
 
@@ -1702,22 +1760,22 @@ class MarkLiveApp {
     });
 
     const newTabFn = () => this.createNewTab();
-    document.getElementById('btn-new-tab')!.addEventListener('click', newTabFn);
-    document.getElementById('btn-tab-add')!.addEventListener('click', newTabFn);
+    document.getElementById('btn-new-tab')?.addEventListener('click', newTabFn);
+    document.getElementById('btn-tab-add')?.addEventListener('click', newTabFn);
 
-    document.getElementById('btn-open-file')!.addEventListener('click', () => {
+    document.getElementById('btn-open-file')?.addEventListener('click', () => {
       void this.triggerOpenFilesDialog();
     });
 
-    document.getElementById('btn-open-folder')!.addEventListener('click', () => {
+    document.getElementById('btn-open-folder')?.addEventListener('click', () => {
       void this.triggerOpenFolderDialog();
     });
 
-    document.getElementById('btn-save')!.addEventListener('click', () => {
+    document.getElementById('btn-save')?.addEventListener('click', () => {
       if (this.activeTab) void this.saveTab(this.activeTab, false);
     });
 
-    document.getElementById('btn-save-as')!.addEventListener('click', () => {
+    document.getElementById('btn-save-as')?.addEventListener('click', () => {
       if (this.activeTab) void this.saveTab(this.activeTab, true);
     });
 
@@ -1725,20 +1783,73 @@ class MarkLiveApp {
       void this.copyCurrentTabMarkdown();
     });
 
-    document.getElementById('btn-copy-rich')!.addEventListener('click', () => {
+    document.getElementById('btn-copy-rich')?.addEventListener('click', () => {
       void this.copyCurrentTabRichText();
     });
 
-    document.getElementById('btn-export-html')!.addEventListener('click', () => {
+    document.getElementById('btn-export-html')?.addEventListener('click', () => {
       void this.exportCurrentTabHtml();
     });
 
-    document.getElementById('btn-export-pdf')!.addEventListener('click', () => {
+    document.getElementById('btn-export-pdf')?.addEventListener('click', () => {
       void this.exportCurrentTabPdf();
     });
 
-    document.getElementById('btn-print')!.addEventListener('click', () => {
+    document.getElementById('btn-print')?.addEventListener('click', () => {
       void this.printCurrentTab();
+    });
+
+    // Share & Export Popover Actions
+    const sharePopover = document.getElementById('share-popover') as (HTMLElement & {
+      hidePopover?: () => void;
+    }) | null;
+    const closeShareMenu = () => {
+      try {
+        sharePopover?.hidePopover?.();
+      } catch {}
+    };
+
+    document.getElementById('btn-share-copy-markdown')?.addEventListener('click', () => {
+      closeShareMenu();
+      void this.copyCurrentTabMarkdown();
+    });
+
+    document.getElementById('btn-share-copy-ai')?.addEventListener('click', () => {
+      closeShareMenu();
+      void this.copyCurrentTabAiContext();
+    });
+
+    document.getElementById('btn-share-copy-rich')?.addEventListener('click', () => {
+      closeShareMenu();
+      void this.copyCurrentTabRichText();
+    });
+
+    document.getElementById('btn-share-export-html')?.addEventListener('click', () => {
+      closeShareMenu();
+      void this.exportCurrentTabHtml();
+    });
+
+    document.getElementById('btn-share-export-pdf')?.addEventListener('click', () => {
+      closeShareMenu();
+      void this.exportCurrentTabPdf();
+    });
+
+    document.getElementById('btn-share-print')?.addEventListener('click', () => {
+      closeShareMenu();
+      void this.printCurrentTab();
+    });
+
+    document.getElementById('btn-share-save-as')?.addEventListener('click', () => {
+      closeShareMenu();
+      if (this.activeTab) void this.saveTab(this.activeTab, true);
+    });
+
+    // Contextual Format Ribbon Toggle Buttons
+    document.getElementById('btn-collapse-format-bar')?.addEventListener('click', () => {
+      this.toggleFormatBar();
+    });
+    document.getElementById('btn-expand-format-bar')?.addEventListener('click', () => {
+      this.toggleFormatBar();
     });
 
     for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-set-view]')) {
@@ -2092,6 +2203,7 @@ class MarkLiveApp {
     });
 
     const openStats = () => this.openDocStatsPopover();
+    this.statusDocSummaryBtn?.addEventListener('click', openStats);
     document.getElementById('status-words')?.addEventListener('click', openStats);
     document.getElementById('status-tokens')?.addEventListener('click', openStats);
     document.getElementById('status-readtime')?.addEventListener('click', openStats);
@@ -2366,6 +2478,9 @@ class MarkLiveApp {
         } else if (e.altKey && !mod && e.shiftKey && key === 's') {
           consume();
           this.toggleSplitOrientation();
+        } else if (e.altKey && !mod && e.shiftKey && key === 'r') {
+          consume();
+          this.toggleFormatBar();
         } else if (e.key === 'F11') {
           consume();
           toggleZen();

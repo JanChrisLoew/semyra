@@ -35,6 +35,8 @@ pub struct UiSessionPrefs {
     pub word_wrap: bool,
     #[serde(default)]
     pub spellcheck: bool,
+    #[serde(default = "default_true")]
+    pub format_bar_visible: bool,
     #[serde(default)]
     pub recent_files: Vec<String>,
     #[serde(default)]
@@ -55,6 +57,7 @@ impl Default for UiSessionPrefs {
             auto_save: false,
             word_wrap: true,
             spellcheck: false,
+            format_bar_visible: true,
             recent_files: Vec::new(),
             recent_folders: Vec::new(),
             session_files: Vec::new(),

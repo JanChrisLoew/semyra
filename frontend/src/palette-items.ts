@@ -66,6 +66,8 @@ export interface PaletteCommandContext {
   onDeleteTableColumn?: () => void;
   onToggleSplitOrientation?: () => void;
   onShowDocStats?: () => void;
+  onToggleFormatBar?: () => void;
+  formatBarVisible?: boolean;
   splitOrientation?: 'vertical' | 'horizontal';
 }
 
@@ -370,6 +372,17 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
             kind: 'command' as const,
             label: 'Dokument: Detaillierte Statistiken & Lesbarkeit anzeigen',
             run: () => ctx.onShowDocStats?.(),
+          },
+        ]
+      : []),
+    ...(ctx.onToggleFormatBar
+      ? [
+          {
+            id: 'cmd:toggle-format-bar',
+            kind: 'command' as const,
+            label: `Ansicht: Formatierungsleiste ${ctx.formatBarVisible === false ? 'einblenden' : 'ausblenden'}`,
+            shortcut: 'Alt+Umschalt+R',
+            run: () => ctx.onToggleFormatBar?.(),
           },
         ]
       : []),
