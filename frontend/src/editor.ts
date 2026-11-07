@@ -43,7 +43,10 @@ import { germanCodeMirrorPhrases } from './editor-l10n-de';
 import {
   convertClipboardToMarkdownTable,
   formatTableAtCursorOrAll,
+  isCursorInsideTable,
+  modifyMarkdownTable,
   navigateMarkdownTableCell,
+  TableEditAction,
 } from './markdown-table';
 import { isMarkdownPath } from './path-utils';
 
@@ -155,6 +158,7 @@ export interface EditorCallbacks {
   onPasteImage: (mimeType: string, dataUrl: string) => void;
   onCopyRichText?: () => void;
   onCopyMarkdown?: () => void;
+  onTableContextMenu?: (clientX: number, clientY: number) => void;
 }
 
 export type FormatAction =
@@ -365,6 +369,28 @@ export class MarkdownEditorController {
     }
     this.view.focus();
     return patch.formattedCount;
+  }
+
+  public isCursorInTable(pos = this.view.state.selection.main.head): boolean {
+    const { state } = this.view;
+    if (pos > state.doc.length) return false;
+    const line = state.doc.lineAt(pos);
+    if (!line.text.includes('|')) return false;
+    if (this.isInsideCodeContext(state, pos)) return false;
+    return isCursorInsideTable(state.doc.toString(), pos);
+  }
+
+  public modifyTable(action: TableEditAction): boolean {
+    const pos = this.view.state.selection.main.head;
+    const patch = modifyMarkdownTable(this.view.state.doc.toString(), pos, action);
+    if (!patch) return false;
+    this.view.dispatch({
+      changes: { from: patch.from, to: patch.to, insert: patch.insert },
+      selection: { anchor: patch.newCursorOffset },
+      scrollIntoView: true,
+    });
+    this.view.focus();
+    return true;
   }
 
   private buildExtensions(): Extension {
@@ -600,6 +626,18 @@ export class MarkdownEditorController {
               });
               return true;
             }
+          }
+          return false;
+        },
+        contextmenu: (event: MouseEvent, view: EditorView) => {
+          const pos =
+            view.posAtCoords({ x: event.clientX, y: event.clientY }) ??
+            view.state.selection.main.head;
+          if (this.isCursorInTable(pos)) {
+            event.preventDefault();
+            view.dispatch({ selection: { anchor: pos } });
+            this.callbacks.onTableContextMenu?.(event.clientX, event.clientY);
+            return true;
           }
           return false;
         },

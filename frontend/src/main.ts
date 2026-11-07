@@ -107,7 +107,12 @@ class MarkLiveApp {
     showPopover?: () => void;
     hidePopover?: () => void;
   };
+  private tableContextMenuEl = document.getElementById('table-context-menu') as HTMLElement & {
+    showPopover?: () => void;
+    hidePopover?: () => void;
+  };
   private tabContextTargetId: string | null = null;
+  private draggedTabId: string | null = null;
 
   public async init(): Promise<void> {
     const cmHost = document.getElementById('codemirror-host')!;
@@ -128,6 +133,9 @@ class MarkLiveApp {
       },
       onCopyMarkdown: () => {
         void this.copyCurrentTabMarkdown();
+      },
+      onTableContextMenu: (clientX, clientY) => {
+        this.openTableContextMenu(clientX, clientY);
       },
     });
 
@@ -162,6 +170,18 @@ class MarkLiveApp {
       },
       onEntryDeleted: (deletedPath) => {
         this.handleExplorerEntryDeleted(deletedPath);
+      },
+      onRemoveRecentFolder: (folderPath) => {
+        this.recentFolders = this.recentFolders.filter((p) => p !== folderPath);
+        this.schedulePrefsSave();
+        this.explorer.renderEmptyStateWithRecents(this.recentFolders, this.recentFiles);
+        this.showToast('Ordner aus Verlauf entfernt');
+      },
+      onRemoveRecentFile: (filePath) => {
+        this.recentFiles = this.recentFiles.filter((p) => p !== filePath);
+        this.schedulePrefsSave();
+        this.explorer.renderEmptyStateWithRecents(this.recentFolders, this.recentFiles);
+        this.showToast('Datei aus Verlauf entfernt');
       },
     });
 
@@ -233,6 +253,36 @@ class MarkLiveApp {
               void this.printCurrentTab();
             },
             onAlignTable: () => this.alignActiveMarkdownTables(),
+            onInsertTableRowAbove: () => {
+              if (this.editor.modifyTable({ type: 'insert-row', direction: 'above' })) {
+                this.showToast('Zeile oberhalb eingefügt');
+              }
+            },
+            onInsertTableRowBelow: () => {
+              if (this.editor.modifyTable({ type: 'insert-row', direction: 'below' })) {
+                this.showToast('Zeile unterhalb eingefügt');
+              }
+            },
+            onDeleteTableRow: () => {
+              if (this.editor.modifyTable({ type: 'delete-row' })) {
+                this.showToast('Zeile gelöscht');
+              }
+            },
+            onInsertTableColumnLeft: () => {
+              if (this.editor.modifyTable({ type: 'insert-col', direction: 'left' })) {
+                this.showToast('Spalte links eingefügt');
+              }
+            },
+            onInsertTableColumnRight: () => {
+              if (this.editor.modifyTable({ type: 'insert-col', direction: 'right' })) {
+                this.showToast('Spalte rechts eingefügt');
+              }
+            },
+            onDeleteTableColumn: () => {
+              if (this.editor.modifyTable({ type: 'delete-col' })) {
+                this.showToast('Spalte gelöscht');
+              }
+            },
             onSetViewMode: (mode) => this.setViewMode(mode),
             onToggleWordWrap: () => this.toggleWordWrap(),
             onToggleSpellcheck: () => {
@@ -1094,6 +1144,66 @@ class MarkLiveApp {
       const slot = document.createElement('div');
       slot.className = `tab-slot ${isSelected ? 'is-active' : ''}`;
       slot.setAttribute('role', 'presentation');
+      slot.draggable = true;
+      slot.dataset.tabId = tab.id;
+
+      slot.addEventListener('dragstart', (e) => {
+        if (!e.dataTransfer) return;
+        this.draggedTabId = tab.id;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', tab.id);
+        slot.classList.add('is-dragging');
+      });
+
+      slot.addEventListener('dragover', (e) => {
+        if (!this.draggedTabId || this.draggedTabId === tab.id) return;
+        e.preventDefault();
+        e.dataTransfer!.dropEffect = 'move';
+        const rect = slot.getBoundingClientRect();
+        const isAfter = e.clientX > rect.left + rect.width / 2;
+        slot.classList.toggle('drop-after', isAfter);
+        slot.classList.toggle('drop-before', !isAfter);
+      });
+
+      slot.addEventListener('dragleave', () => {
+        slot.classList.remove('drop-before', 'drop-after');
+      });
+
+      slot.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        slot.classList.remove('drop-before', 'drop-after');
+        const sourceId = this.draggedTabId ?? e.dataTransfer?.getData('text/plain');
+        if (!sourceId || sourceId === tab.id) return;
+
+        const sourceIndex = this.tabs.findIndex((t) => t.id === sourceId);
+        let targetIndex = this.tabs.findIndex((t) => t.id === tab.id);
+        if (sourceIndex === -1 || targetIndex === -1) return;
+
+        const rect = slot.getBoundingClientRect();
+        const isAfter = e.clientX > rect.left + rect.width / 2;
+        if (isAfter) {
+          targetIndex++;
+        }
+        if (sourceIndex < targetIndex) {
+          targetIndex--;
+        }
+
+        const [movedTab] = this.tabs.splice(sourceIndex, 1);
+        this.tabs.splice(targetIndex, 0, movedTab);
+
+        this.renderTabBar();
+        this.schedulePrefsSave();
+      });
+
+      slot.addEventListener('dragend', () => {
+        this.draggedTabId = null;
+        slot.classList.remove('is-dragging');
+        for (const el of this.tabBarEl.querySelectorAll('.tab-slot')) {
+          el.classList.remove('drop-before', 'drop-after', 'is-dragging');
+        }
+      });
+
       slot.addEventListener('auxclick', (e) => {
         if (e.button === 1) {
           e.preventDefault();
@@ -1178,6 +1288,25 @@ class MarkLiveApp {
       this.tabContextMenuEl.style.top = `${clampedTop}px`;
 
       const firstItem = this.tabContextMenuEl.querySelector<HTMLButtonElement>(
+        '[focusgroup~="menu"] > button:not(:disabled)',
+      );
+      firstItem?.focus();
+    });
+  }
+
+  private openTableContextMenu(clientX: number, clientY: number): void {
+    this.tableContextMenuEl.style.left = `${clientX}px`;
+    this.tableContextMenuEl.style.top = `${clientY}px`;
+    this.tableContextMenuEl.showPopover?.();
+
+    requestAnimationFrame(() => {
+      const rect = this.tableContextMenuEl.getBoundingClientRect();
+      const clampedLeft = Math.max(6, Math.min(clientX, window.innerWidth - rect.width - 8));
+      const clampedTop = Math.max(6, Math.min(clientY, window.innerHeight - rect.height - 8));
+      this.tableContextMenuEl.style.left = `${clampedLeft}px`;
+      this.tableContextMenuEl.style.top = `${clampedTop}px`;
+
+      const firstItem = this.tableContextMenuEl.querySelector<HTMLButtonElement>(
         '[focusgroup~="menu"] > button:not(:disabled)',
       );
       firstItem?.focus();
@@ -1633,6 +1762,49 @@ class MarkLiveApp {
           this.showToast(`Als KI-Kontext (${tab.name}) kopiert`);
           break;
         }
+      }
+    });
+
+    // Context menu actions for Markdown tables
+    this.tableContextMenuEl.addEventListener('click', (e) => {
+      const actionBtn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-table-action]');
+      if (!actionBtn) return;
+      const action = actionBtn.dataset.tableAction;
+      this.tableContextMenuEl.hidePopover?.();
+      switch (action) {
+        case 'row-above':
+          if (this.editor.modifyTable({ type: 'insert-row', direction: 'above' })) {
+            this.showToast('Zeile oberhalb eingefügt');
+          }
+          break;
+        case 'row-below':
+          if (this.editor.modifyTable({ type: 'insert-row', direction: 'below' })) {
+            this.showToast('Zeile unterhalb eingefügt');
+          }
+          break;
+        case 'delete-row':
+          if (this.editor.modifyTable({ type: 'delete-row' })) {
+            this.showToast('Zeile gelöscht');
+          }
+          break;
+        case 'col-left':
+          if (this.editor.modifyTable({ type: 'insert-col', direction: 'left' })) {
+            this.showToast('Spalte links eingefügt');
+          }
+          break;
+        case 'col-right':
+          if (this.editor.modifyTable({ type: 'insert-col', direction: 'right' })) {
+            this.showToast('Spalte rechts eingefügt');
+          }
+          break;
+        case 'delete-col':
+          if (this.editor.modifyTable({ type: 'delete-col' })) {
+            this.showToast('Spalte gelöscht');
+          }
+          break;
+        case 'align':
+          this.alignActiveMarkdownTables();
+          break;
       }
     });
 

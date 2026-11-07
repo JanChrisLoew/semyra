@@ -663,3 +663,169 @@ export function convertClipboardToMarkdownTable(
 
   return null;
 }
+
+export type TableEditAction =
+  | { type: 'insert-row'; direction: 'above' | 'below' }
+  | { type: 'delete-row' }
+  | { type: 'insert-col'; direction: 'left' | 'right' }
+  | { type: 'delete-col' };
+
+export interface TableEditResult {
+  from: number;
+  to: number;
+  insert: string;
+  newCursorOffset: number;
+}
+
+export function isCursorInsideTable(docText: string, cursorOffset: number): boolean {
+  const lineInfos = splitDocumentLinesWithOffsets(docText);
+  let cursorLine = 0;
+  for (let i = 0; i < lineInfos.length; i++) {
+    if (cursorOffset >= lineInfos[i].from && cursorOffset <= lineInfos[i].to) {
+      cursorLine = i;
+      break;
+    }
+  }
+  const lines = lineInfos.map((l) => l.text);
+  return findTableBlockAtLine(lines, cursorLine) !== null;
+}
+
+export function modifyMarkdownTable(
+  docText: string,
+  cursorOffset: number,
+  action: TableEditAction,
+): TableEditResult | null {
+  const lineInfos = splitDocumentLinesWithOffsets(docText);
+  const lines = lineInfos.map((l) => l.text);
+  const eol = docText.includes('\r\n') ? '\r\n' : '\n';
+
+  let cursorLine = 0;
+  for (let i = 0; i < lineInfos.length; i++) {
+    if (cursorOffset >= lineInfos[i].from && cursorOffset <= lineInfos[i].to) {
+      cursorLine = i;
+      break;
+    }
+  }
+
+  const activeBlock = findTableBlockAtLine(lines, cursorLine);
+  if (!activeBlock) return null;
+
+  const rawSlice = lines.slice(activeBlock.startLine, activeBlock.endLine + 1);
+  const parsedRows: string[][] = [];
+  for (const line of rawSlice) {
+    const r = splitMarkdownTableRow(line);
+    if (!r) return null;
+    parsedRows.push(r);
+  }
+
+  if (parsedRows.length < 2) return null;
+
+  const rowIdx = cursorLine - activeBlock.startLine;
+  const colCount = Math.max(...parsedRows.map((r) => r.length));
+
+  const spans = computeRowCellSpans(lines[cursorLine], lineInfos[cursorLine].from, rowIdx);
+  let colIdx = 0;
+  for (let c = 0; c < spans.length; c++) {
+    if (cursorOffset >= spans[c].rawFrom && cursorOffset <= spans[c].rawTo) {
+      colIdx = c;
+      break;
+    }
+  }
+  if (spans.length > 0 && cursorOffset > spans[spans.length - 1].rawTo) {
+    colIdx = spans.length - 1;
+  }
+
+  let targetRow = rowIdx;
+  let targetCol = colIdx;
+
+  switch (action.type) {
+    case 'insert-row': {
+      if (action.direction === 'above') {
+        targetRow = rowIdx <= 1 ? 2 : rowIdx;
+      } else {
+        targetRow = rowIdx <= 1 ? 2 : rowIdx + 1;
+      }
+      const newRow = Array.from({ length: colCount }, () => '');
+      parsedRows.splice(targetRow, 0, newRow);
+      break;
+    }
+
+    case 'delete-row': {
+      if (rowIdx === 1) return null;
+      if (rowIdx === 0) {
+        if (parsedRows.length <= 2) return null;
+        parsedRows[0] = parsedRows[2];
+        parsedRows.splice(2, 1);
+        targetRow = 0;
+      } else {
+        if (parsedRows.length <= 3) {
+          parsedRows[2] = Array.from({ length: colCount }, () => '');
+          targetRow = 2;
+        } else {
+          parsedRows.splice(rowIdx, 1);
+          targetRow = Math.min(rowIdx, parsedRows.length - 1);
+          if (targetRow === 1) targetRow = 0;
+        }
+      }
+      break;
+    }
+
+    case 'insert-col': {
+      targetCol = action.direction === 'left' ? colIdx : colIdx + 1;
+      for (let r = 0; r < parsedRows.length; r++) {
+        if (r === 1) {
+          parsedRows[1].splice(targetCol, 0, '---');
+        } else if (r === 0) {
+          parsedRows[0].splice(targetCol, 0, `Spalte ${targetCol + 1}`);
+        } else {
+          parsedRows[r].splice(targetCol, 0, '');
+        }
+      }
+      targetRow = rowIdx === 1 ? 2 : rowIdx;
+      break;
+    }
+
+    case 'delete-col': {
+      if (colCount <= 1) return null;
+      targetCol = Math.min(colIdx, colCount - 1);
+      for (let r = 0; r < parsedRows.length; r++) {
+        parsedRows[r].splice(targetCol, 1);
+      }
+      targetCol = Math.min(targetCol, colCount - 2);
+      targetRow = rowIdx === 1 ? 2 : rowIdx;
+      break;
+    }
+  }
+
+  const finalColCount = Math.max(...parsedRows.map((r) => r.length));
+  for (const r of parsedRows) {
+    while (r.length < finalColCount) {
+      r.push('');
+    }
+  }
+
+  const unformatted = parsedRows.map((r, rIdx) => {
+    if (rIdx === 1) {
+      return `| ${r.map((c) => (/^:?-+:?$/.test(c.trim()) ? c.trim() : '---')).join(' | ')} |`;
+    }
+    return `| ${r.join(' | ')} |`;
+  });
+
+  const formattedLines = formatMarkdownTableLines(unformatted);
+  const insert = formattedLines.join(eol);
+
+  const from = lineInfos[activeBlock.startLine].from;
+  const to = lineInfos[activeBlock.endLine].to;
+
+  targetRow = Math.min(targetRow, formattedLines.length - 1);
+  let offsetInInsert = 0;
+  for (let r = 0; r < targetRow; r++) {
+    offsetInInsert += formattedLines[r].length + eol.length;
+  }
+  const rowSpans = computeRowCellSpans(formattedLines[targetRow], offsetInInsert, targetRow);
+  const safeTargetCol = Math.min(targetCol, rowSpans.length - 1);
+  const cellSpan = rowSpans[safeTargetCol] ?? rowSpans[rowSpans.length - 1];
+  const newCursorOffset = from + (cellSpan ? cellSpan.selectFrom : offsetInInsert);
+
+  return { from, to, insert, newCursorOffset };
+}

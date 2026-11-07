@@ -3,6 +3,8 @@ import {
   convertClipboardToMarkdownTable,
   formatMarkdownTableLines,
   formatTableAtCursorOrAll,
+  isCursorInsideTable,
+  modifyMarkdownTable,
   navigateMarkdownTableCell,
   splitMarkdownTableRow,
 } from '../markdown-table';
@@ -119,5 +121,100 @@ describe('markdown-table', () => {
 
     // Ordinary prose or single-line text is untouched
     expect(convertClipboardToMarkdownTable(undefined, 'Hallo Welt ohne Tabelle')).toBeNull();
+  });
+
+  it('detects when cursor is inside a Markdown table', () => {
+    const doc = [
+      'Einleitender Absatz.',
+      '',
+      '| Spalte A | Spalte B |',
+      '| :--- | :--- |',
+      '| 1 | 2 |',
+      '',
+      'Schlussabsatz.',
+    ].join('\n');
+
+    const tableStart = doc.indexOf('| Spalte A');
+    const tableData = doc.indexOf('| 1 |');
+    const outsidePos = 5;
+
+    expect(isCursorInsideTable(doc, tableStart)).toBe(true);
+    expect(isCursorInsideTable(doc, tableData)).toBe(true);
+    expect(isCursorInsideTable(doc, outsidePos)).toBe(false);
+  });
+
+  it('modifies table by inserting and deleting rows with automatic column balancing', () => {
+    const doc = [
+      '| Name | Rolle |',
+      '| :--- | :--- |',
+      '| Alice | Admin |',
+      '| Bob | Dev |',
+    ].join('\n');
+
+    // Insert row below 'Alice' (cursor at 'Alice')
+    const alicePos = doc.indexOf('Alice');
+    const insertedBelow = modifyMarkdownTable(doc, alicePos, {
+      type: 'insert-row',
+      direction: 'below',
+    });
+    expect(insertedBelow).not.toBeNull();
+    const linesBelow = insertedBelow!.insert.split('\n');
+    expect(linesBelow).toHaveLength(5);
+    expect(linesBelow[2]).toContain('Alice');
+    expect(linesBelow[3]).toMatch(/^\|\s+\|\s+\|$/);
+    expect(linesBelow[4]).toContain('Bob');
+
+    // Insert row above 'Alice'
+    const insertedAbove = modifyMarkdownTable(doc, alicePos, {
+      type: 'insert-row',
+      direction: 'above',
+    });
+    expect(insertedAbove).not.toBeNull();
+    const linesAbove = insertedAbove!.insert.split('\n');
+    expect(linesAbove).toHaveLength(5);
+    expect(linesAbove[2]).toMatch(/^\|\s+\|\s+\|$/);
+    expect(linesAbove[3]).toContain('Alice');
+
+    // Delete row 'Bob'
+    const bobPos = doc.indexOf('Bob');
+    const deletedBob = modifyMarkdownTable(doc, bobPos, { type: 'delete-row' });
+    expect(deletedBob).not.toBeNull();
+    expect(deletedBob!.insert).not.toContain('Bob');
+    expect(deletedBob!.insert).toContain('Alice');
+
+    // Rejects deleting separator row
+    const sepPos = doc.indexOf(':---');
+    expect(modifyMarkdownTable(doc, sepPos, { type: 'delete-row' })).toBeNull();
+  });
+
+  it('modifies table by inserting and deleting columns across all rows', () => {
+    const doc = [
+      '| A | B |',
+      '| :--- | :--- |',
+      '| 1 | 2 |',
+    ].join('\n');
+
+    const bPos = doc.indexOf('B');
+    // Insert column right of 'B'
+    const colRight = modifyMarkdownTable(doc, bPos, {
+      type: 'insert-col',
+      direction: 'right',
+    });
+    expect(colRight).not.toBeNull();
+    const linesRight = colRight!.insert.split('\n');
+    expect(linesRight[0]).toBe('| A   | B   | Spalte 3 |');
+    expect(linesRight[1]).toBe('| --- | --- | -------- |');
+    expect(linesRight[2]).toBe('| 1   | 2   |          |');
+
+    // Delete column 'A'
+    const aPos = doc.indexOf('A');
+    const colDeleted = modifyMarkdownTable(doc, aPos, { type: 'delete-col' });
+    expect(colDeleted).not.toBeNull();
+    const linesDeleted = colDeleted!.insert.split('\n');
+    expect(linesDeleted[0]).toBe('| B   |');
+    expect(linesDeleted[2]).toBe('| 2   |');
+
+    // Refuses to delete the last remaining column
+    expect(modifyMarkdownTable(colDeleted!.insert, 2, { type: 'delete-col' })).toBeNull();
   });
 });

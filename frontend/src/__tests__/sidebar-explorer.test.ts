@@ -77,4 +77,46 @@ describe('SidebarExplorerController', () => {
     const activeBtn = fileTreeEl.querySelector('.tree-row.is-active');
     expect(activeBtn?.getAttribute('data-filepath')).toBe('C:\\Docs\\Architektur\\ADR\\001.md');
   });
+
+  it('renders recent folders and files with remove buttons and triggers removal callbacks', () => {
+    const fileTreeEl = document.createElement('div');
+    const workspaceTitleEl = document.createElement('span');
+    const contextPopoverEl = document.createElement('div');
+    const onRemoveRecentFolder = vi.fn();
+    const onRemoveRecentFile = vi.fn();
+
+    const explorer = new SidebarExplorerController({
+      fileTreeEl,
+      workspaceTitleEl,
+      contextPopoverEl,
+      getActiveFilePath: () => null,
+      onOpenFilePath: vi.fn(),
+      onOpenCreatedFile: vi.fn(),
+      onTriggerOpenFolderDialog: vi.fn(),
+      onWorkspaceFolderLoaded: vi.fn(),
+      onEntryRenamed: vi.fn(),
+      onEntryDeleted: vi.fn(),
+      onRemoveRecentFolder,
+      onRemoveRecentFile,
+    });
+
+    explorer.renderEmptyStateWithRecents(
+      ['C:\\Projekte\\MarkLive', 'C:\\Docs'],
+      ['C:\\Projekte\\MarkLive\\README.md', 'C:\\Docs\\Notizen.md'],
+    );
+
+    const rows = fileTreeEl.querySelectorAll('.recent-entry-row');
+    expect(rows).toHaveLength(4);
+
+    const removeBtns = fileTreeEl.querySelectorAll<HTMLButtonElement>('.recent-remove-btn');
+    expect(removeBtns).toHaveLength(4);
+
+    // Click remove on first folder
+    removeBtns[0].click();
+    expect(onRemoveRecentFolder).toHaveBeenCalledWith('C:\\Projekte\\MarkLive');
+
+    // Click remove on first file
+    removeBtns[2].click();
+    expect(onRemoveRecentFile).toHaveBeenCalledWith('C:\\Projekte\\MarkLive\\README.md');
+  });
 });

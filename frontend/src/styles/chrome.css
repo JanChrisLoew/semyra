@@ -219,6 +219,23 @@ button {
   font-weight: 500;
 }
 
+.tab-slot[draggable="true"] {
+  cursor: grab;
+}
+
+.tab-slot.is-dragging {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+
+.tab-slot.drop-before {
+  border-left: 2px solid var(--accent);
+}
+
+.tab-slot.drop-after {
+  border-right: 2px solid var(--accent);
+}
+
 .tab-select-btn {
   display: inline-flex;
   align-items: center;

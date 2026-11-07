@@ -352,6 +352,43 @@
     </div>
   </div>
 
+  <!-- Context Menu Popover for Markdown Tables -->
+  <div id="table-context-menu" popover="auto" class="context-popover">
+    <div focusgroup="menu nomemory" aria-label="Tabellen-Aktionen">
+      <div class="context-popover-title">Tabelle</div>
+      <button type="button" data-table-action="row-above">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 10h12M8 4v8M5 7l3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Zeile oberhalb einfügen</span>
+      </button>
+      <button type="button" data-table-action="row-below">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6h12M8 4v8M5 9l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Zeile unterhalb einfügen</span>
+      </button>
+      <button type="button" data-table-action="delete-row">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8h12M11 5l-6 6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+        <span>Zeile löschen</span>
+      </button>
+      <hr>
+      <button type="button" data-table-action="col-left">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 2v12M4 8h8M7 5L4 8l3 3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Spalte links einfügen</span>
+      </button>
+      <button type="button" data-table-action="col-right">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2v12M4 8h8M9 5l3 3-3 3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Spalte rechts einfügen</span>
+      </button>
+      <button type="button" data-table-action="delete-col">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v12M5 11l6-6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+        <span>Spalte löschen</span>
+      </button>
+      <hr>
+      <button type="button" data-table-action="align">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h12M2 8h8M2 12h12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+        <span>Tabelle ausrichten (Alt+Umschalt+F)</span>
+      </button>
+    </div>
+  </div>
+
   <!-- Native Modal Dialog: Create File / Folder / Rename Entry -->
   <dialog id="new-file-dialog" closedby="any" aria-labelledby="new-file-dialog-title">
     <h2 id="new-file-dialog-title">Neue Markdown-Datei erstellen</h2>

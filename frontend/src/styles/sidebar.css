@@ -136,6 +136,22 @@
   color: var(--fg-muted);
 }
 
+.recent-entry-row {
+  display: flex;
+  align-items: center;
+  position: relative;
+  border-radius: var(--radius-sm);
+}
+
+.recent-entry-row:hover {
+  background: var(--bg-hover);
+}
+
+.recent-entry-row .recent-entry-btn {
+  flex: 1;
+  min-width: 0;
+}
+
 .recent-entry-btn {
   display: flex;
   flex-direction: column;
@@ -152,7 +168,34 @@
 }
 
 .recent-entry-btn:hover {
-  background: var(--bg-hover);
+  background: transparent;
+}
+
+.recent-remove-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-right: 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.recent-entry-row:hover .recent-remove-btn,
+.recent-remove-btn:focus-visible {
+  display: inline-flex;
+}
+
+.recent-remove-btn:hover {
+  background: var(--bg-active);
+  color: var(--fg-primary);
 }
 
 .recent-entry-btn:focus-visible {
@@ -412,6 +455,15 @@ details[open] > summary .tree-chevron {
 
 .context-popover:is(:popover-open, .\:popover-open) {
   display: block;
+}
+
+.context-popover-title {
+  padding: 4px 10px 2px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
 }
 
 [focusgroup~="menu"] {

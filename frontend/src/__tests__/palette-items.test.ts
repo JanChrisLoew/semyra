@@ -109,6 +109,8 @@ describe('palette-items', () => {
     const onToggle = vi.fn();
     const onCopyMd = vi.fn();
     const onCopyAi = vi.fn();
+    const onInsertRowAbove = vi.fn();
+    const onInsertColLeft = vi.fn();
     const noop = vi.fn();
 
     const cmds = buildPaletteCommandItems({
@@ -148,6 +150,8 @@ describe('palette-items', () => {
       onToggleTask: onToggle,
       onCopyMarkdown: onCopyMd,
       onCopyAiContext: onCopyAi,
+      onInsertTableRowAbove: onInsertRowAbove,
+      onInsertTableColumnLeft: onInsertColLeft,
     });
 
     const copyMdCmd = cmds.find((c) => c.id === 'cmd:copy-markdown');
@@ -185,5 +189,17 @@ describe('palette-items', () => {
     expect(taskCmd?.shortcut).toBe('Alt+C');
     taskCmd?.run();
     expect(onToggle).toHaveBeenCalledTimes(1);
+
+    const rowAboveCmd = cmds.find((c) => c.id === 'cmd:table-row-above');
+    expect(rowAboveCmd).toBeDefined();
+    expect(rowAboveCmd?.label).toContain('Zeile oberhalb');
+    rowAboveCmd?.run();
+    expect(onInsertRowAbove).toHaveBeenCalledTimes(1);
+
+    const colLeftCmd = cmds.find((c) => c.id === 'cmd:table-col-left');
+    expect(colLeftCmd).toBeDefined();
+    expect(colLeftCmd?.label).toContain('Spalte links');
+    colLeftCmd?.run();
+    expect(onInsertColLeft).toHaveBeenCalledTimes(1);
   });
 });

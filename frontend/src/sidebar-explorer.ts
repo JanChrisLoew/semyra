@@ -31,6 +31,8 @@ export interface SidebarExplorerDeps {
   onWorkspaceFolderLoaded: (folderPath: string, persistPrefs: boolean) => void;
   onEntryRenamed: (oldPath: string, newPath: string, newName: string) => void;
   onEntryDeleted: (deletedPath: string) => void;
+  onRemoveRecentFolder?: (folderPath: string) => void;
+  onRemoveRecentFile?: (filePath: string) => void;
 }
 
 /**
@@ -193,6 +195,9 @@ export class SidebarExplorerController {
       sec.appendChild(h);
 
       for (const folderPath of recentFolders.slice(0, 5)) {
+        const row = document.createElement('div');
+        row.className = 'recent-entry-row';
+
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'recent-entry-btn';
@@ -210,7 +215,20 @@ export class SidebarExplorerController {
         btn.addEventListener('click', () => {
           void this.loadFolder(folderPath, true);
         });
-        sec.appendChild(btn);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'recent-remove-btn';
+        removeBtn.title = 'Aus Verlauf entfernen';
+        removeBtn.setAttribute('aria-label', `Ordner ${baseNameOfPath(folderPath)} aus Verlauf entfernen`);
+        removeBtn.textContent = '×';
+        removeBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.deps.onRemoveRecentFolder?.(folderPath);
+        });
+
+        row.append(btn, removeBtn);
+        sec.appendChild(row);
       }
       wrap.appendChild(sec);
     }
@@ -224,6 +242,9 @@ export class SidebarExplorerController {
       sec.appendChild(h);
 
       for (const filePath of recentFiles.slice(0, 6)) {
+        const row = document.createElement('div');
+        row.className = 'recent-entry-row';
+
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'recent-entry-btn';
@@ -241,7 +262,20 @@ export class SidebarExplorerController {
         btn.addEventListener('click', () => {
           void this.deps.onOpenFilePath(filePath);
         });
-        sec.appendChild(btn);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'recent-remove-btn';
+        removeBtn.title = 'Aus Verlauf entfernen';
+        removeBtn.setAttribute('aria-label', `Datei ${baseNameOfPath(filePath)} aus Verlauf entfernen`);
+        removeBtn.textContent = '×';
+        removeBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.deps.onRemoveRecentFile?.(filePath);
+        });
+
+        row.append(btn, removeBtn);
+        sec.appendChild(row);
       }
       wrap.appendChild(sec);
     }

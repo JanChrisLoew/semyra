@@ -58,6 +58,12 @@ export interface PaletteCommandContext {
   onToggleTask?: () => void;
   onCopyMarkdown?: () => void;
   onCopyAiContext?: () => void;
+  onInsertTableRowAbove?: () => void;
+  onInsertTableRowBelow?: () => void;
+  onDeleteTableRow?: () => void;
+  onInsertTableColumnLeft?: () => void;
+  onInsertTableColumnRight?: () => void;
+  onDeleteTableColumn?: () => void;
 }
 
 export async function buildPaletteFileItems(ctx: PaletteFileContext): Promise<PaletteItem[]> {
@@ -245,10 +251,70 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
     {
       id: 'cmd:align-table',
       kind: 'command',
-      label: 'Editor: Markdown-Tabelle ausrichten',
+      label: 'Tabelle: Markdown-Tabelle ausrichten',
       shortcut: 'Alt+Umschalt+F',
       run: ctx.onAlignTable,
     },
+    ...(ctx.onInsertTableRowAbove
+      ? [
+          {
+            id: 'cmd:table-row-above',
+            kind: 'command' as const,
+            label: 'Tabelle: Zeile oberhalb einfügen',
+            run: ctx.onInsertTableRowAbove,
+          },
+        ]
+      : []),
+    ...(ctx.onInsertTableRowBelow
+      ? [
+          {
+            id: 'cmd:table-row-below',
+            kind: 'command' as const,
+            label: 'Tabelle: Zeile unterhalb einfügen',
+            run: ctx.onInsertTableRowBelow,
+          },
+        ]
+      : []),
+    ...(ctx.onDeleteTableRow
+      ? [
+          {
+            id: 'cmd:table-delete-row',
+            kind: 'command' as const,
+            label: 'Tabelle: Aktuelle Zeile löschen',
+            run: ctx.onDeleteTableRow,
+          },
+        ]
+      : []),
+    ...(ctx.onInsertTableColumnLeft
+      ? [
+          {
+            id: 'cmd:table-col-left',
+            kind: 'command' as const,
+            label: 'Tabelle: Spalte links einfügen',
+            run: ctx.onInsertTableColumnLeft,
+          },
+        ]
+      : []),
+    ...(ctx.onInsertTableColumnRight
+      ? [
+          {
+            id: 'cmd:table-col-right',
+            kind: 'command' as const,
+            label: 'Tabelle: Spalte rechts einfügen',
+            run: ctx.onInsertTableColumnRight,
+          },
+        ]
+      : []),
+    ...(ctx.onDeleteTableColumn
+      ? [
+          {
+            id: 'cmd:table-delete-col',
+            kind: 'command' as const,
+            label: 'Tabelle: Aktuelle Spalte löschen',
+            run: ctx.onDeleteTableColumn,
+          },
+        ]
+      : []),
     ...(ctx.onToggleTask
       ? [
           {
