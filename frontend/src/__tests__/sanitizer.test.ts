@@ -47,6 +47,24 @@ describe('safeSetMarkdownHTML', () => {
     expect(nextDetails.querySelector('code')?.textContent).toBe('title: Test 2');
   });
 
+  it('preserves user open state on generic <details> elements across re-renders', async () => {
+    const host = document.createElement('article');
+    await safeSetMarkdownHTML(
+      host,
+      '<details data-line="1"><summary>Details</summary><p>Geheimer Inhalt</p></details>',
+    );
+    const details = host.querySelector('details') as HTMLDetailsElement;
+    details.open = true;
+
+    await safeSetMarkdownHTML(
+      host,
+      '<details data-line="1"><summary>Details</summary><p>Aktualisierter Inhalt</p></details>',
+    );
+    const nextDetails = host.querySelector('details') as HTMLDetailsElement;
+    expect(nextDetails.open).toBe(true);
+    expect(nextDetails.querySelector('p')?.textContent).toBe('Aktualisierter Inhalt');
+  });
+
   it('renders cached KaTeX inline math blocks cleanly', async () => {
     const host = document.createElement('article');
     await safeSetMarkdownHTML(

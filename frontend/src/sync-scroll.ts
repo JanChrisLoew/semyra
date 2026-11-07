@@ -10,6 +10,13 @@ export interface SyncScrollDeps {
   onActiveHeadingChange: (slug: string | null) => void;
 }
 
+function escapeId(id: string): string {
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+    return CSS.escape(id);
+  }
+  return id.replace(/([^\w-])/g, '\\$1');
+}
+
 export class SyncScrollController {
   private enabled = true;
   private scrollSyncLock: 'editor' | 'preview' | null = null;
@@ -27,6 +34,14 @@ export class SyncScrollController {
 
   public setEnabled(enabled: boolean): void {
     this.enabled = enabled;
+  }
+
+  public lockScrollForNavigation(source: 'editor' | 'preview', durationMs = 450): void {
+    this.scrollSyncLock = source;
+    window.clearTimeout(this.scrollUnlockTimer);
+    this.scrollUnlockTimer = window.setTimeout(() => {
+      this.scrollSyncLock = null;
+    }, durationMs);
   }
 
   private lockScrollSource(source: 'editor' | 'preview'): void {
@@ -80,7 +95,7 @@ export class SyncScrollController {
       const paneRect = previewPaneEl.getBoundingClientRect();
       const thresholdY = paneRect.top + 56;
       for (const item of outline) {
-        const el = previewContentEl.querySelector<HTMLElement>(`#${CSS.escape(item.slug)}`);
+        const el = previewContentEl.querySelector<HTMLElement>(`#${escapeId(item.slug)}`);
         if (!el) continue;
         if (el.getBoundingClientRect().top <= thresholdY) {
           currentSlug = item.slug;
@@ -179,7 +194,7 @@ export class SyncScrollController {
     }
 
     let prev = { line: 1, top: 0 };
-    let next = { line: editor.view.state.doc.lines, top: pvMax };
+    let next = { line: editor.view.state.doc.lines + 1, top: pvMax };
 
     for (const a of anchors) {
       if (a.top <= pvTop + 8) {

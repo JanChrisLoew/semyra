@@ -44,6 +44,7 @@ export interface PaletteCommandContext {
   onToggleLineEnding: () => void;
   onZoomDelta: (delta: number) => void;
   onZoomReset: () => void;
+  onOpenEditorSearch?: () => void;
   onOpenEditorReplace?: () => void;
   onOpenSearchPanel: () => void;
   onOpenOutlinePanel: () => void;
@@ -266,6 +267,17 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
       shortcut: 'Strg+0',
       run: ctx.onZoomReset,
     },
+    ...(ctx.onOpenEditorSearch
+      ? [
+          {
+            id: 'cmd:editor-search',
+            kind: 'command' as const,
+            label: 'Suche: Im Dokument suchen',
+            shortcut: 'Strg+F',
+            run: ctx.onOpenEditorSearch,
+          },
+        ]
+      : []),
     ...(ctx.onOpenEditorReplace
       ? [
           {

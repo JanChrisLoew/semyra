@@ -72,12 +72,11 @@
   width: 100%;
 }
 
-/* Zen Mode */
+/* Zen Mode: Pure distraction-free writing canvas */
+.app-shell.is-zen .top-chrome,
 .app-shell.is-zen .sidebar,
-.app-shell.is-zen .tab-strip-wrap,
-.app-shell.is-zen .format-bar,
 .app-shell.is-zen .status-bar {
-  display: none;
+  display: none !important;
 }
 
 /* CodeMirror 6 Host Styling */

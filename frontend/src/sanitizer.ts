@@ -297,11 +297,10 @@ function reconcileChildren(container: HTMLElement, staging: HTMLElement): void {
       const nextEl = nextNode as HTMLElement;
 
       if (curEl.tagName === nextEl.tagName && curEl.className === nextEl.className) {
-        // Preserve user's expand/collapse toggle state on YAML frontmatter card
+        // Preserve user's expand/collapse toggle state on <details> (frontmatter card or custom Markdown details)
         if (
           curEl instanceof HTMLDetailsElement &&
-          nextEl instanceof HTMLDetailsElement &&
-          curEl.classList.contains('frontmatter-card')
+          nextEl instanceof HTMLDetailsElement
         ) {
           nextEl.open = curEl.open;
         }

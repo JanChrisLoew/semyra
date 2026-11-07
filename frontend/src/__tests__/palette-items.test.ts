@@ -48,6 +48,7 @@ describe('palette-items', () => {
 
   it('reflects dynamic editor/document states in German command labels and badges', () => {
     const noop = vi.fn();
+    const onSearch = vi.fn();
     const cmds = buildPaletteCommandItems({
       wordWrapActive: true,
       spellcheckActive: false,
@@ -72,6 +73,7 @@ describe('palette-items', () => {
       onToggleLineEnding: noop,
       onZoomDelta: noop,
       onZoomReset: noop,
+      onOpenEditorSearch: onSearch,
       onOpenSearchPanel: noop,
       onOpenOutlinePanel: noop,
       onToggleZen: noop,
@@ -79,6 +81,13 @@ describe('palette-items', () => {
       onRevealInExplorer: noop,
       onShowShortcuts: noop,
     });
+
+    const searchCmd = cmds.find((c) => c.id === 'cmd:editor-search')!;
+    expect(searchCmd).toBeDefined();
+    expect(searchCmd.shortcut).toBe('Strg+F');
+    expect(searchCmd.label).toContain('Im Dokument suchen');
+    searchCmd.run();
+    expect(onSearch).toHaveBeenCalledTimes(1);
 
     const wrapCmd = cmds.find((c) => c.id === 'cmd:toggle-wrap')!;
     expect(wrapCmd.label).toContain('deaktivieren');

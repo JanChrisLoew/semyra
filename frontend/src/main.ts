@@ -40,6 +40,7 @@ interface OpenTab {
   previewScrollTop: number;
   outline: HeadingItem[];
   stats: DocStats;
+  hasExternalConflict?: boolean;
 }
 
 class MarkLiveApp {
@@ -211,6 +212,7 @@ class MarkLiveApp {
             onToggleLineEnding: () => this.toggleActiveTabLineEnding(),
             onZoomDelta: (delta) => this.setZoomPercent(this.zoomPercent + delta),
             onZoomReset: () => this.setZoomPercent(100),
+            onOpenEditorSearch: () => this.openEditorSearchPanel(),
             onOpenEditorReplace: () => this.openEditorReplacePanel(),
             onOpenSearchPanel: () => this.switchSidebarPanel('search'),
             onOpenOutlinePanel: () => this.switchSidebarPanel('outline'),
@@ -441,6 +443,22 @@ class MarkLiveApp {
     }
   }
 
+  private flushDraftSync(): void {
+    window.clearTimeout(this.draftSyncTimer);
+    this.draftSyncTimer = undefined;
+    const dirtyEntries: DraftEntry[] = this.tabs
+      .filter((t) => t.isDirty)
+      .map((t) => ({
+        name: t.name,
+        path: t.path,
+        parentDir: t.parentDir,
+        content: t.currentContent,
+        savedContent: t.savedContent,
+        lineEnding: t.lineEnding,
+      }));
+    void backend.saveDrafts(dirtyEntries).catch(() => {});
+  }
+
   private scheduleDraftSync(): void {
     window.clearTimeout(this.draftSyncTimer);
     this.draftSyncTimer = window.setTimeout(() => {
@@ -547,7 +565,12 @@ class MarkLiveApp {
     if (!target) return;
 
     this.activeTabId = tabId;
-    this.externalBannerEl.hidden = true;
+    if (target.hasExternalConflict && target.path) {
+      this.externalChangedPath = target.path;
+      this.externalBannerEl.hidden = false;
+    } else {
+      this.externalBannerEl.hidden = true;
+    }
     this.editor.swapState(target.editorState, target.editorScrollTop);
 
     this.renderTabBar();
@@ -645,6 +668,7 @@ class MarkLiveApp {
     tab.savedContent = tab.currentContent;
     tab.encoding = 'UTF-8';
     tab.isDirty = false;
+    tab.hasExternalConflict = false;
     this.pushRecentFile(tab.path);
     this.explorer.invalidateFilesCache();
 
@@ -699,7 +723,7 @@ class MarkLiveApp {
       this.renderTabBar();
     }
     this.syncWindowMetadata();
-    this.scheduleDraftSync();
+    this.flushDraftSync();
     this.schedulePrefsSave();
   }
 
@@ -724,6 +748,20 @@ class MarkLiveApp {
       }
     }
 
+    const remapPath = (p: string) => {
+      const pLower = p.toLowerCase();
+      if (pLower === oldLower) return newPath;
+      if (pLower.startsWith(oldPrefix)) {
+        return `${newPath}${p.slice(oldPath.length)}`;
+      }
+      return p;
+    };
+    this.recentFiles = this.recentFiles.map(remapPath);
+    this.recentFolders = this.recentFolders.map(remapPath);
+    if (!this.explorer.hasWorkspace) {
+      this.explorer.renderEmptyStateWithRecents(this.recentFolders, this.recentFiles);
+    }
+
     this.renderTabBar();
     this.updateStatusBar();
     this.syncWindowMetadata();
@@ -734,6 +772,16 @@ class MarkLiveApp {
   private handleExplorerEntryDeleted(deletedPath: string): void {
     const lowerTarget = deletedPath.toLowerCase();
     const prefix = `${lowerTarget}\\`;
+
+    const isDeleted = (p: string) => {
+      const pLower = p.toLowerCase();
+      return pLower === lowerTarget || pLower.startsWith(prefix);
+    };
+    this.recentFiles = this.recentFiles.filter((p) => !isDeleted(p));
+    this.recentFolders = this.recentFolders.filter((p) => !isDeleted(p));
+    if (!this.explorer.hasWorkspace) {
+      this.explorer.renderEmptyStateWithRecents(this.recentFolders, this.recentFiles);
+    }
 
     for (let i = this.tabs.length - 1; i >= 0; i--) {
       const t = this.tabs[i];
@@ -864,6 +912,7 @@ class MarkLiveApp {
       btn.textContent = item.text || 'Überschrift';
       btn.title = `Zeile ${item.line}: ${item.text}`;
       btn.addEventListener('click', () => {
+        this.syncScroll.lockScrollForNavigation('editor', 500);
         this.editor.jumpToLine(item.line);
         const headingEl = this.previewContentEl.querySelector<HTMLElement>(
           `#${CSS.escape(item.slug)}`,
@@ -1095,6 +1144,13 @@ class MarkLiveApp {
     }
   }
 
+  private openEditorSearchPanel(): void {
+    if (this.appEl.getAttribute('data-view') === 'preview') {
+      this.setViewMode('split');
+    }
+    this.editor.openSearch(false);
+  }
+
   private openEditorReplacePanel(): void {
     if (this.appEl.getAttribute('data-view') === 'preview') {
       this.setViewMode('split');
@@ -1280,7 +1336,16 @@ class MarkLiveApp {
     const toggleZen = () => this.appEl.classList.toggle('is-zen');
     document.getElementById('btn-zen')!.addEventListener('click', toggleZen);
 
-    document.getElementById('format-bar')!.addEventListener('click', (e) => {
+    const formatBarEl = document.getElementById('format-bar')!;
+    formatBarEl.addEventListener('pointerdown', (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-fmt]');
+      if (btn) {
+        // Prevent button from stealing focus and collapsing the active CodeMirror text selection
+        e.preventDefault();
+      }
+    });
+
+    formatBarEl.addEventListener('click', (e) => {
       const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-fmt]');
       if (!btn) return;
       const fmt = btn.dataset.fmt as FormatAction;
@@ -1465,11 +1530,14 @@ class MarkLiveApp {
     // External modification reload banner
     document.getElementById('btn-reload-external')!.addEventListener('click', async () => {
       this.externalBannerEl.hidden = true;
-      if (!this.externalChangedPath) return;
+      const targetPath = this.externalChangedPath;
+      this.externalChangedPath = null;
+      if (!targetPath) return;
       const tab = this.tabs.find(
-        (t) => t.path?.toLowerCase() === this.externalChangedPath?.toLowerCase(),
+        (t) => t.path?.toLowerCase() === targetPath.toLowerCase(),
       );
       if (tab && tab.path) {
+        tab.hasExternalConflict = false;
         const payload = await backend.readFile(tab.path);
         tab.savedContent = payload.content;
         tab.currentContent = payload.content;
@@ -1489,6 +1557,16 @@ class MarkLiveApp {
 
     document.getElementById('btn-dismiss-banner')!.addEventListener('click', () => {
       this.externalBannerEl.hidden = true;
+      if (this.activeTab) {
+        this.activeTab.hasExternalConflict = false;
+      }
+      if (this.externalChangedPath) {
+        const tab = this.tabs.find(
+          (t) => t.path?.toLowerCase() === this.externalChangedPath?.toLowerCase(),
+        );
+        if (tab) tab.hasExternalConflict = false;
+        this.externalChangedPath = null;
+      }
     });
 
     // Application-wide keyboard shortcuts in capture phase so CodeMirror's unshifted
@@ -1524,6 +1602,9 @@ class MarkLiveApp {
         } else if (mod && !e.altKey && e.shiftKey && key === 'p') {
           consume();
           this.palette.open('commands');
+        } else if (mod && !e.altKey && !e.shiftKey && key === 'f') {
+          consume();
+          this.openEditorSearchPanel();
         } else if (mod && !e.altKey && !e.shiftKey && key === 'h') {
           consume();
           this.openEditorReplacePanel();
@@ -1625,6 +1706,10 @@ class MarkLiveApp {
           if (disk.content === tab.currentContent) {
             tab.savedContent = disk.content;
             tab.isDirty = false;
+            tab.hasExternalConflict = false;
+            if (tab.id === this.activeTabId) {
+              this.externalBannerEl.hidden = true;
+            }
             this.renderTabBar();
             this.scheduleDraftSync();
             continue;
@@ -1634,14 +1719,19 @@ class MarkLiveApp {
             tab.currentContent = disk.content;
             tab.encoding = disk.encoding || 'UTF-8';
             tab.lineEnding = disk.lineEnding;
+            tab.hasExternalConflict = false;
             if (tab.id === this.activeTabId) {
+              this.externalBannerEl.hidden = true;
               this.editor.replaceAllContent(disk.content);
             } else {
               tab.editorState = this.editor.createState(disk.content);
             }
-          } else if (tab.id === this.activeTabId) {
-            this.externalChangedPath = tab.path;
-            this.externalBannerEl.hidden = false;
+          } else {
+            tab.hasExternalConflict = true;
+            if (tab.id === this.activeTabId) {
+              this.externalChangedPath = tab.path;
+              this.externalBannerEl.hidden = false;
+            }
           }
         } catch {
           // File may have been deleted or temporarily locked
