@@ -28,6 +28,10 @@ dirs = "5.0"
 base64 = "0.22"
 trash = "5.2"
 
+[target.'cfg(target_os = "windows")'.dependencies]
+webview2-com = "0.39"
+windows-core = "0.62"
+
 [build-dependencies]
 winresource = "0.1"
 

@@ -122,3 +122,126 @@
 .codemirror-host .cm-editor.cm-focused .cm-selectionBackground {
   background: color-mix(in srgb, var(--accent) 24%, transparent) !important;
 }
+
+/* Code Folding Gutter & Placeholder */
+.codemirror-host .cm-foldGutter .cm-gutterElement {
+  padding: 0 4px;
+  cursor: pointer;
+  color: var(--fg-muted);
+  user-select: none;
+  transition: color 120ms ease;
+}
+
+.codemirror-host .cm-foldGutter .cm-gutterElement:hover {
+  color: var(--fg-primary);
+}
+
+.codemirror-host .cm-foldPlaceholder {
+  background: var(--bg-active);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 0 6px;
+  margin: 0 4px;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+/* Windows 11 Fluent Search & Replace Panel (Strg+F / Strg+H) */
+.codemirror-host .cm-panels {
+  background: var(--bg-elevated);
+  color: var(--fg-primary);
+  border-bottom: 1px solid var(--border-subtle);
+  font-family: var(--font-sans);
+  z-index: 5;
+}
+
+.codemirror-host .cm-panels.cm-panels-top {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.codemirror-host .cm-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 8px 34px 8px 12px;
+  font-size: 12.5px;
+  position: relative;
+}
+
+.codemirror-host .cm-search input.cm-textfield {
+  height: 28px;
+  padding: 0 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-subtle);
+  color: var(--fg-primary);
+  font-family: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+
+.codemirror-host .cm-search input.cm-textfield:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.codemirror-host .cm-search button.cm-button {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-subtle);
+  background-image: none;
+  color: var(--fg-primary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-transform: none;
+}
+
+.codemirror-host .cm-search button.cm-button:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.codemirror-host .cm-search button.cm-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.codemirror-host .cm-search label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.codemirror-host .cm-search label input[type="checkbox"] {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.codemirror-host .cm-panel button[name="close"] {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  border: 0;
+  background: transparent;
+  color: var(--fg-secondary);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.codemirror-host .cm-panel button[name="close"]:hover {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+}

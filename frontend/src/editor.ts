@@ -11,6 +11,9 @@ import {
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import {
   bracketMatching,
+  foldGutter,
+  foldKeymap,
+  foldService,
   HighlightStyle,
   indentOnInput,
   syntaxHighlighting,
@@ -33,6 +36,12 @@ import {
   placeholder,
 } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
+import { germanCodeMirrorPhrases } from './editor-l10n-de';
+import {
+  convertClipboardToMarkdownTable,
+  formatTableAtCursorOrAll,
+  navigateMarkdownTableCell,
+} from './markdown-table';
 
 const markdownHighlightStyle = HighlightStyle.define([
   { tag: tags.heading1, fontWeight: '700', fontSize: '1.3em' },
@@ -153,9 +162,79 @@ export type FormatAction =
   | 'codeblock'
   | 'link'
   | 'image'
+  | 'align-table'
   | 'math'
   | 'mermaid'
   | 'hr';
+
+/**
+ * Fold service supporting YAML frontmatter (`--- ... ---`) at line 1 and
+ * hierarchical ATX Markdown heading sections (`#` .. `######`).
+ */
+const markdownSectionFoldService = foldService.of((state, lineStart) => {
+  const line = state.doc.lineAt(lineStart);
+
+  // 1. YAML Frontmatter at line 1
+  if (line.number === 1 && line.text.trim() === '---') {
+    const maxLine = Math.min(state.doc.lines, 160);
+    for (let l = 2; l <= maxLine; l++) {
+      const candidate = state.doc.line(l);
+      const t = candidate.text.trim();
+      if (t === '---' || t === '...') {
+        return { from: line.to, to: candidate.to };
+      }
+    }
+    return null;
+  }
+
+  // 2. ATX Heading section (`#` .. `######`) outside fenced code blocks
+  const headingMatch = /^(#{1,6})\s+\S/.exec(line.text);
+  if (!headingMatch) return null;
+
+  let node: ReturnType<ReturnType<typeof syntaxTree>['resolveInner']> | null =
+    syntaxTree(state).resolveInner(line.from, 1);
+  while (node) {
+    if (node.name === 'FencedCode' || node.name === 'CodeBlock') return null;
+    node = node.parent;
+  }
+
+  const level = headingMatch[1].length;
+  let endLineNum = line.number;
+  let inFence = false;
+  let fenceChar = '';
+
+  for (let l = line.number + 1; l <= state.doc.lines; l++) {
+    const cur = state.doc.line(l);
+    const fenceMatch = /^\s*(`{3,}|~{3,})/.exec(cur.text);
+    if (fenceMatch) {
+      const ch = fenceMatch[1][0];
+      if (!inFence) {
+        inFence = true;
+        fenceChar = ch;
+      } else if (ch === fenceChar) {
+        inFence = false;
+      }
+      endLineNum = l;
+      continue;
+    }
+
+    if (!inFence) {
+      const nextHeading = /^(#{1,6})\s+\S/.exec(cur.text);
+      if (nextHeading && nextHeading[1].length <= level) {
+        break;
+      }
+    }
+    endLineNum = l;
+  }
+
+  // Keep a clean blank separator line visible before the following heading
+  while (endLineNum > line.number && state.doc.line(endLineNum).text.trim() === '') {
+    endLineNum--;
+  }
+
+  if (endLineNum <= line.number) return null;
+  return { from: line.to, to: state.doc.line(endLineNum).to };
+});
 
 export class MarkdownEditorController {
   public view: EditorView;
@@ -237,9 +316,51 @@ export class MarkdownEditorController {
     return true;
   };
 
+  private handleTableTab =
+    (direction: 'next' | 'prev') =>
+    (view: EditorView): boolean => {
+      const { state } = view;
+      if (state.selection.ranges.length !== 1) return false;
+      const pos = state.selection.main.head;
+      if (this.isInsideCodeContext(state, pos)) return false;
+
+      const nav = navigateMarkdownTableCell(state.doc.toString(), pos, direction);
+      if (!nav) return false;
+
+      view.dispatch({
+        changes: nav.changes,
+        selection: nav.selection,
+        scrollIntoView: true,
+      });
+      return true;
+    };
+
+  public alignMarkdownTables(): number {
+    const { state } = this.view;
+    const pos = state.selection.main.head;
+    const patch = formatTableAtCursorOrAll(state.doc.toString(), pos);
+    if (!patch) return 0;
+
+    if (state.sliceDoc(patch.from, patch.to) !== patch.insert) {
+      const clampedAnchor = Math.min(pos, patch.from + patch.insert.length);
+      this.view.dispatch({
+        changes: { from: patch.from, to: patch.to, insert: patch.insert },
+        selection: { anchor: clampedAnchor },
+      });
+    }
+    this.view.focus();
+    return patch.formattedCount;
+  }
+
   private buildExtensions(): Extension {
     return [
+      EditorState.phrases.of(germanCodeMirrorPhrases),
       lineNumbers(),
+      foldGutter({
+        openText: '▾',
+        closedText: '▸',
+      }),
+      markdownSectionFoldService,
       highlightActiveLineGutter(),
       highlightActiveLine(),
       history(),
@@ -259,6 +380,18 @@ export class MarkdownEditorController {
         {
           key: 'Enter',
           run: this.handleSmartEnter,
+        },
+        {
+          key: 'Tab',
+          run: this.handleTableTab('next'),
+          shift: this.handleTableTab('prev'),
+        },
+        {
+          key: 'Alt-Shift-f',
+          run: () => {
+            this.alignMarkdownTables();
+            return true;
+          },
         },
         {
           key: 'Mod-b',
@@ -341,6 +474,7 @@ export class MarkdownEditorController {
         ...closeBracketsKeymap,
         ...defaultKeymap,
         ...searchKeymap,
+        ...foldKeymap,
         ...historyKeymap,
       ]),
       EditorView.updateListener.of((update) => {
@@ -380,19 +514,36 @@ export class MarkdownEditorController {
 
           // Smart URL paste over selected single-line text -> [selected](url)
           const plain = event.clipboardData?.getData('text/plain');
-          if (plain) {
-            const range = view.state.selection.main;
-            if (!range.empty) {
-              const selected = view.state.sliceDoc(range.from, range.to);
-              const mdLink = formatSmartUrlPaste(selected, plain);
-              if (mdLink) {
-                event.preventDefault();
-                view.dispatch({
-                  changes: { from: range.from, to: range.to, insert: mdLink },
-                  selection: { anchor: range.from + mdLink.length },
-                });
-                return true;
-              }
+          const range = view.state.selection.main;
+          if (plain && !range.empty) {
+            const selected = view.state.sliceDoc(range.from, range.to);
+            const mdLink = formatSmartUrlPaste(selected, plain);
+            if (mdLink) {
+              event.preventDefault();
+              view.dispatch({
+                changes: { from: range.from, to: range.to, insert: mdLink },
+                selection: { anchor: range.from + mdLink.length },
+              });
+              return true;
+            }
+          }
+
+          // Smart HTML <table> / TSV spreadsheet paste -> aligned GFM Markdown table
+          if (!this.isInsideCodeContext(view.state, range.from)) {
+            const html = event.clipboardData?.getData('text/html');
+            const mdTable = convertClipboardToMarkdownTable(html, plain);
+            if (mdTable) {
+              event.preventDefault();
+              const lineBefore = view.state.doc.lineAt(range.from);
+              const needsLeadingNl = range.from > lineBefore.from;
+              const prefix = needsLeadingNl ? '\n' : '';
+              const insert = `${prefix}${mdTable}\n`;
+              view.dispatch({
+                changes: { from: range.from, to: range.to, insert },
+                selection: { anchor: range.from + insert.length },
+                scrollIntoView: true,
+              });
+              return true;
             }
           }
           return false;
@@ -619,6 +770,9 @@ export class MarkdownEditorController {
       }
       case 'image':
         this.insertSnippet(`![${selected || 'Bildbeschreibung'}](./bild.png)`);
+        break;
+      case 'align-table':
+        this.alignMarkdownTables();
         break;
       case 'math':
         this.insertSnippet(`\n$$\n\\int_0^\\infty e^{-x^2}\\,dx = \\frac{\\sqrt{\\pi}}{2}\n$$\n`);

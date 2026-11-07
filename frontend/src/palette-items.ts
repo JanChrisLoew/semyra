@@ -31,8 +31,11 @@ export interface PaletteCommandContext {
   onOpenFolderDialog: () => Promise<void> | void;
   onSave: () => void;
   onSaveAs: () => void;
+  onCopyRichText: () => void;
   onExportHtml: () => void;
+  onExportPdf: () => void;
   onPrint: () => void;
+  onAlignTable: () => void;
   onSetViewMode: (mode: 'editor' | 'split' | 'preview') => void;
   onToggleWordWrap: () => void;
   onToggleSpellcheck: () => void;
@@ -151,17 +154,38 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
       run: ctx.onSaveAs,
     },
     {
+      id: 'cmd:copy-rich',
+      kind: 'command',
+      label: 'Zwischenablage: Als formatierten Text kopieren (Word, Teams, Outlook)',
+      shortcut: 'Strg+Umschalt+K',
+      run: ctx.onCopyRichText,
+    },
+    {
       id: 'cmd:export-html',
       kind: 'command',
-      label: 'Export: Als eigenständige HTML-Datei exportieren…',
+      label: 'Export: Als eigenständige 1-Datei-HTML exportieren…',
       run: ctx.onExportHtml,
+    },
+    {
+      id: 'cmd:export-pdf',
+      kind: 'command',
+      label: 'Export: Direkt als PDF-Datei exportieren…',
+      shortcut: 'Strg+Alt+P',
+      run: ctx.onExportPdf,
     },
     {
       id: 'cmd:print',
       kind: 'command',
-      label: 'Export: Drucken / Als PDF speichern…',
+      label: 'Export: Drucken…',
       shortcut: 'Strg+P',
       run: ctx.onPrint,
+    },
+    {
+      id: 'cmd:align-table',
+      kind: 'command',
+      label: 'Editor: Markdown-Tabelle ausrichten',
+      shortcut: 'Alt+Umschalt+F',
+      run: ctx.onAlignTable,
     },
     {
       id: 'cmd:view-split',

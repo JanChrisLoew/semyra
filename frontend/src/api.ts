@@ -188,11 +188,19 @@ export const backend = {
     markdown: string,
     baseDir: string | null,
     defaultDir: string | null,
+    renderedHtml?: string,
   ) =>
     postJson<{ exported: boolean; path?: string }>('dialog/export-html', {
       title,
       markdown,
       baseDir,
+      defaultDir,
+      renderedHtml,
+    }),
+
+  exportPdfDialog: (title: string, defaultDir: string | null) =>
+    postJson<{ exported: boolean; path?: string }>('dialog/export-pdf', {
+      title,
       defaultDir,
     }),
 

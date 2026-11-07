@@ -21,6 +21,10 @@ pub enum UserEvent {
         files: Vec<String>,
         folder: Option<String>,
     },
+    ExportPdf {
+        target_path: PathBuf,
+        done_tx: std::sync::mpsc::SyncSender<Result<(), String>>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]

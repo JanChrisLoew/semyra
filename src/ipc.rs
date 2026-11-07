@@ -1,9 +1,10 @@
 use crate::drafts::{clear_recovery_snapshot, save_recovery_snapshot, DraftEntry};
 use crate::fs_ops::{
     build_directory_tree, build_standalone_html_document, clean_windows_path, create_new_folder,
-    create_new_markdown_file, import_dropped_image, list_workspace_markdown_files,
-    move_to_recycle_bin, normalize_existing_path, read_text_file, rename_fs_entry,
-    reveal_in_explorer, save_clipboard_image, search_workspace_files, write_text_file,
+    create_new_markdown_file, import_dropped_image, inline_local_asset_images,
+    list_workspace_markdown_files, move_to_recycle_bin, normalize_existing_path, read_text_file,
+    rename_fs_entry, reveal_in_explorer, save_clipboard_image, search_workspace_files,
+    write_text_file,
 };
 use crate::markdown::render_markdown;
 use crate::state::{AppState, UserEvent};
@@ -107,7 +108,15 @@ struct SaveDialogReq {
 struct ExportHtmlReq {
     title: String,
     markdown: String,
+    rendered_html: Option<String>,
     base_dir: Option<String>,
+    default_dir: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportPdfReq {
+    title: String,
     default_dir: Option<String>,
 }
 
@@ -739,9 +748,21 @@ fn handle_api_route(
                 }
 
                 if let Some(chosen) = dlg.save_file() {
-                    let base = req.base_dir.as_deref().map(Path::new);
-                    let rendered = render_markdown(&req.markdown, base);
-                    let doc = build_standalone_html_document(stem, &rendered.html);
+                    let raw_body = match req
+                        .rendered_html
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                    {
+                        Some(client_html) => client_html.to_string(),
+                        None => {
+                            let base = req.base_dir.as_deref().map(Path::new);
+                            render_markdown(&req.markdown, base).html
+                        }
+                    };
+                    let self_contained_body =
+                        inline_local_asset_images(&raw_body, |p| state.is_local_asset_allowed(p));
+                    let doc = build_standalone_html_document(stem, &self_contained_body);
                     match write_text_file(&chosen, &doc, true) {
                         Ok(saved_path) => responder.respond(ok_json(&serde_json::json!({
                             "exported": true,
@@ -750,6 +771,80 @@ fn handle_api_route(
                         Err(err) => {
                             responder.respond(err_json(StatusCode::INTERNAL_SERVER_ERROR, err))
                         }
+                    }
+                } else {
+                    responder.respond(ok_json(&serde_json::json!({ "exported": false })));
+                }
+            });
+        }
+
+        "dialog/export-pdf" => {
+            let Ok(req) = serde_json::from_slice::<ExportPdfReq>(&body) else {
+                responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige PDF-Export-Anfrage"));
+                return;
+            };
+            std::thread::spawn(move || {
+                let stem = Path::new(&req.title)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("Dokument");
+                let pdf_name = format!("{stem}.pdf");
+                let start_dir = req
+                    .default_dir
+                    .as_ref()
+                    .map(PathBuf::from)
+                    .or_else(|| {
+                        state
+                            .inner
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.workspace_folder.clone())
+                    })
+                    .or_else(dirs::document_dir);
+
+                let mut dlg = rfd::FileDialog::new()
+                    .set_title("Als PDF exportieren")
+                    .set_file_name(&pdf_name)
+                    .add_filter("PDF-Dokument (*.pdf)", &["pdf"]);
+
+                if let Some(dir) = start_dir {
+                    dlg = dlg.set_directory(dir);
+                }
+
+                if let Some(chosen) = dlg.save_file() {
+                    let cleaned = clean_windows_path(&chosen);
+                    let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
+                    if state
+                        .proxy
+                        .send_event(UserEvent::ExportPdf {
+                            target_path: cleaned.clone(),
+                            done_tx,
+                        })
+                        .is_err()
+                    {
+                        responder.respond(err_json(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Hauptfenster konnte für den PDF-Export nicht erreicht werden.",
+                        ));
+                        return;
+                    }
+
+                    match done_rx.recv_timeout(std::time::Duration::from_secs(30)) {
+                        Ok(Ok(())) => {
+                            let final_path =
+                                normalize_existing_path(&cleaned).to_string_lossy().into_owned();
+                            responder.respond(ok_json(&serde_json::json!({
+                                "exported": true,
+                                "path": final_path
+                            })));
+                        }
+                        Ok(Err(err)) => {
+                            responder.respond(err_json(StatusCode::INTERNAL_SERVER_ERROR, err))
+                        }
+                        Err(_) => responder.respond(err_json(
+                            StatusCode::GATEWAY_TIMEOUT,
+                            "Zeitüberschreitung beim Erstellen der PDF-Datei.",
+                        )),
                     }
                 } else {
                     responder.respond(ok_json(&serde_json::json!({ "exported": false })));

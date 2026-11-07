@@ -492,6 +492,54 @@ fn main() {
                     .to_string();
                     dispatch_frontend_event(&webview, "files-dropped", &payload);
                 }
+                UserEvent::ExportPdf {
+                    target_path,
+                    done_tx,
+                } => {
+                    #[cfg(target_os = "windows")]
+                    {
+                        use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_7;
+                        use webview2_com::PrintToPdfCompletedHandler;
+                        use windows_core::{Interface, HSTRING};
+                        use wry::WebViewExtWindows;
+
+                        match webview.webview().cast::<ICoreWebView2_7>() {
+                            Ok(wv7) => {
+                                let path_hstr = HSTRING::from(target_path.as_os_str());
+                                let tx_cb = done_tx.clone();
+                                let handler = PrintToPdfCompletedHandler::create(Box::new(
+                                    move |hr, ok| {
+                                        if hr.is_ok() && ok {
+                                            let _ = tx_cb.send(Ok(()));
+                                        } else {
+                                            let _ = tx_cb.send(Err(
+                                                "PDF-Erstellung durch WebView2 fehlgeschlagen."
+                                                    .to_string(),
+                                            ));
+                                        }
+                                        Ok(())
+                                    },
+                                ));
+                                let res = unsafe { wv7.PrintToPdf(&path_hstr, None, &handler) };
+                                if let Err(e) = res {
+                                    let _ = done_tx.send(Err(format!(
+                                        "PDF-Export konnte nicht gestartet werden: {e}"
+                                    )));
+                                }
+                            }
+                            Err(e) => {
+                                let _ = done_tx.send(Err(format!(
+                                    "WebView2 unterstützt direkten PDF-Export nicht: {e}"
+                                )));
+                            }
+                        }
+                    }
+                    #[cfg(not(target_os = "windows"))]
+                    {
+                        let _ = target_path;
+                        let _ = done_tx.send(Err("PDF-Export wird nur unter Windows unterstützt.".to_string()));
+                    }
+                }
             },
 
             _ => {}

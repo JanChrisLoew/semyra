@@ -6,7 +6,7 @@ pub mod workspace;
 
 pub use assets::{import_dropped_image, save_clipboard_image};
 pub use encoding::{read_text_file, write_text_file};
-pub use html_export::build_standalone_html_document;
+pub use html_export::{build_standalone_html_document, inline_local_asset_images};
 pub use search::search_workspace_files;
 pub use workspace::{
     build_directory_tree, create_new_folder, create_new_markdown_file,

@@ -10,10 +10,11 @@ import {
   UiSessionPrefs,
 } from './api';
 import { FormatAction, MarkdownEditorController } from './editor';
+import { copyRichPreviewToClipboard, preparePreviewHtmlForExport } from './export-utils';
 import { bindRovingHorizontalKeyNav, syncRovingTabindex } from './navigation-a11y';
 import { CommandPaletteController } from './palette';
 import { buildPaletteCommandItems, buildPaletteFileItems } from './palette-items';
-import { parentDirOfPath, resolveRelativeMarkdownPath } from './path-utils';
+import { baseNameOfPath, parentDirOfPath, resolveRelativeMarkdownPath } from './path-utils';
 import { installProgressiveEnhancements } from './polyfills';
 import { safeSetMarkdownHTML } from './sanitizer';
 import { SidebarExplorerController } from './sidebar-explorer';
@@ -63,6 +64,7 @@ class MarkLiveApp {
   private autoSaveTimer: number | undefined;
   private draftSyncTimer: number | undefined;
   private prefsSyncTimer: number | undefined;
+  private toastTimer: number | undefined;
   private renderSeq = 0;
   private externalChangedPath: string | null = null;
 
@@ -81,6 +83,7 @@ class MarkLiveApp {
   private statusZoomBtn = document.getElementById('status-zoom') as HTMLButtonElement;
   private statusEolBtn = document.getElementById('status-eol') as HTMLButtonElement;
   private statusEncodingEl = document.getElementById('status-encoding')!;
+  private statusToastEl = document.getElementById('status-toast')!;
   private dropOverlayEl = document.getElementById('drop-overlay')!;
   private externalBannerEl = document.getElementById('external-banner')!;
 
@@ -181,8 +184,17 @@ class MarkLiveApp {
             onSaveAs: () => {
               if (this.activeTab) void this.saveTab(this.activeTab, true);
             },
-            onExportHtml: () => this.exportCurrentTabHtml(),
+            onCopyRichText: () => {
+              void this.copyCurrentTabRichText();
+            },
+            onExportHtml: () => {
+              void this.exportCurrentTabHtml();
+            },
+            onExportPdf: () => {
+              void this.exportCurrentTabPdf();
+            },
             onPrint: () => window.print(),
+            onAlignTable: () => this.alignActiveMarkdownTables(),
             onSetViewMode: (mode) => this.setViewMode(mode),
             onToggleWordWrap: () => this.toggleWordWrap(),
             onToggleSpellcheck: () => {
@@ -1040,11 +1052,92 @@ class MarkLiveApp {
     }
   }
 
-  private exportCurrentTabHtml(): void {
+  private showToast(message: string): void {
+    // Never mutate the polite live region while a modal dialog makes outside DOM inert
+    if (document.querySelector('dialog[open]')) return;
+    window.clearTimeout(this.toastTimer);
+    this.statusToastEl.textContent = message;
+    this.statusToastEl.classList.add('is-visible');
+    this.toastTimer = window.setTimeout(() => {
+      this.statusToastEl.classList.remove('is-visible');
+      this.statusToastEl.textContent = '';
+    }, 2800);
+  }
+
+  private async flushActivePreviewRender(): Promise<void> {
+    const tab = this.activeTab;
+    if (!tab) return;
+    if (this.renderDebounceTimer !== undefined) {
+      window.clearTimeout(this.renderDebounceTimer);
+      this.renderDebounceTimer = undefined;
+      await this.renderPreviewImmediate(
+        tab.currentContent,
+        tab.parentDir ?? this.explorer.rootPath,
+      );
+    }
+  }
+
+  private alignActiveMarkdownTables(): void {
+    const count = this.editor.alignMarkdownTables();
+    if (count > 0) {
+      this.showToast(
+        count === 1 ? 'Markdown-Tabelle ausgerichtet' : `${count} Markdown-Tabellen ausgerichtet`,
+      );
+    } else {
+      this.showToast('Keine Markdown-Tabelle im Dokument gefunden');
+    }
+  }
+
+  private async copyCurrentTabRichText(): Promise<void> {
+    const tab = this.activeTab;
+    if (!tab) return;
+    try {
+      await this.flushActivePreviewRender();
+      await copyRichPreviewToClipboard(this.previewContentEl, tab.currentContent);
+      this.showToast('Als formatierter Text in die Zwischenablage kopiert');
+    } catch (err) {
+      console.error('Formatierter Text konnte nicht kopiert werden:', err);
+      this.showToast('Kopieren in die Zwischenablage fehlgeschlagen');
+    }
+  }
+
+  private async exportCurrentTabHtml(): Promise<void> {
     const tab = this.activeTab;
     if (!tab) return;
     const baseDir = tab.parentDir ?? this.explorer.rootPath;
-    void backend.exportHtmlDialog(tab.name, tab.currentContent, baseDir, baseDir);
+    try {
+      await this.flushActivePreviewRender();
+      const renderedHtml = preparePreviewHtmlForExport(this.previewContentEl);
+      const res = await backend.exportHtmlDialog(
+        tab.name,
+        tab.currentContent,
+        baseDir,
+        baseDir,
+        renderedHtml,
+      );
+      if (res.exported && res.path) {
+        this.showToast(`HTML exportiert: ${baseNameOfPath(res.path)}`);
+      }
+    } catch (err) {
+      console.error('HTML-Export fehlgeschlagen:', err);
+      this.showToast('HTML-Export fehlgeschlagen');
+    }
+  }
+
+  private async exportCurrentTabPdf(): Promise<void> {
+    const tab = this.activeTab;
+    if (!tab) return;
+    const baseDir = tab.parentDir ?? this.explorer.rootPath;
+    try {
+      await this.flushActivePreviewRender();
+      const res = await backend.exportPdfDialog(tab.name, baseDir);
+      if (res.exported && res.path) {
+        this.showToast(`PDF exportiert: ${baseNameOfPath(res.path)}`);
+      }
+    } catch (err) {
+      console.error('PDF-Export fehlgeschlagen:', err);
+      this.showToast('PDF-Export fehlgeschlagen');
+    }
   }
 
   private bindUIEvents(): void {
@@ -1076,8 +1169,16 @@ class MarkLiveApp {
       if (this.activeTab) void this.saveTab(this.activeTab, true);
     });
 
+    document.getElementById('btn-copy-rich')!.addEventListener('click', () => {
+      void this.copyCurrentTabRichText();
+    });
+
     document.getElementById('btn-export-html')!.addEventListener('click', () => {
-      this.exportCurrentTabHtml();
+      void this.exportCurrentTabHtml();
+    });
+
+    document.getElementById('btn-export-pdf')!.addEventListener('click', () => {
+      void this.exportCurrentTabPdf();
     });
 
     document.getElementById('btn-print')!.addEventListener('click', () => {
@@ -1106,7 +1207,12 @@ class MarkLiveApp {
     document.getElementById('format-bar')!.addEventListener('click', (e) => {
       const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-fmt]');
       if (!btn) return;
-      this.editor.applyFormat(btn.dataset.fmt as FormatAction);
+      const fmt = btn.dataset.fmt as FormatAction;
+      if (fmt === 'align-table') {
+        this.alignActiveMarkdownTables();
+      } else {
+        this.editor.applyFormat(fmt);
+      }
     });
 
     const tableDialog = document.getElementById('table-dialog') as HTMLDialogElement;
@@ -1338,7 +1444,13 @@ class MarkLiveApp {
       } else if (mod && e.shiftKey && key === 's') {
         e.preventDefault();
         if (this.activeTab) void this.saveTab(this.activeTab, true);
-      } else if (mod && !e.shiftKey && key === 'p') {
+      } else if (mod && e.shiftKey && !e.altKey && key === 'k') {
+        e.preventDefault();
+        void this.copyCurrentTabRichText();
+      } else if (mod && e.altKey && !e.shiftKey && key === 'p') {
+        e.preventDefault();
+        void this.exportCurrentTabPdf();
+      } else if (mod && !e.shiftKey && !e.altKey && key === 'p') {
         e.preventDefault();
         window.print();
       } else if (mod && key === 'w') {

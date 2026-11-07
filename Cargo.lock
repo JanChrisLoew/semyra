@@ -1390,7 +1390,9 @@ dependencies = [
  "syntect",
  "tao",
  "trash",
+ "webview2-com",
  "window-vibrancy",
+ "windows-core",
  "winresource",
  "wry",
 ]

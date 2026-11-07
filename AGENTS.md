@@ -5,8 +5,8 @@ MarkLive is a native **Windows 11 x64 Markdown editor with live preview**, compi
 ## 1. Architecture Overview
 
 - **Native Rust Host (`src/`)**:
-  - `src/main.rs`: Win32 `tao` event loop, `wry` Edge WebView2 host (`https://marklive.localhost`), Windows 11 Mica backdrop (`window-vibrancy`), multi-monitor window bounds restoration, Explorer file/image/folder drag-and-drop, and `notify` filesystem watcher.
-  - `src/ipc.rs`: Asynchronous custom-protocol router (`with_asynchronous_custom_protocol("marklive", ...)`). Serves embedded static assets via `rust-embed` (`#[folder = "frontend/dist"]`) and handles JSON RPC endpoints under `/api/*`. Heavy CPU and disk routes (`render`, `read-file`, `write-file`, `list-tree`, `workspace-files`, `search-workspace`, `drafts/save`, `/api/local-asset`) MUST run off the Win32 UI thread (`std::thread::spawn` + `responder.respond(...)`). Only native `rfd` OS dialogs and `tao` window mutations run on the main thread.
+  - `src/main.rs`: Win32 `tao` event loop, `wry` Edge WebView2 host (`https://marklive.localhost`), direct native PDF export (`ICoreWebView2_7::PrintToPdf`), Windows 11 Mica backdrop (`window-vibrancy`), multi-monitor window bounds restoration, Explorer file/image/folder drag-and-drop, and `notify` filesystem watcher.
+  - `src/ipc.rs`: Asynchronous custom-protocol router (`with_asynchronous_custom_protocol("marklive", ...)`). Serves embedded static assets via `rust-embed` (`#[folder = "frontend/dist"]`) and handles JSON RPC endpoints under `/api/*`. Heavy CPU and disk routes (`render`, `read-file`, `write-file`, `list-tree`, `workspace-files`, `search-workspace`, `drafts/save`, `/api/local-asset`) MUST run off the Win32 UI thread (`std::thread::spawn` + `responder.respond(...)`). Native `rfd` OS dialogs also run off the UI thread while `tao`/WebView2 window operations execute via `EventLoopProxy<UserEvent>`.
   - `src/markdown.rs`: `pulldown-cmark` + `syntect` GFM pipeline (tables, task checkboxes with `data-task-line`, GitHub alerts `[!NOTE]`..`[!CAUTION]`, footnotes, YAML frontmatter cards, inline/display math placeholders, Mermaid placeholders, `data-line` scroll-sync anchors, heading outline & reading-time stats).
   - `src/fs_ops/`: Modular filesystem & export subsystem:
     - `mod.rs`: Path canonicalization (`clean_windows_path`, `normalize_existing_path`), Markdown/image extension filters, and `explorer.exe /select,` integration.
@@ -14,16 +14,17 @@ MarkLive is a native **Windows 11 x64 Markdown editor with live preview**, compi
     - `workspace.rs`: Directory tree builder, Quick-Open file indexer, safe file/subfolder creation, rename, and Windows Recycle Bin deletion (`trash`).
     - `search.rs`: Workspace full-text search across Markdown documents.
     - `assets.rs`: Clipboard (`data:image/...;base64`) and dropped image importer into `./assets/`.
-    - `html_export.rs`: Self-contained dark/light standalone HTML exporter.
+    - `html_export.rs`: True 1-file dark/light standalone HTML exporter (preserving rendered MathML & Mermaid SVGs and base64-inlining allowed local images).
   - `src/single_instance.rs`: Named Win32 mutex (`Local\MarkLive_SingleInstance_v1`) + localhost IPC handoff so Explorer file launches open as tabs in the existing window (`--new-window` bypasses single-instance to spawn an independent window with a per-PID WebView2 profile).
   - `src/icon_gen.rs` & `build.rs`: Shared multi-DPI (`16, 32, 48, 256` px) procedural icon generator used for both the PE `.exe` resource (`winres`) and the runtime window icon.
 
 - **Modular TypeScript / Vite Frontend (`frontend/src/`)**:
-  - `main.ts`: Application shell orchestrating tab lifecycle, editor/live-preview coordination, session & crash-draft persistence, document outline, status bar, split resizer, and global shortcuts.
+  - `main.ts`: Application shell orchestrating tab lifecycle, editor/live-preview coordination, HTML/PDF/Rich-Text export actions, polite status toast (`#status-toast`), session & crash-draft persistence, document outline, status bar, split resizer, and global shortcuts.
   - `sidebar-explorer.ts`: Workspace directory tree, empty-state recent folders/files view, context menu popover, file/folder creation & rename dialog, and Recycle Bin confirmation.
   - `workspace-search.ts`: Debounced, sequence-guarded full-text workspace search panel.
   - `palette.ts` & `palette-items.ts`: Fuzzy-matched Quick-Open (`Strg+E`) & Command Palette (`Strg+Umschalt+P` / `>`) controller and decoupled, unit-tested item builders.
-  - `editor.ts`: CodeMirror 6 controller with dynamic `Compartment`s (`wordWrap`, `spellcheck`), smart Markdown list/task/blockquote `Enter` continuation, and smart URL paste over selected text.
+  - `editor.ts`, `editor-l10n-de.ts` & `markdown-table.ts`: CodeMirror 6 controller with German UI localization (`phrases`), section/YAML/code folding (`foldGutter` + `foldService`), dynamic `Compartment`s (`wordWrap`, `spellcheck`), smart Markdown list/task/blockquote `Enter` continuation, GFM table `Tab`/`Shift+Tab` cell navigation & pipe alignment, and smart URL / HTML `<table>` / TSV clipboard conversion.
+  - `export-utils.ts`: Live-preview HTML serializer and Office/Teams/Outlook-ready Rich-Text clipboard builder (`ClipboardItem` with inline structural styles and base64-inlined local assets).
   - `sanitizer.ts`: Capability-probed HTML sanitization (`setHTML` self-test with `DOMPurify` fallback), LRU-cached KaTeX & lazy-loaded Mermaid rendering, and incremental DOM reconciliation (`reconcileChildren`) that preserves unchanged nodes and `<details>` open state.
   - `sync-scroll.ts`: Bidirectional fractional `[data-line]` scroll synchronization and active TOC section tracking.
   - `theme.ts`, `path-utils.ts`, `polyfills.ts`, `navigation-a11y.ts`: Win32/CSS theme synchronization, Windows/relative Markdown path helpers, progressive-enhancement polyfills, and roving `tabindex` keyboard navigation.
