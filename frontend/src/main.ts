@@ -1059,6 +1059,16 @@ class MarkLiveApp {
     if (revealBtn) revealBtn.disabled = !tab.path;
     if (copyPathBtn) copyPathBtn.disabled = !tab.path;
 
+    const closeOthersBtn = this.tabContextMenuEl.querySelector<HTMLButtonElement>(
+      '[data-tab-ctx="close-others"]',
+    );
+    const closeRightBtn = this.tabContextMenuEl.querySelector<HTMLButtonElement>(
+      '[data-tab-ctx="close-to-right"]',
+    );
+    const tabIdx = this.tabs.findIndex((t) => t.id === tabId);
+    if (closeOthersBtn) closeOthersBtn.disabled = this.tabs.length <= 1;
+    if (closeRightBtn) closeRightBtn.disabled = tabIdx === -1 || tabIdx >= this.tabs.length - 1;
+
     this.tabContextMenuEl.style.left = `${e.clientX}px`;
     this.tabContextMenuEl.style.top = `${e.clientY}px`;
     this.tabContextMenuEl.showPopover?.();
