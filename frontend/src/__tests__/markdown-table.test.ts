@@ -8,11 +8,12 @@ import {
 } from '../markdown-table';
 
 describe('markdown-table', () => {
-  it('splits pipe rows while preserving escaped pipes', () => {
+  it('splits pipe rows while preserving escaped pipes and trailing double-backslashes', () => {
     expect(splitMarkdownTableRow('| Befehl | Syntax `a \\| b` |')).toEqual([
       'Befehl',
       'Syntax `a \\| b`',
     ]);
+    expect(splitMarkdownTableRow('| Pfad | C:\\Temp\\\\|')).toEqual(['Pfad', 'C:\\Temp\\\\']);
     expect(splitMarkdownTableRow('Normaler Absatz ohne Pipe')).toBeNull();
     expect(splitMarkdownTableRow('```rust')).toBeNull();
   });

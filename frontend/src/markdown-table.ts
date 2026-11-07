@@ -51,10 +51,10 @@ export function splitMarkdownTableRow(line: string): string[] | null {
   parts.push(trimmed.slice(start));
 
   // Strip optional leading and trailing outer pipes (`| a | b |` -> `[' a ', ' b ']`)
-  if (trimmed.startsWith('|')) {
+  if (pipePositions[0] === 0) {
     parts.shift();
   }
-  if (trimmed.endsWith('|') && !trimmed.endsWith('\\|')) {
+  if (pipePositions[pipePositions.length - 1] === trimmed.length - 1) {
     parts.pop();
   }
 
@@ -329,10 +329,7 @@ function computeRowCellSpans(
   const firstNonWs = lineText.search(/\S/);
   const lastNonWs = lineText.trimEnd().length - 1;
   const hasLeadingPipe = firstNonWs !== -1 && pipes[0] === firstNonWs;
-  const hasTrailingPipe =
-    lastNonWs >= 0 &&
-    pipes[pipes.length - 1] === lastNonWs &&
-    !lineText.slice(0, lastNonWs + 1).endsWith('\\|');
+  const hasTrailingPipe = lastNonWs >= 0 && pipes[pipes.length - 1] === lastNonWs;
 
   const boundaries: number[] = [];
   if (!hasLeadingPipe) {

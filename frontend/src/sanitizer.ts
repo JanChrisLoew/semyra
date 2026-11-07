@@ -119,6 +119,7 @@ function isDarkColorSchemeActive(): boolean {
 export async function safeSetMarkdownHTML(
   container: HTMLElement,
   rawHtml: string,
+  options?: { forceLightTheme?: boolean },
 ): Promise<void> {
   const staging = document.createElement('div') as HTMLElement & ElementWithSetHTML;
   let insertedViaNative = false;
@@ -173,14 +174,18 @@ export async function safeSetMarkdownHTML(
   // Lazy-load and cache Mermaid diagrams offscreen before reconciling into live DOM
   const mermaidNodes = staging.querySelectorAll<HTMLElement>('.mermaid-wrapper[data-mermaid]');
   if (mermaidNodes.length > 0) {
-    await renderMermaidBlocksCached(mermaidNodes);
+    await renderMermaidBlocksCached(mermaidNodes, Boolean(options?.forceLightTheme));
   }
 
   reconcileChildren(container, staging);
 }
 
-async function renderMermaidBlocksCached(nodes: NodeListOf<HTMLElement>): Promise<void> {
-  const theme: 'dark' | 'default' = isDarkColorSchemeActive() ? 'dark' : 'default';
+async function renderMermaidBlocksCached(
+  nodes: NodeListOf<HTMLElement>,
+  forceLightTheme = false,
+): Promise<void> {
+  const theme: 'dark' | 'default' =
+    !forceLightTheme && isDarkColorSchemeActive() ? 'dark' : 'default';
 
   // Fast-path: check if every Mermaid diagram in this document is already cached
   let hasUncached = false;

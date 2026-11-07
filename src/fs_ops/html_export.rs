@@ -189,7 +189,9 @@ pub fn build_standalone_html_document(title: &str, rendered_body_html: &str) -> 
     .align-left {{ text-align: left !important; }}
     .align-center {{ text-align: center !important; }}
     .align-right {{ text-align: right !important; }}
+    .katex-html {{ display: none !important; }}
     .math-display {{ margin: 1.1em 0; padding: 0.6em 0; overflow-x: auto; text-align: center; }}
+    .math-display math, math[display="block"] {{ display: block; font-size: 1.12em; }}
     .mermaid-wrapper {{ margin: 1.2em 0; padding: 1rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); text-align: center; overflow-x: auto; }}
     .mermaid-wrapper svg {{ max-width: 100%; height: auto; }}
     img {{ max-width: 100%; height: auto; border-radius: 6px; }}

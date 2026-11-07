@@ -99,6 +99,9 @@ class MarkLiveApp {
       onPasteImage: (mimeType, dataUrl) => {
         void this.handlePasteImage(mimeType, dataUrl);
       },
+      onCopyRichText: () => {
+        void this.copyCurrentTabRichText();
+      },
     });
 
     this.syncScroll = new SyncScrollController({
@@ -793,6 +796,7 @@ class MarkLiveApp {
     markdown: string,
     baseDir: string | null,
     restoreScrollTop?: number,
+    forceLightTheme = false,
   ): Promise<void> {
     const seq = ++this.renderSeq;
     try {
@@ -805,7 +809,7 @@ class MarkLiveApp {
         tab.stats = res.stats;
       }
 
-      await safeSetMarkdownHTML(this.previewContentEl, res.html);
+      await safeSetMarkdownHTML(this.previewContentEl, res.html, { forceLightTheme });
       this.renderOutline(res.outline);
       this.updateStatusBar();
 
@@ -1088,12 +1092,61 @@ class MarkLiveApp {
     }
   }
 
+  private async withLightPaperPreview<T>(fn: () => Promise<T>): Promise<T> {
+    const tab = this.activeTab;
+    await this.flushActivePreviewRender();
+    if (!tab) return fn();
+
+    const baseDir = tab.parentDir ?? this.explorer.rootPath;
+    const prevView = (this.appEl.getAttribute('data-view') ?? 'split') as
+      | 'editor'
+      | 'split'
+      | 'preview';
+    const hasMermaid = this.previewContentEl.querySelector('.mermaid-wrapper[data-mermaid]') !== null;
+    const metaScheme = document
+      .querySelector('meta[name="color-scheme"]')
+      ?.getAttribute('content');
+    const isDarkActive =
+      metaScheme === 'dark' ||
+      (metaScheme !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+    // Temporarily expose preview pane if in editor-only view so lazy images decode properly
+    if (prevView === 'editor') {
+      this.appEl.setAttribute('data-view', 'split');
+    }
+    if (hasMermaid && isDarkActive) {
+      await this.renderPreviewImmediate(tab.currentContent, baseDir, undefined, true);
+    }
+
+    const imgs = Array.from(this.previewContentEl.querySelectorAll<HTMLImageElement>('img'));
+    await Promise.all(
+      imgs.map(async (img) => {
+        img.loading = 'eager';
+        if (typeof img.decode === 'function') {
+          await img.decode().catch(() => {});
+        }
+      }),
+    );
+
+    try {
+      return await fn();
+    } finally {
+      if (prevView === 'editor') {
+        this.appEl.setAttribute('data-view', 'editor');
+      }
+      if (hasMermaid && isDarkActive) {
+        await this.renderPreviewImmediate(tab.currentContent, baseDir);
+      }
+    }
+  }
+
   private async copyCurrentTabRichText(): Promise<void> {
     const tab = this.activeTab;
     if (!tab) return;
     try {
-      await this.flushActivePreviewRender();
-      await copyRichPreviewToClipboard(this.previewContentEl, tab.currentContent);
+      await this.withLightPaperPreview(async () => {
+        await copyRichPreviewToClipboard(this.previewContentEl, tab.currentContent);
+      });
       this.showToast('Als formatierter Text in die Zwischenablage kopiert');
     } catch (err) {
       console.error('Formatierter Text konnte nicht kopiert werden:', err);
@@ -1129,8 +1182,9 @@ class MarkLiveApp {
     if (!tab) return;
     const baseDir = tab.parentDir ?? this.explorer.rootPath;
     try {
-      await this.flushActivePreviewRender();
-      const res = await backend.exportPdfDialog(tab.name, baseDir);
+      const res = await this.withLightPaperPreview(() =>
+        backend.exportPdfDialog(tab.name, baseDir),
+      );
       if (res.exported && res.path) {
         this.showToast(`PDF exportiert: ${baseNameOfPath(res.path)}`);
       }
@@ -1415,79 +1469,96 @@ class MarkLiveApp {
       this.externalBannerEl.hidden = true;
     });
 
-    // Application-wide keyboard shortcuts
-    window.addEventListener('keydown', (e) => {
-      const mod = e.ctrlKey || e.metaKey;
-      const key = e.key.toLowerCase();
+    // Application-wide keyboard shortcuts in capture phase so CodeMirror's unshifted
+    // keymap fallbacks (e.g. Mod-f / Mod-d / Mod-k) never intercept Mod+Shift app commands.
+    // Explicitly guarded against DE-QWERTZ AltGr (`Ctrl+Alt` / `AltGraph`).
+    window.addEventListener(
+      'keydown',
+      (e) => {
+        if (e.getModifierState?.('AltGraph') || (e.ctrlKey && e.altKey)) {
+          return;
+        }
+        if (document.querySelector('dialog[open]:not(#palette-dialog)')) {
+          return;
+        }
 
-      if (mod && !e.shiftKey && key === 'e') {
-        e.preventDefault();
-        this.palette.open('files');
-      } else if (mod && e.shiftKey && key === 'p') {
-        e.preventDefault();
-        this.palette.open('commands');
-      } else if (mod && !e.shiftKey && key === 'n') {
-        e.preventDefault();
-        newTabFn();
-      } else if (mod && !e.shiftKey && key === 'o') {
-        e.preventDefault();
-        void this.triggerOpenFilesDialog();
-      } else if (mod && e.shiftKey && key === 'o') {
-        e.preventDefault();
-        void this.triggerOpenFolderDialog();
-      } else if (mod && e.shiftKey && key === 'f') {
-        e.preventDefault();
-        this.switchSidebarPanel('search');
-      } else if (mod && !e.shiftKey && key === 's') {
-        e.preventDefault();
-        if (this.activeTab) void this.saveTab(this.activeTab, false);
-      } else if (mod && e.shiftKey && key === 's') {
-        e.preventDefault();
-        if (this.activeTab) void this.saveTab(this.activeTab, true);
-      } else if (mod && e.shiftKey && !e.altKey && key === 'k') {
-        e.preventDefault();
-        void this.copyCurrentTabRichText();
-      } else if (mod && e.altKey && !e.shiftKey && key === 'p') {
-        e.preventDefault();
-        void this.exportCurrentTabPdf();
-      } else if (mod && !e.shiftKey && !e.altKey && key === 'p') {
-        e.preventDefault();
-        window.print();
-      } else if (mod && key === 'w') {
-        e.preventDefault();
-        if (this.activeTab) void this.requestCloseTab(this.activeTab.id);
-      } else if (mod && e.key === '\\') {
-        e.preventDefault();
-        this.sidebarEl.classList.toggle('is-collapsed');
-      } else if (mod && (e.key === '+' || e.key === '=')) {
-        e.preventDefault();
-        this.setZoomPercent(this.zoomPercent + 10);
-      } else if (mod && e.key === '-') {
-        e.preventDefault();
-        this.setZoomPercent(this.zoomPercent - 10);
-      } else if (mod && e.key === '0') {
-        e.preventDefault();
-        this.setZoomPercent(100);
-      } else if (e.altKey && !mod && key === 'z') {
-        e.preventDefault();
-        this.toggleWordWrap();
-      } else if (e.altKey && e.key === '1') {
-        e.preventDefault();
-        this.setViewMode('editor');
-      } else if (e.altKey && e.key === '2') {
-        e.preventDefault();
-        this.setViewMode('split');
-      } else if (e.altKey && e.key === '3') {
-        e.preventDefault();
-        this.setViewMode('preview');
-      } else if (e.key === 'F11') {
-        e.preventDefault();
-        toggleZen();
-      } else if (e.key === 'F1') {
-        e.preventDefault();
-        shortcutsDialog.showModal();
-      }
-    });
+        const mod = e.ctrlKey || e.metaKey;
+        const key = e.key.toLowerCase();
+        const consume = () => {
+          e.preventDefault();
+          e.stopPropagation();
+        };
+
+        if (mod && !e.altKey && !e.shiftKey && key === 'e') {
+          consume();
+          this.palette.open('files');
+        } else if (mod && !e.altKey && e.shiftKey && key === 'p') {
+          consume();
+          this.palette.open('commands');
+        } else if (mod && !e.altKey && !e.shiftKey && key === 'n') {
+          consume();
+          newTabFn();
+        } else if (mod && !e.altKey && !e.shiftKey && key === 'o') {
+          consume();
+          void this.triggerOpenFilesDialog();
+        } else if (mod && !e.altKey && e.shiftKey && key === 'o') {
+          consume();
+          void this.triggerOpenFolderDialog();
+        } else if (mod && !e.altKey && e.shiftKey && key === 'f') {
+          consume();
+          this.switchSidebarPanel('search');
+        } else if (mod && !e.altKey && !e.shiftKey && key === 's') {
+          consume();
+          if (this.activeTab) void this.saveTab(this.activeTab, false);
+        } else if (mod && !e.altKey && e.shiftKey && key === 's') {
+          consume();
+          if (this.activeTab) void this.saveTab(this.activeTab, true);
+        } else if (mod && !e.altKey && e.shiftKey && key === 'k') {
+          consume();
+          void this.copyCurrentTabRichText();
+        } else if (mod && !e.altKey && e.shiftKey && key === 'd') {
+          consume();
+          void this.exportCurrentTabPdf();
+        } else if (mod && !e.altKey && !e.shiftKey && key === 'p') {
+          consume();
+          window.print();
+        } else if (mod && !e.altKey && !e.shiftKey && key === 'w') {
+          consume();
+          if (this.activeTab) void this.requestCloseTab(this.activeTab.id);
+        } else if (mod && !e.altKey && !e.shiftKey && key === 'j') {
+          consume();
+          this.sidebarEl.classList.toggle('is-collapsed');
+        } else if (mod && !e.altKey && (e.key === '+' || e.key === '=')) {
+          consume();
+          this.setZoomPercent(this.zoomPercent + 10);
+        } else if (mod && !e.altKey && e.key === '-') {
+          consume();
+          this.setZoomPercent(this.zoomPercent - 10);
+        } else if (mod && !e.altKey && e.key === '0') {
+          consume();
+          this.setZoomPercent(100);
+        } else if (e.altKey && !mod && !e.shiftKey && key === 'z') {
+          consume();
+          this.toggleWordWrap();
+        } else if (e.altKey && !mod && e.key === '1') {
+          consume();
+          this.setViewMode('editor');
+        } else if (e.altKey && !mod && e.key === '2') {
+          consume();
+          this.setViewMode('split');
+        } else if (e.altKey && !mod && e.key === '3') {
+          consume();
+          this.setViewMode('preview');
+        } else if (e.key === 'F11') {
+          consume();
+          toggleZen();
+        } else if (e.key === 'F1') {
+          consume();
+          shortcutsDialog.showModal();
+        }
+      },
+      { capture: true },
+    );
   }
 
   private bindBackendEvents(): void {

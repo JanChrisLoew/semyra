@@ -11,21 +11,23 @@ import {
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import {
   bracketMatching,
+  foldedRanges,
   foldGutter,
-  foldKeymap,
   foldService,
   HighlightStyle,
   indentOnInput,
   syntaxHighlighting,
   syntaxTree,
+  unfoldEffect,
 } from '@codemirror/language';
 import { languages } from '@codemirror/language-data';
 import {
   highlightSelectionMatches,
+  openSearchPanel,
   search,
   searchKeymap,
 } from '@codemirror/search';
-import { Compartment, EditorState, Extension } from '@codemirror/state';
+import { Compartment, EditorState, Extension, StateEffect } from '@codemirror/state';
 import {
   drawSelection,
   EditorView,
@@ -144,6 +146,7 @@ export interface EditorCallbacks {
   onEditorScrolled: () => void;
   onFormatCommand: (cmd: FormatAction) => void;
   onPasteImage: (mimeType: string, dataUrl: string) => void;
+  onCopyRichText?: () => void;
 }
 
 export type FormatAction =
@@ -322,6 +325,8 @@ export class MarkdownEditorController {
       const { state } = view;
       if (state.selection.ranges.length !== 1) return false;
       const pos = state.selection.main.head;
+      // Fast O(1) exit before any syntax-tree walk or document string allocation
+      if (!state.doc.lineAt(pos).text.includes('|')) return false;
       if (this.isInsideCodeContext(state, pos)) return false;
 
       const nav = navigateMarkdownTableCell(state.doc.toString(), pos, direction);
@@ -422,6 +427,13 @@ export class MarkdownEditorController {
           },
         },
         {
+          key: 'Mod-Shift-k',
+          run: () => {
+            this.callbacks.onCopyRichText?.();
+            return true;
+          },
+        },
+        {
           key: 'Mod-k',
           run: () => {
             this.applyFormat('link');
@@ -470,11 +482,28 @@ export class MarkdownEditorController {
             return true;
           },
         },
+        {
+          key: 'Mod-h',
+          run: (view) => {
+            openSearchPanel(view);
+            requestAnimationFrame(() => {
+              const replaceInput = view.dom.querySelector<HTMLInputElement>(
+                '.cm-search input[name="replace"]',
+              );
+              replaceInput?.focus();
+              replaceInput?.select();
+            });
+            return true;
+          },
+        },
         indentWithTab,
         ...closeBracketsKeymap,
-        ...defaultKeymap,
-        ...searchKeymap,
-        ...foldKeymap,
+        // Strip Shift-Mod-k (`deleteLine`, conflicts with Rich-Text Copy Strg+Umschalt+K)
+        // and Mod-Alt-\ (`indentSelection`, conflicts with AltGr+ß = `\` on DE-QWERTZ)
+        ...defaultKeymap.filter(
+          (k) => k.key !== 'Shift-Mod-k' && k.key !== 'Mod-Alt-\\',
+        ),
+        ...searchKeymap.filter((k) => k.key !== 'Mod-Alt-g'),
         ...historyKeymap,
       ]),
       EditorView.updateListener.of((update) => {
@@ -627,9 +656,12 @@ export class MarkdownEditorController {
       return this.view.state.doc.lines;
     }
     const block = this.view.lineBlockAtHeight(scrollTop);
-    const lineObj = this.view.state.doc.lineAt(block.from);
-    const frac = block.height > 0 ? Math.max(0, Math.min(1, (scrollTop - block.top) / block.height)) : 0;
-    return lineObj.number + frac;
+    const startLine = this.view.state.doc.lineAt(block.from).number;
+    const endLine = this.view.state.doc.lineAt(block.to).number;
+    const lineSpan = Math.max(1, endLine - startLine + 1);
+    const frac =
+      block.height > 0 ? Math.max(0, Math.min(1, (scrollTop - block.top) / block.height)) : 0;
+    return startLine + frac * lineSpan;
   }
 
   /**
@@ -648,9 +680,19 @@ export class MarkdownEditorController {
   public jumpToLine(lineNumber: number): void {
     const clamped = Math.max(1, Math.min(this.view.state.doc.lines, lineNumber));
     const lineObj = this.view.state.doc.line(clamped);
+    const effects: StateEffect<unknown>[] = [];
+
+    // Automatically unfold any collapsed section enclosing `lineObj`
+    foldedRanges(this.view.state).between(0, this.view.state.doc.length, (from, to) => {
+      if (lineObj.from >= from && lineObj.from <= to) {
+        effects.push(unfoldEffect.of({ from, to }));
+      }
+    });
+    effects.push(EditorView.scrollIntoView(lineObj.from, { y: 'start', yMargin: 24 }));
+
     this.view.dispatch({
       selection: { anchor: lineObj.from },
-      effects: EditorView.scrollIntoView(lineObj.from, { y: 'start', yMargin: 24 }),
+      effects,
     });
     this.view.focus();
   }

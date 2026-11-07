@@ -27,8 +27,10 @@ fn gruss_aus_windows_11(name: &str) -> String {
 | :--- | :---: | :--- |
 | Schnellauswahl | \`Strg + E\` | Wechselt blitzschnell zwischen Tabs, Projektdateien & Verlauf |
 | Befehlspalette | \`Strg + Umschalt + P\` | Führt alle Editor-, Ansichts- und Export-Befehle aus |
+| Tabellen-Workflow | \`Tab\` / \`Alt + Umschalt + F\` | Springt von Zelle zu Zelle & richtet Spalten sauber aus |
+| Rich-Text & PDF | \`Strg + Umschalt + K / D\` | Kopiert für Word/Teams/Outlook oder exportiert direkt als PDF |
 | Volltextsuche | \`Strg + Umschalt + F\` | Durchsucht alle Markdown-Dateien im Arbeitsordner |
-| Screenshot / URL | \`Strg + V\` | Speichert Bilder unter \`assets/\` oder verlinkt markierten Text |
+| Screenshot / Excel | \`Strg + V\` | Speichert Bilder, verlinkt Auswahl oder wandelt Tabellen um |
 | Dokument-Zoom | \`Strg + + / - / 0\` | Skaliert Editor- und Vorschau-Typografie stufenlos |
 
 Auch mathematische Formeln mit KaTeX wie $E = mc^2$ oder abgesetzte Gleichungen funktionieren sofort:

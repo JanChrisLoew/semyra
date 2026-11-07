@@ -2,9 +2,18 @@
  * Preview HTML export & Rich-Text clipboard utilities.
  *
  * Ensures exported standalone HTML and rich clipboard payloads preserve rendered
- * KaTeX MathML, Mermaid SVGs, task-list checked states, and base64-inlined local images,
- * while stripping interactive editor-only buttons (`.copy-code-btn`).
+ * KaTeX MathML (without duplicate `.katex-html` span trees), Mermaid SVGs,
+ * task-list checked states, GFM alert colors, table alignments, and base64-inlined
+ * local images, while stripping interactive editor-only chrome (`.copy-code-btn`).
  */
+
+const ALERT_COLORS: Record<string, string> = {
+  'gfm-alert-note': '#2f81f7',
+  'gfm-alert-tip': '#2da44e',
+  'gfm-alert-important': '#8250df',
+  'gfm-alert-warning': '#d29922',
+  'gfm-alert-caution': '#cf222e',
+};
 
 function syncTaskCheckboxesAndStripChrome(clone: HTMLElement, source: HTMLElement): void {
   const srcInputs = source.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
@@ -19,8 +28,10 @@ function syncTaskCheckboxesAndStripChrome(clone: HTMLElement, source: HTMLElemen
     dst.setAttribute('disabled', '');
   });
 
-  for (const btn of clone.querySelectorAll('.copy-code-btn')) {
-    btn.remove();
+  // Strip interactive copy buttons and font-dependent `.katex-html` spans
+  // so native `<math>` (MathML) renders cleanly once without external fonts/CSS.
+  for (const el of clone.querySelectorAll('.copy-code-btn, .katex-html')) {
+    el.remove();
   }
 }
 
@@ -67,10 +78,16 @@ async function inlineLocalAssetImagesInDom(
   );
 }
 
+function resolveCellTextAlign(cell: HTMLElement): 'left' | 'center' | 'right' {
+  if (cell.classList.contains('align-center')) return 'center';
+  if (cell.classList.contains('align-right')) return 'right';
+  return 'left';
+}
+
 /**
  * Builds an Office-, Outlook-, Teams-, and Confluence-friendly HTML fragment with
- * inline structural styles (table borders, code blocks, blockquotes, alerts) and
- * base64-inlined local images.
+ * inline structural styles (table borders + alignments, code blocks, blockquotes,
+ * GFM alerts) and base64-inlined local images.
  */
 export async function buildOfficeFriendlyHtml(
   previewEl: HTMLElement,
@@ -78,6 +95,12 @@ export async function buildOfficeFriendlyHtml(
 ): Promise<string> {
   const clone = previewEl.cloneNode(true) as HTMLElement;
   syncTaskCheckboxesAndStripChrome(clone, previewEl);
+
+  // Strip code-block header bar (language badge) so Word/Outlook/Teams receive clean <pre> blocks
+  for (const hdr of clone.querySelectorAll('.code-block-header')) {
+    hdr.remove();
+  }
+
   await inlineLocalAssetImagesInDom(clone, fetchFn);
 
   for (const table of clone.querySelectorAll<HTMLElement>('table')) {
@@ -87,13 +110,18 @@ export async function buildOfficeFriendlyHtml(
     );
   }
   for (const th of clone.querySelectorAll<HTMLElement>('th')) {
+    const align = resolveCellTextAlign(th);
     th.setAttribute(
       'style',
-      'border: 1px solid #d0d7de; padding: 6px 12px; background-color: #f6f8fa; font-weight: 600; text-align: left;',
+      `border: 1px solid #d0d7de; padding: 6px 12px; background-color: #f6f8fa; font-weight: 600; text-align: ${align};`,
     );
   }
   for (const td of clone.querySelectorAll<HTMLElement>('td')) {
-    td.setAttribute('style', 'border: 1px solid #d0d7de; padding: 6px 12px;');
+    const align = resolveCellTextAlign(td);
+    td.setAttribute(
+      'style',
+      `border: 1px solid #d0d7de; padding: 6px 12px; text-align: ${align};`,
+    );
   }
   for (const pre of clone.querySelectorAll<HTMLElement>('pre')) {
     pre.setAttribute(
@@ -115,11 +143,25 @@ export async function buildOfficeFriendlyHtml(
       'margin: 10px 0; padding: 4px 14px; border-left: 4px solid #005fb8; color: #444c56;',
     );
   }
-  for (const alert of clone.querySelectorAll<HTMLElement>('.markdown-alert')) {
+  for (const alert of clone.querySelectorAll<HTMLElement>('.gfm-alert')) {
+    let accent = '#005fb8';
+    for (const [cls, hex] of Object.entries(ALERT_COLORS)) {
+      if (alert.classList.contains(cls)) {
+        accent = hex;
+        break;
+      }
+    }
     alert.setAttribute(
       'style',
-      'margin: 12px 0; padding: 10px 14px; border-left: 4px solid #005fb8; background-color: #f6f8fa; border-radius: 4px;',
+      `margin: 12px 0; padding: 10px 14px; border-left: 4px solid ${accent}; background-color: #f6f8fa; border-radius: 4px;`,
     );
+    const titleEl = alert.querySelector<HTMLElement>('.gfm-alert-title');
+    if (titleEl) {
+      titleEl.setAttribute(
+        'style',
+        `font-weight: 600; margin: 0 0 4px 0; color: ${accent};`,
+      );
+    }
   }
 
   return `<div style="font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; font-size: 11pt; line-height: 1.6; color: #1b1b1f;">${clone.innerHTML}</div>`;

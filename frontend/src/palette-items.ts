@@ -170,7 +170,7 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
       id: 'cmd:export-pdf',
       kind: 'command',
       label: 'Export: Direkt als PDF-Datei exportieren…',
-      shortcut: 'Strg+Alt+P',
+      shortcut: 'Strg+Umschalt+D',
       run: ctx.onExportPdf,
     },
     {
