@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-windows-x64:
+    name: Build & Test (Windows 11 x64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust dependency cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Typecheck, test, and build frontend
+        working-directory: frontend
+        run: |
+          npm run typecheck
+          npm test
+          npm run build
+
+      - name: Run Rust unit tests
+        run: cargo test --locked
+
+      - name: Build standalone MarkLive.exe (Release)
+        run: cargo build --release --locked
+
+      - name: Upload MarkLive.exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MarkLive-win11-x64
+          path: target/release/MarkLive.exe

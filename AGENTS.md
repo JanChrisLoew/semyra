@@ -1,0 +1,62 @@
+# AGENTS.md — MarkLive Engineering & Architecture Guide
+
+MarkLive is a native **Windows 11 x64 Markdown editor with live preview**, compiled into a single standalone binary (`MarkLive.exe`) without Node.js or Electron runtime dependencies.
+
+## 1. Architecture Overview
+
+- **Native Rust Host (`src/`)**:
+  - `src/main.rs`: Win32 `tao` event loop, `wry` Edge WebView2 host (`https://marklive.localhost`), Windows 11 Mica backdrop (`window-vibrancy`), multi-monitor window bounds restoration, Explorer file/image/folder drag-and-drop, and `notify` filesystem watcher.
+  - `src/ipc.rs`: Asynchronous custom-protocol router (`with_asynchronous_custom_protocol("marklive", ...)`). Serves embedded static assets via `rust-embed` (`#[folder = "frontend/dist"]`) and handles JSON RPC endpoints under `/api/*`. Heavy CPU and disk routes (`render`, `read-file`, `write-file`, `list-tree`, `workspace-files`, `search-workspace`, `drafts/save`, `/api/local-asset`) MUST run off the Win32 UI thread (`std::thread::spawn` + `responder.respond(...)`). Only native `rfd` OS dialogs and `tao` window mutations run on the main thread.
+  - `src/markdown.rs`: `pulldown-cmark` + `syntect` GFM pipeline (tables, task checkboxes with `data-task-line`, GitHub alerts `[!NOTE]`..`[!CAUTION]`, footnotes, YAML frontmatter cards, inline/display math placeholders, Mermaid placeholders, `data-line` scroll-sync anchors, heading outline & reading-time stats).
+  - `src/fs_ops.rs`: Encoding-aware text reader (UTF-8, UTF-8 BOM, UTF-16 LE/BE BOM, Windows-1252 fallback), atomic temp-file + rename UTF-8 writer preserving `CRLF`/`LF`, clipboard & dropped image importer (`./assets/`), Recycle Bin deletion (`trash`), workspace search, and standalone HTML exporter.
+  - `src/single_instance.rs`: Named Win32 mutex (`Local\MarkLive_SingleInstance_v1`) + localhost IPC handoff so Explorer file launches open as tabs in the existing window (`--new-window` bypasses single-instance to spawn an independent window with a per-PID WebView2 profile).
+  - `src/icon_gen.rs` & `build.rs`: Shared multi-DPI (`16, 32, 48, 256` px) procedural icon generator used for both the PE `.exe` resource (`winres`) and the runtime window icon.
+
+- **Modular TypeScript / Vite Frontend (`frontend/src/`)**:
+  - `main.ts`: Application shell, tab lifecycle, session & preference persistence, sidebar explorer/search/outline, context menu, and global shortcuts.
+  - `editor.ts`: CodeMirror 6 controller with dynamic `Compartment`s (`wordWrap`, `spellcheck`), smart Markdown list/task/blockquote `Enter` continuation, and smart URL paste over selected text.
+  - `sanitizer.ts`: Capability-probed HTML sanitization (`setHTML` self-test with `DOMPurify` fallback), LRU-cached KaTeX & lazy-loaded Mermaid rendering, and incremental DOM reconciliation (`reconcileChildren`) that preserves unchanged nodes and `<details>` open state.
+  - `sync-scroll.ts`: Bidirectional fractional `[data-line]` scroll synchronization and active TOC section tracking.
+  - `palette.ts`: Fuzzy-matched Quick-Open (`Strg+E`) & Command Palette (`Strg+Umschalt+P` / `>`).
+  - `navigation-a11y.ts`: Roving `tabindex` (`0` / `-1`) and horizontal arrow-key navigation for `[role="tablist"]` and `[role="toolbar"]`.
+
+## 2. Mandatory Build & Verification Order
+
+Because `rust-embed` embeds `frontend/dist` into `MarkLive.exe` at Rust compile time (and `build.rs` panics on `--release` if `frontend/dist/assets` is missing), **always build the frontend before compiling Rust**:
+
+```powershell
+# Full end-to-end check, test, and release build:
+powershell -ExecutionPolicy Bypass -File .\scripts\Build-Release.ps1
+```
+
+Or step-by-step during development:
+
+```powershell
+cd frontend
+npm run typecheck
+npm test
+npm run build
+cd ..
+cargo test
+cargo build --release
+```
+
+> Note: Do not assume `cargo clippy` is installed in local environments; rely on `cargo check`, `cargo test` (zero warnings), `npm run typecheck`, and `npm test` (Vitest).
+
+## 3. Security & Windows Invariants
+
+1. **Scoped Local Asset Access**: `/api/local-asset?path=...` MUST always check `state.is_local_asset_allowed(&target)` before reading disk bytes so untrusted Markdown files cannot exfiltrate arbitrary paths outside opened workspaces/document folders.
+2. **Extended-Length Path Stripping**: `fs::canonicalize` on Windows prefixes paths with `\\?\`. Always pass canonicalized user-facing paths through `clean_windows_path` before displaying them in UI or passing them to `explorer.exe /select,`.
+3. **XSS-Safe Preview Rendering**: Never assign raw Markdown HTML directly to `innerHTML` on live DOM elements. Route all preview updates through `safeSetMarkdownHTML` in `frontend/src/sanitizer.ts`, and do not apply `content-visibility: auto` to `.markdown-body` blocks (doing so replaces offscreen block heights with estimates and breaks `SyncScrollController` pixel interpolation).
+4. **Destructive File Operations**: Never call `fs::remove_file` / `fs::remove_dir_all` on user documents from UI actions; always move user files/folders to the Windows Recycle Bin via `trash::delete`.
+
+## 4. UI, Localization & Modern Web Standards
+
+- **Language**: All user-facing UI labels, tooltips, dialogs, status badges, and backend error messages are written in **idiomatic German** (`<html lang="de">`). Source code identifiers and comments remain in English.
+- **Browser Baseline**: MarkLive runs inside Microsoft Edge WebView2 (evergreen Chromium on Windows 11) while keeping progressive-enhancement fallbacks (`@oddbird/popover-polyfill`, `invokers-polyfill`, `DOMPurify`) so components remain standards-compliant and testable in `jsdom`.
+- **HTML/CSS Conventions**:
+  - Use native `<dialog>` (`closedby="any"` or `closedby="none"` paired with a `cancel` event guard, resetting `dialog.returnValue = ''` on `close`) without redundant `role="dialog"` or `aria-modal`.
+  - Use declarative Invoker Commands (`command="show-modal" commandfor="..."`) where static buttons open modal dialogs.
+  - Enclose search inputs in `<search>` with explicit `<label class="visually-hidden">` elements.
+  - Keep interactive close buttons as siblings of `<button role="tab">` inside `.tab-slot` (never nest `<button>` inside `[role="tab"]`), and maintain roving `tabindex` keyboard support.
+  - Maintain dual light/dark theme support via `:root { color-scheme: light dark; }`, `light-dark()` tokens, and `<meta name="color-scheme">` synchronization with the Win32 titlebar (`window.set_theme`).

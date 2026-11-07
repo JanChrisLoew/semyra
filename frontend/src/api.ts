@@ -23,6 +23,7 @@ export interface FilePayload {
   name: string;
   content: string;
   lineEnding: 'CRLF' | 'LF';
+  encoding: string;
   parentDir: string | null;
 }
 
@@ -32,6 +33,12 @@ export interface FileTreeNode {
   isDir: boolean;
   isMarkdown: boolean;
   children?: FileTreeNode[];
+}
+
+export interface WorkspaceFileEntry {
+  path: string;
+  name: string;
+  relPath: string;
 }
 
 export interface DraftEntry {
@@ -56,10 +63,24 @@ export interface SearchFileResult {
   matches: SearchMatchItem[];
 }
 
+export interface UiSessionPrefs {
+  splitRatio: number;
+  zoomPercent: number;
+  syncScroll: boolean;
+  autoSave: boolean;
+  wordWrap: boolean;
+  spellcheck: boolean;
+  recentFiles: string[];
+  recentFolders: string[];
+  sessionFiles: string[];
+  activeSessionFile: string | null;
+}
+
 export interface StartupPayload {
   initialFiles: string[];
   initialFolder: string | null;
   recoveredDrafts: DraftEntry[];
+  uiPrefs: UiSessionPrefs;
 }
 
 async function postJson<T>(endpoint: string, payload: unknown = {}): Promise<T> {
@@ -78,6 +99,9 @@ async function postJson<T>(endpoint: string, payload: unknown = {}): Promise<T> 
 export const backend = {
   getStartup: () => postJson<StartupPayload>('startup'),
 
+  saveUiPrefs: (prefs: UiSessionPrefs) =>
+    postJson<{ ok: boolean }>('prefs/save', prefs),
+
   renderMarkdown: (markdown: string, baseDir: string | null) =>
     postJson<RenderResult>('render', { markdown, baseDir }),
 
@@ -87,6 +111,9 @@ export const backend = {
     postJson<{ path: string }>('write-file', { path, content, lineEnding }),
 
   listTree: (path: string) => postJson<FileTreeNode>('list-tree', { path }),
+
+  listWorkspaceFiles: (path: string) =>
+    postJson<{ files: WorkspaceFileEntry[] }>('workspace-files', { path }),
 
   createFile: (parentDir: string, fileName: string) =>
     postJson<FilePayload>('create-file', { parentDir, fileName }),
@@ -114,6 +141,12 @@ export const backend = {
     postJson<{ savedPath: string; markdownSnippet: string }>(
       'save-pasted-image',
       { baseDir, mimeType, dataBase64 },
+    ),
+
+  importDroppedImage: (baseDir: string | null, sourcePath: string) =>
+    postJson<{ savedPath: string; markdownSnippet: string }>(
+      'import-dropped-image',
+      { baseDir, sourcePath },
     ),
 
   searchWorkspace: (root: string, query: string, caseSensitive: boolean) =>
@@ -178,7 +211,7 @@ export const backend = {
 type BackendEventMap = {
   'drag-enter': { count: number };
   'drag-leave': Record<string, never>;
-  'files-dropped': { files: string[]; folder: string | null };
+  'files-dropped': { files: string[]; images?: string[]; folder: string | null };
   'fs-changed': { paths: string[] };
   'close-requested': Record<string, never>;
 };

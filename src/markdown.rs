@@ -248,7 +248,7 @@ pub fn render_markdown(markdown: &str, base_dir: Option<&Path>) -> RenderResult 
                 Event::End(TagEnd::MetadataBlock(_)) => {
                     let highlighted = highlight_code("yaml", yaml_buf.trim_end());
                     html.push_str(&format!(
-                        "<details class=\"frontmatter-card\" data-line=\"{meta_line}\"><summary>Frontmatter (YAML)</summary><pre><code class=\"hl-code\">{highlighted}</code></pre></details>\n"
+                        "<details class=\"frontmatter-card\" data-line=\"{meta_line}\"><summary>Frontmatter (YAML)</summary><pre tabindex=\"0\"><code class=\"hl-code\">{highlighted}</code></pre></details>\n"
                     ));
                     in_metadata = None;
                 }
@@ -323,7 +323,7 @@ pub fn render_markdown(markdown: &str, base_dir: Option<&Path>) -> RenderResult 
                         escape_html(&mut html, lang_label);
                         html.push_str("\"><div class=\"code-block-header\"><span class=\"code-lang-badge\">");
                         escape_html(&mut html, lang_label);
-                        html.push_str("</span><button type=\"button\" class=\"copy-code-btn\" aria-label=\"Code kopieren\">Kopieren</button></div><pre><code class=\"hl-code\">");
+                        html.push_str("</span><button type=\"button\" class=\"copy-code-btn\" aria-label=\"Code kopieren\">Kopieren</button></div><pre tabindex=\"0\"><code class=\"hl-code\">");
                         html.push_str(&highlighted);
                         html.push_str("</code></pre></div>\n");
                     }

@@ -1,12 +1,13 @@
 use crate::drafts::{clear_recovery_snapshot, save_recovery_snapshot, DraftEntry};
 use crate::fs_ops::{
     build_directory_tree, build_standalone_html_document, clean_windows_path, create_new_folder,
-    create_new_markdown_file, move_to_recycle_bin, normalize_existing_path, read_text_file,
-    rename_fs_entry, reveal_in_explorer, save_clipboard_image, search_workspace_files,
-    write_text_file,
+    create_new_markdown_file, import_dropped_image, list_workspace_markdown_files,
+    move_to_recycle_bin, normalize_existing_path, read_text_file, rename_fs_entry,
+    reveal_in_explorer, save_clipboard_image, search_workspace_files, write_text_file,
 };
 use crate::markdown::render_markdown;
 use crate::state::{AppState, UserEvent};
+use crate::window_prefs::UiSessionPrefs;
 use http::{Response, StatusCode};
 use percent_encoding::percent_decode_str;
 use rust_embed::RustEmbed;
@@ -68,6 +69,13 @@ struct SavePastedImageReq {
     base_dir: Option<String>,
     mime_type: String,
     data_base64: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportDroppedImageReq {
+    base_dir: Option<String>,
+    source_path: String,
 }
 
 #[derive(Deserialize)]
@@ -169,31 +177,33 @@ pub fn handle_protocol_request(
             responder.respond(err_json(StatusCode::BAD_REQUEST, "Fehlender Pfadparameter."));
             return;
         };
-        let target = PathBuf::from(&raw_path);
-        if !state.is_local_asset_allowed(&target) {
-            responder.respond(err_json(
-                StatusCode::FORBIDDEN,
-                "Zugriff auf lokale Ressource außerhalb geöffneter Ordner verweigert.",
-            ));
-            return;
-        }
-        match fs::read(&target) {
-            Ok(bytes) => {
-                let mime = mime_guess::from_path(&target)
-                    .first_or_octet_stream()
-                    .to_string();
-                let resp = Response::builder()
-                    .status(StatusCode::OK)
-                    .header("Content-Type", mime)
-                    .header("Cache-Control", "no-cache")
-                    .body(Cow::Owned(bytes))
-                    .unwrap();
-                responder.respond(resp);
+        std::thread::spawn(move || {
+            let target = PathBuf::from(&raw_path);
+            if !state.is_local_asset_allowed(&target) {
+                responder.respond(err_json(
+                    StatusCode::FORBIDDEN,
+                    "Zugriff auf lokale Ressource außerhalb geöffneter Ordner verweigert.",
+                ));
+                return;
             }
-            Err(_) => {
-                responder.respond(err_json(StatusCode::NOT_FOUND, "Bilddatei nicht gefunden."));
+            match fs::read(&target) {
+                Ok(bytes) => {
+                    let mime = mime_guess::from_path(&target)
+                        .first_or_octet_stream()
+                        .to_string();
+                    let resp = Response::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", mime)
+                        .header("Cache-Control", "no-cache")
+                        .body(Cow::Owned(bytes))
+                        .unwrap();
+                    responder.respond(resp);
+                }
+                Err(_) => {
+                    responder.respond(err_json(StatusCode::NOT_FOUND, "Bilddatei nicht gefunden."));
+                }
             }
-        }
+        });
         return;
     }
 
@@ -245,13 +255,40 @@ fn handle_api_route(
             let payload = state
                 .inner
                 .lock()
-                .map(|g| g.startup.clone())
+                .map(|g| {
+                    let mut s = g.startup.clone();
+                    s.ui_prefs = g.ui_prefs.clone();
+                    s
+                })
                 .unwrap_or(crate::state::StartupPayload {
                     initial_files: Vec::new(),
                     initial_folder: None,
                     recovered_drafts: Vec::new(),
+                    ui_prefs: UiSessionPrefs::default(),
                 });
             responder.respond(ok_json(&payload));
+        }
+
+        "prefs/save" => {
+            let Ok(prefs) = serde_json::from_slice::<UiSessionPrefs>(&body) else {
+                responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Einstellungen"));
+                return;
+            };
+            let ws_folder = if let Ok(mut guard) = state.inner.lock() {
+                guard.ui_prefs = prefs.clone();
+                guard.workspace_folder.as_ref().map(|p| p.to_string_lossy().to_string())
+            } else {
+                None
+            };
+            std::thread::spawn(move || {
+                let mut disk = crate::window_prefs::load_window_prefs();
+                disk.ui = prefs;
+                if ws_folder.is_some() {
+                    disk.last_workspace_folder = ws_folder;
+                }
+                crate::window_prefs::save_window_prefs(&disk);
+                responder.respond(ok_json(&serde_json::json!({ "ok": true })));
+            });
         }
 
         "drafts/save" => {
@@ -259,10 +296,10 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Entwurfsdaten"));
                 return;
             };
-            match save_recovery_snapshot(req.entries) {
+            std::thread::spawn(move || match save_recovery_snapshot(req.entries) {
                 Ok(()) => responder.respond(ok_json(&serde_json::json!({ "ok": true }))),
                 Err(err) => responder.respond(err_json(StatusCode::INTERNAL_SERVER_ERROR, err)),
-            }
+            });
         }
 
         "drafts/clear" => {
@@ -270,23 +307,132 @@ fn handle_api_route(
             responder.respond(ok_json(&serde_json::json!({ "ok": true })));
         }
 
+        "render" => {
+            let Ok(req) = serde_json::from_slice::<RenderReq>(&body) else {
+                responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Render-Anfrage"));
+                return;
+            };
+            std::thread::spawn(move || {
+                let base = req.base_dir.as_deref().map(Path::new);
+                let result = render_markdown(&req.markdown, base);
+                responder.respond(ok_json(&result));
+            });
+        }
+
+        "read-file" => {
+            let Ok(req) = serde_json::from_slice::<PathReq>(&body) else {
+                responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültiger Dateipfad"));
+                return;
+            };
+            std::thread::spawn(move || {
+                let p = PathBuf::from(&req.path);
+                match read_text_file(&p) {
+                    Ok(file_data) => {
+                        state.allow_file_parent(&p);
+                        responder.respond(ok_json(&file_data));
+                    }
+                    Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
+                }
+            });
+        }
+
+        "write-file" => {
+            let Ok(req) = serde_json::from_slice::<WriteReq>(&body) else {
+                responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Speicher-Anfrage"));
+                return;
+            };
+            std::thread::spawn(move || {
+                let p = PathBuf::from(&req.path);
+                let prefer_crlf = req
+                    .line_ending
+                    .as_deref()
+                    .map(|le| le.eq_ignore_ascii_case("CRLF"))
+                    .unwrap_or(true);
+                state.record_self_write(&p);
+                match write_text_file(&p, &req.content, prefer_crlf) {
+                    Ok(saved_path) => {
+                        let saved_p = Path::new(&saved_path);
+                        state.record_self_write(saved_p);
+                        state.allow_file_parent(saved_p);
+                        responder.respond(ok_json(&serde_json::json!({ "path": saved_path })));
+                    }
+                    Err(err) => {
+                        responder.respond(err_json(StatusCode::INTERNAL_SERVER_ERROR, err))
+                    }
+                }
+            });
+        }
+
+        "list-tree" => {
+            let Ok(req) = serde_json::from_slice::<PathReq>(&body) else {
+                responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültiger Ordnerpfad"));
+                return;
+            };
+            std::thread::spawn(move || {
+                let folder = PathBuf::from(&req.path);
+                match build_directory_tree(&folder, 5) {
+                    Ok(tree) => {
+                        state.set_workspace_folder(&folder);
+                        responder.respond(ok_json(&tree));
+                    }
+                    Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
+                }
+            });
+        }
+
+        "workspace-files" => {
+            let Ok(req) = serde_json::from_slice::<PathReq>(&body) else {
+                responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültiger Ordnerpfad"));
+                return;
+            };
+            std::thread::spawn(move || {
+                match list_workspace_markdown_files(Path::new(&req.path)) {
+                    Ok(files) => responder.respond(ok_json(&serde_json::json!({ "files": files }))),
+                    Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
+                }
+            });
+        }
+
         "save-pasted-image" => {
             let Ok(req) = serde_json::from_slice::<SavePastedImageReq>(&body) else {
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Bild-Anfrage"));
                 return;
             };
-            let base = req.base_dir.as_deref().map(Path::new);
-            match save_clipboard_image(base, &req.mime_type, &req.data_base64) {
-                Ok((saved_path, md_snippet)) => {
-                    state.record_self_write(&saved_path);
-                    state.allow_file_parent(&saved_path);
-                    responder.respond(ok_json(&serde_json::json!({
-                        "savedPath": saved_path.to_string_lossy(),
-                        "markdownSnippet": md_snippet
-                    })));
+            std::thread::spawn(move || {
+                let base = req.base_dir.as_deref().map(Path::new);
+                match save_clipboard_image(base, &req.mime_type, &req.data_base64) {
+                    Ok((saved_path, md_snippet)) => {
+                        state.record_self_write(&saved_path);
+                        state.allow_file_parent(&saved_path);
+                        responder.respond(ok_json(&serde_json::json!({
+                            "savedPath": saved_path.to_string_lossy(),
+                            "markdownSnippet": md_snippet
+                        })));
+                    }
+                    Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
                 }
-                Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
-            }
+            });
+        }
+
+        "import-dropped-image" => {
+            let Ok(req) = serde_json::from_slice::<ImportDroppedImageReq>(&body) else {
+                responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Bilddatei"));
+                return;
+            };
+            std::thread::spawn(move || {
+                let base = req.base_dir.as_deref().map(Path::new);
+                match import_dropped_image(base, Path::new(&req.source_path)) {
+                    Ok((saved_path, md_snippet)) => {
+                        state.record_self_write(&saved_path);
+                        state.allow_file_parent(&saved_path);
+                        responder.respond(ok_json(&serde_json::json!({
+                            "savedPath": saved_path.to_string_lossy(),
+                            "markdownSnippet": md_snippet
+                        })));
+                    }
+                    Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
+                }
+            });
         }
 
         "search-workspace" => {
@@ -295,74 +441,17 @@ fn handle_api_route(
                 return;
             };
             std::thread::spawn(move || {
-                match search_workspace_files(Path::new(&req.root), &req.query, req.case_sensitive) {
-                    Ok(results) => responder.respond(ok_json(&serde_json::json!({ "results": results }))),
+                match search_workspace_files(
+                    Path::new(&req.root),
+                    &req.query,
+                    req.case_sensitive,
+                ) {
+                    Ok(results) => {
+                        responder.respond(ok_json(&serde_json::json!({ "results": results })))
+                    }
                     Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
                 }
             });
-        }
-
-        "render" => {
-            let Ok(req) = serde_json::from_slice::<RenderReq>(&body) else {
-                responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Render-Anfrage"));
-                return;
-            };
-            let base = req.base_dir.as_deref().map(Path::new);
-            let result = render_markdown(&req.markdown, base);
-            responder.respond(ok_json(&result));
-        }
-
-        "read-file" => {
-            let Ok(req) = serde_json::from_slice::<PathReq>(&body) else {
-                responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültiger Dateipfad"));
-                return;
-            };
-            let p = PathBuf::from(&req.path);
-            match read_text_file(&p) {
-                Ok(file_data) => {
-                    state.allow_file_parent(&p);
-                    responder.respond(ok_json(&file_data));
-                }
-                Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
-            }
-        }
-
-        "write-file" => {
-            let Ok(req) = serde_json::from_slice::<WriteReq>(&body) else {
-                responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Speicher-Anfrage"));
-                return;
-            };
-            let p = PathBuf::from(&req.path);
-            let prefer_crlf = req
-                .line_ending
-                .as_deref()
-                .map(|le| le.eq_ignore_ascii_case("CRLF"))
-                .unwrap_or(true);
-            state.record_self_write(&p);
-            match write_text_file(&p, &req.content, prefer_crlf) {
-                Ok(saved_path) => {
-                    let saved_p = Path::new(&saved_path);
-                    state.record_self_write(saved_p);
-                    state.allow_file_parent(saved_p);
-                    responder.respond(ok_json(&serde_json::json!({ "path": saved_path })));
-                }
-                Err(err) => responder.respond(err_json(StatusCode::INTERNAL_SERVER_ERROR, err)),
-            }
-        }
-
-        "list-tree" => {
-            let Ok(req) = serde_json::from_slice::<PathReq>(&body) else {
-                responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültiger Ordnerpfad"));
-                return;
-            };
-            let folder = PathBuf::from(&req.path);
-            match build_directory_tree(&folder, 5) {
-                Ok(tree) => {
-                    state.set_workspace_folder(&folder);
-                    responder.respond(ok_json(&tree));
-                }
-                Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
-            }
         }
 
         "create-file" => {
@@ -396,7 +485,10 @@ fn handle_api_route(
 
         "rename-path" => {
             let Ok(req) = serde_json::from_slice::<RenamePathReq>(&body) else {
-                responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Umbenennungs-Anfrage"));
+                responder.respond(err_json(
+                    StatusCode::BAD_REQUEST,
+                    "Ungültige Umbenennungs-Anfrage",
+                ));
                 return;
             };
             let old_p = PathBuf::from(&req.path);
@@ -489,7 +581,6 @@ fn handle_api_route(
             responder.respond(ok_json(&serde_json::json!({ "ok": true })));
         }
 
-        // Native Windows 11 dialogs executed on background threads so the UI never freezes
         "dialog/open-files" => {
             std::thread::spawn(move || {
                 let start_dir = state
@@ -601,8 +692,9 @@ fn handle_api_route(
                                 .and_then(|n| n.to_str())
                                 .unwrap_or("Unbenannt.md")
                                 .to_string();
-                            let parent_dir =
-                                norm.parent().map(|p| clean_windows_path(p).to_string_lossy().into_owned());
+                            let parent_dir = norm
+                                .parent()
+                                .map(|p| clean_windows_path(p).to_string_lossy().into_owned());
                             responder.respond(ok_json(&serde_json::json!({
                                 "saved": true,
                                 "path": saved_path,

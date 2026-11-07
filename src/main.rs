@@ -2,13 +2,15 @@
 
 mod drafts;
 mod fs_ops;
+mod icon_gen;
 mod ipc;
 mod markdown;
 mod single_instance;
 mod state;
 mod window_prefs;
 
-use crate::fs_ops::{clean_windows_path, normalize_existing_path};
+use crate::fs_ops::{clean_windows_path, is_image_path, normalize_existing_path};
+use crate::icon_gen::render_marklive_rgba;
 use crate::ipc::handle_protocol_request;
 use crate::single_instance::{
     cleanup_instance_lock, start_primary_instance_listener, try_forward_to_running_instance,
@@ -16,11 +18,12 @@ use crate::single_instance::{
 use crate::state::{AppState, UserEvent};
 use crate::window_prefs::{load_window_prefs, save_window_prefs, WindowPrefs};
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tao::dpi::{LogicalSize, PhysicalPosition};
 use tao::event::{Event, WindowEvent};
-use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
+use tao::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy};
 use tao::window::{Icon, Window, WindowBuilder};
 use wry::{DragDropEvent, NewWindowResponse, WebContext, WebView, WebViewBuilder};
 
@@ -69,71 +72,60 @@ fn parse_cli_targets() -> CliArgs {
 }
 
 fn generate_window_rgba_icon(size: u32) -> Option<Icon> {
-    let mut rgba = vec![0u8; (size * size * 4) as usize];
-    let s = size as f32;
+    let rgba = render_marklive_rgba(size);
+    Icon::from_rgba(rgba, size, size).ok()
+}
 
-    for y in 0..size {
-        for x in 0..size {
-            let dx = x as f32;
-            let dy = y as f32;
-            let margin = s * 0.06;
-            let radius = s * 0.22;
-            let half = (s * 0.5) - margin;
-            let cx = dx - s * 0.5;
-            let cy = dy - s * 0.5;
-            let qx = cx.abs() - (half - radius);
-            let qy = cy.abs() - (half - radius);
-            let dist = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt()
-                + qx.min(qy.max(0.0)).min(0.0)
-                - radius;
-            let alpha = (0.5 - dist).clamp(0.0, 1.0);
-            if alpha <= 0.0 {
-                continue;
-            }
+/// Validates that saved physical window coordinates overlap at least one connected monitor
+/// so undocking an external display never spawns an invisible off-screen window.
+fn is_position_visible_on_monitors(
+    event_loop: &EventLoop<UserEvent>,
+    x: i32,
+    y: i32,
+    width_px: i32,
+    height_px: i32,
+) -> bool {
+    let min_visible_w = 120;
+    let min_visible_h = 80;
 
-            let t = ((dx + dy) / (2.0 * s)).clamp(0.0, 1.0);
-            let mut r = 37.0 * (1.0 - t) + 99.0 * t;
-            let mut g = 99.0 * (1.0 - t) + 102.0 * t;
-            let mut b = 235.0 * (1.0 - t) + 241.0 * t;
+    let mut checked_any = false;
+    for monitor in event_loop.available_monitors() {
+        checked_any = true;
+        let m_pos = monitor.position();
+        let m_size = monitor.size();
+        let m_left = m_pos.x;
+        let m_top = m_pos.y;
+        let m_right = m_left + m_size.width as i32;
+        let m_bottom = m_top + m_size.height as i32;
 
-            let nx = dx / s;
-            let ny = dy / s;
-            let mut fg = false;
-            if (0.28..=0.72).contains(&ny) {
-                if (0.20..=0.28).contains(&nx) || (0.50..=0.58).contains(&nx) {
-                    fg = true;
-                }
-                let diag_y = (ny - 0.28) / 0.30;
-                if (0.0..=1.0).contains(&diag_y) {
-                    let tl = 0.24 + diag_y * 0.15;
-                    let tr = 0.54 - diag_y * 0.15;
-                    if (nx - tl).abs() < 0.045 || (nx - tr).abs() < 0.045 {
-                        fg = true;
-                    }
-                }
-            }
-            if (0.30..=0.62).contains(&ny) && (0.70..=0.78).contains(&nx) {
-                fg = true;
-            }
-            if (0.54..=0.72).contains(&ny) && (nx - 0.74).abs() <= (0.72 - ny) * 0.85 {
-                fg = true;
-            }
-
-            if fg {
-                r = 255.0;
-                g = 255.0;
-                b = 255.0;
-            }
-
-            let idx = ((y * size + x) * 4) as usize;
-            rgba[idx] = r.round() as u8;
-            rgba[idx + 1] = g.round() as u8;
-            rgba[idx + 2] = b.round() as u8;
-            rgba[idx + 3] = (alpha * 255.0).round() as u8;
+        let overlap_x = (x + width_px).min(m_right) - x.max(m_left);
+        let overlap_y = (y + height_px).min(m_bottom) - y.max(m_top);
+        if overlap_x >= min_visible_w && overlap_y >= min_visible_h {
+            return true;
         }
     }
 
-    Icon::from_rgba(rgba, size, size).ok()
+    // If monitor enumeration returned empty, allow sane positive coordinates
+    !checked_any && x > -8_000 && y > -8_000
+}
+
+/// Removes orphaned `WebView2-instance-<pid>` directories left behind by closed secondary windows.
+fn cleanup_stale_webview_profiles(base_data_dir: &Path) {
+    let current_pid_dir = format!("WebView2-instance-{}", std::process::id());
+    let Ok(entries) = fs::read_dir(base_data_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name_str) = name.to_str() else {
+            continue;
+        };
+        if name_str.starts_with("WebView2-instance-") && name_str != current_pid_dir {
+            // If another process actively holds a WebView2 lock inside this folder, remove_dir_all
+            // safely fails on the locked file while cleaning unlocked stale directories.
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
 }
 
 fn dispatch_frontend_event(webview: &WebView, event_name: &str, payload_json: &str) {
@@ -149,11 +141,10 @@ fn build_webview_with_context<'a>(
     window: &'a Window,
     app_state: AppState,
     proxy: EventLoopProxy<UserEvent>,
-    drop_tx: std::sync::mpsc::Sender<(String, String)>,
 ) -> wry::Result<WebView> {
     let protocol_state = app_state.clone();
     let drop_state = app_state;
-    let drop_wakeup = proxy.clone();
+    let drop_proxy = proxy.clone();
     let nav_proxy = proxy.clone();
     let new_win_proxy = proxy;
 
@@ -189,19 +180,20 @@ fn build_webview_with_context<'a>(
         .with_drag_drop_handler(move |event| {
             match event {
                 DragDropEvent::Enter { paths, .. } => {
-                    let count = paths.len();
-                    let _ = drop_tx.send((
-                        "drag-enter".to_string(),
-                        serde_json::json!({ "count": count }).to_string(),
-                    ));
-                    let _ = drop_wakeup.send_event(UserEvent::FsChanged { paths: Vec::new() });
+                    let _ = drop_proxy.send_event(UserEvent::FrontendEvent {
+                        name: "drag-enter".to_string(),
+                        payload_json: serde_json::json!({ "count": paths.len() }).to_string(),
+                    });
                 }
                 DragDropEvent::Leave => {
-                    let _ = drop_tx.send(("drag-leave".to_string(), "{}".to_string()));
-                    let _ = drop_wakeup.send_event(UserEvent::FsChanged { paths: Vec::new() });
+                    let _ = drop_proxy.send_event(UserEvent::FrontendEvent {
+                        name: "drag-leave".to_string(),
+                        payload_json: "{}".to_string(),
+                    });
                 }
                 DragDropEvent::Drop { paths, .. } => {
                     let mut files = Vec::new();
+                    let mut images = Vec::new();
                     let mut folder: Option<String> = None;
                     for p in paths {
                         let cleaned = clean_windows_path(&p);
@@ -210,16 +202,23 @@ fn build_webview_with_context<'a>(
                             folder = Some(cleaned.to_string_lossy().into_owned());
                         } else if cleaned.is_file() {
                             drop_state.allow_file_parent(&cleaned);
-                            files.push(cleaned.to_string_lossy().into_owned());
+                            if is_image_path(&cleaned) {
+                                images.push(cleaned.to_string_lossy().into_owned());
+                            } else {
+                                files.push(cleaned.to_string_lossy().into_owned());
+                            }
                         }
                     }
-                    let payload = serde_json::json!({
+                    let payload_json = serde_json::json!({
                         "files": files,
+                        "images": images,
                         "folder": folder
                     })
                     .to_string();
-                    let _ = drop_tx.send(("files-dropped".to_string(), payload));
-                    let _ = drop_wakeup.send_event(UserEvent::FsChanged { paths: Vec::new() });
+                    let _ = drop_proxy.send_event(UserEvent::FrontendEvent {
+                        name: "files-dropped".to_string(),
+                        payload_json,
+                    });
                 }
                 _ => {}
             }
@@ -236,23 +235,34 @@ fn build_webview_with_context<'a>(
     builder.build(window)
 }
 
-fn persist_current_window_state(window: &Window, app_state: &AppState) {
-    let scale = window.scale_factor();
-    let size = window.inner_size().to_logical::<f64>(scale);
-    let pos = window.outer_position().ok();
-    let last_folder = app_state
+fn persist_current_window_state(
+    window: &Window,
+    app_state: &AppState,
+    normal_size: (f64, f64),
+    normal_pos: Option<(i32, i32)>,
+) {
+    let (last_folder, ui_prefs) = app_state
         .inner
         .lock()
         .ok()
-        .and_then(|g| g.workspace_folder.as_ref().map(|p| p.to_string_lossy().into_owned()));
+        .map(|g| {
+            (
+                g.workspace_folder
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().into_owned()),
+                g.ui_prefs.clone(),
+            )
+        })
+        .unwrap_or_default();
 
     let prefs = WindowPrefs {
-        width: size.width.max(760.0),
-        height: size.height.max(480.0),
-        x: pos.map(|p| p.x),
-        y: pos.map(|p| p.y),
+        width: normal_size.0.max(760.0),
+        height: normal_size.1.max(480.0),
+        x: normal_pos.map(|p| p.0),
+        y: normal_pos.map(|p| p.1),
         maximized: window.is_maximized(),
         last_workspace_folder: last_folder,
+        ui: ui_prefs,
     };
     save_window_prefs(&prefs);
 }
@@ -279,12 +289,22 @@ fn main() {
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
 
+    let base_data_dir = dirs::data_local_dir()
+        .unwrap_or_else(env::temp_dir)
+        .join("MarkLive");
+
     let is_primary = !cli.force_new_window;
     if is_primary {
+        cleanup_stale_webview_profiles(&base_data_dir);
         start_primary_instance_listener(proxy.clone());
     }
 
-    let app_state = AppState::new(cli.initial_files, initial_folder, proxy.clone());
+    let app_state = AppState::new(
+        cli.initial_files,
+        initial_folder,
+        prefs.ui.clone(),
+        proxy.clone(),
+    );
 
     let mut win_builder = WindowBuilder::new()
         .with_title("MarkLive")
@@ -295,7 +315,13 @@ fn main() {
         .with_transparent(true);
 
     if let (Some(x), Some(y)) = (prefs.x, prefs.y) {
-        if x > -16_000 && y > -16_000 {
+        if is_position_visible_on_monitors(
+            &event_loop,
+            x,
+            y,
+            prefs.width.round() as i32,
+            prefs.height.round() as i32,
+        ) {
             win_builder = win_builder.with_position(PhysicalPosition::new(x, y));
         }
     }
@@ -311,10 +337,6 @@ fn main() {
         }
     }
 
-    let base_data_dir = dirs::data_local_dir()
-        .unwrap_or_else(env::temp_dir)
-        .join("MarkLive");
-
     let profile_subdir = if cfg!(debug_assertions) {
         "WebView2-dev"
     } else {
@@ -322,8 +344,7 @@ fn main() {
     };
     let mut primary_context = WebContext::new(Some(base_data_dir.join(profile_subdir)));
     let mut fallback_context: Option<WebContext> = None;
-
-    let (drop_tx, drop_rx) = std::sync::mpsc::channel::<(String, String)>();
+    let mut fallback_pid_dir: Option<PathBuf> = None;
 
     // Resilient WebView2 initialization: falls back to an isolated per-process profile if locked
     let webview = match build_webview_with_context(
@@ -331,25 +352,48 @@ fn main() {
         &window,
         app_state.clone(),
         proxy.clone(),
-        drop_tx.clone(),
     ) {
         Ok(wv) => wv,
         Err(_) => {
             let pid_dir = base_data_dir.join(format!("WebView2-instance-{}", std::process::id()));
+            fallback_pid_dir = Some(pid_dir.clone());
             let ctx = fallback_context.insert(WebContext::new(Some(pid_dir)));
-            build_webview_with_context(&mut *ctx, &window, app_state.clone(), proxy, drop_tx)
+            build_webview_with_context(&mut *ctx, &window, app_state.clone(), proxy)
                 .expect("Windows 11 WebView2 konnte nicht initialisiert werden")
         }
     };
 
+    // Track last non-maximized, non-minimized bounds so restore geometry stays accurate
+    let mut last_normal_size = (prefs.width.max(760.0), prefs.height.max(480.0));
+    let mut last_normal_pos = prefs.x.zip(prefs.y);
+
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
 
-        while let Ok((evt_name, payload_json)) = drop_rx.try_recv() {
-            dispatch_frontend_event(&webview, &evt_name, &payload_json);
-        }
-
         match event {
+            Event::WindowEvent {
+                event: WindowEvent::Resized(physical_size),
+                ..
+            } => {
+                if !window.is_maximized()
+                    && !window.is_minimized()
+                    && physical_size.width > 0
+                    && physical_size.height > 0
+                {
+                    let logical = physical_size.to_logical::<f64>(window.scale_factor());
+                    last_normal_size = (logical.width, logical.height);
+                }
+            }
+
+            Event::WindowEvent {
+                event: WindowEvent::Moved(pos),
+                ..
+            } => {
+                if !window.is_maximized() && !window.is_minimized() && pos.x > -16_000 && pos.y > -16_000 {
+                    last_normal_pos = Some((pos.x, pos.y));
+                }
+            }
+
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
@@ -364,11 +408,22 @@ fn main() {
                     dispatch_frontend_event(&webview, "close-requested", "{}");
                 } else {
                     crate::drafts::clear_recovery_snapshot();
-                    persist_current_window_state(&window, &app_state);
+                    persist_current_window_state(
+                        &window,
+                        &app_state,
+                        last_normal_size,
+                        last_normal_pos,
+                    );
                     if is_primary {
                         cleanup_instance_lock();
                     }
                     *control_flow = ControlFlow::Exit;
+                }
+            }
+
+            Event::LoopDestroyed => {
+                if let Some(ref pid_dir) = fallback_pid_dir {
+                    let _ = fs::remove_dir_all(pid_dir);
                 }
             }
 
@@ -390,7 +445,12 @@ fn main() {
                 }
                 UserEvent::ForceCloseWindow => {
                     crate::drafts::clear_recovery_snapshot();
-                    persist_current_window_state(&window, &app_state);
+                    persist_current_window_state(
+                        &window,
+                        &app_state,
+                        last_normal_size,
+                        last_normal_pos,
+                    );
                     if is_primary {
                         cleanup_instance_lock();
                     }
@@ -401,6 +461,9 @@ fn main() {
                         let payload = serde_json::json!({ "paths": paths }).to_string();
                         dispatch_frontend_event(&webview, "fs-changed", &payload);
                     }
+                }
+                UserEvent::FrontendEvent { name, payload_json } => {
+                    dispatch_frontend_event(&webview, &name, &payload_json);
                 }
                 UserEvent::OpenExternalUrl(url) => {
                     #[cfg(target_os = "windows")]
@@ -423,6 +486,7 @@ fn main() {
                     }
                     let payload = serde_json::json!({
                         "files": files,
+                        "images": Vec::<String>::new(),
                         "folder": folder
                     })
                     .to_string();

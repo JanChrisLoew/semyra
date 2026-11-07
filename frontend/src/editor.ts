@@ -14,6 +14,7 @@ import {
   HighlightStyle,
   indentOnInput,
   syntaxHighlighting,
+  syntaxTree,
 } from '@codemirror/language';
 import { languages } from '@codemirror/language-data';
 import {
@@ -21,7 +22,7 @@ import {
   search,
   searchKeymap,
 } from '@codemirror/search';
-import { EditorState, Extension } from '@codemirror/state';
+import { Compartment, EditorState, Extension } from '@codemirror/state';
 import {
   drawSelection,
   EditorView,
@@ -45,6 +46,88 @@ const markdownHighlightStyle = HighlightStyle.define([
   { tag: tags.quote, color: 'var(--fg-secondary)', fontStyle: 'italic' },
   { tag: tags.meta, color: 'var(--fg-muted)' },
 ]);
+
+export interface SmartEnterAction {
+  type: 'continue' | 'exit';
+  insertText?: string;
+  replacementLine?: string;
+}
+
+/**
+ * Pure helper computing Markdown list, task-list, numbered-list, and blockquote
+ * continuation or clean exit on Enter.
+ */
+export function computeSmartMarkdownEnter(
+  lineText: string,
+  cursorOffsetInLine: number,
+): SmartEnterAction | null {
+  // 1. Task list item: - [ ] or * [x]
+  const taskMatch = /^(\s*)([-*+])\s+\[[ xX]\](\s*)(.*)$/.exec(lineText);
+  if (taskMatch) {
+    const [, indent, bullet, spaceAfterBox, rest] = taskMatch;
+    const prefixLen = lineText.length - rest.length;
+    if (cursorOffsetInLine < prefixLen - spaceAfterBox.length) return null;
+    if (rest.trim().length === 0 && cursorOffsetInLine === lineText.length) {
+      return { type: 'exit', replacementLine: indent };
+    }
+    return { type: 'continue', insertText: `\n${indent}${bullet} [ ] ` };
+  }
+
+  // 2. Unordered list item: - item / * item / + item (avoid horizontal rules like --- or * * *)
+  const ulMatch = /^(\s*)([-*+])\s+(.*)$/.exec(lineText);
+  if (ulMatch) {
+    const [, indent, bullet, rest] = ulMatch;
+    if (/^([-*_])(?:\s*\1){2,}\s*$/.test(lineText)) return null;
+    const prefixLen = lineText.length - rest.length;
+    if (cursorOffsetInLine < prefixLen) return null;
+    if (rest.trim().length === 0 && cursorOffsetInLine === lineText.length) {
+      return { type: 'exit', replacementLine: indent };
+    }
+    return { type: 'continue', insertText: `\n${indent}${bullet} ` };
+  }
+
+  // 3. Ordered list item: 1. item / 1) item
+  const olMatch = /^(\s*)(\d+)([.)])\s+(.*)$/.exec(lineText);
+  if (olMatch) {
+    const [, indent, numStr, delimiter, rest] = olMatch;
+    const prefixLen = lineText.length - rest.length;
+    if (cursorOffsetInLine < prefixLen) return null;
+    if (rest.trim().length === 0 && cursorOffsetInLine === lineText.length) {
+      return { type: 'exit', replacementLine: indent };
+    }
+    const nextNum = Number(numStr) + 1;
+    return { type: 'continue', insertText: `\n${indent}${nextNum}${delimiter} ` };
+  }
+
+  // 4. Blockquote / GFM Alert: > quote
+  const quoteMatch = /^(\s*(?:>\s*)+)(.*)$/.exec(lineText);
+  if (quoteMatch) {
+    const [, rawQuotePrefix, rest] = quoteMatch;
+    if (cursorOffsetInLine < rawQuotePrefix.length) return null;
+    if (rest.trim().length === 0 && cursorOffsetInLine === lineText.length) {
+      return { type: 'exit', replacementLine: '' };
+    }
+    const normalizedPrefix = `${rawQuotePrefix.replace(/\s+$/, '')} `;
+    return { type: 'continue', insertText: `\n${normalizedPrefix}` };
+  }
+
+  return null;
+}
+
+/**
+ * Pure helper formatting a pasted HTTP(S) URL into `[selected](url)` when single-line text is selected.
+ */
+export function formatSmartUrlPaste(
+  selectedText: string,
+  pastedText: string,
+): string | null {
+  const trimmedUrl = pastedText.trim();
+  if (!/^https?:\/\/\S+$/i.test(trimmedUrl)) return null;
+  if (!selectedText || selectedText.trim().length === 0) return null;
+  if (selectedText.includes('\n') || selectedText.includes('\r')) return null;
+  if (/^https?:\/\/\S+$/i.test(selectedText.trim())) return null;
+  return `[${selectedText}](${trimmedUrl})`;
+}
 
 export interface EditorCallbacks {
   onDocChanged: (content: string) => void;
@@ -77,6 +160,10 @@ export type FormatAction =
 export class MarkdownEditorController {
   public view: EditorView;
   private callbacks: EditorCallbacks;
+  private wordWrapCompartment = new Compartment();
+  private spellcheckCompartment = new Compartment();
+  private wordWrapEnabled = true;
+  private spellcheckEnabled = false;
   private sharedExtensions: Extension;
 
   constructor(host: HTMLElement, initialContent: string, callbacks: EditorCallbacks) {
@@ -88,6 +175,67 @@ export class MarkdownEditorController {
       parent: host,
     });
   }
+
+  private wordWrapExtension(enabled: boolean): Extension {
+    return enabled ? EditorView.lineWrapping : [];
+  }
+
+  private spellcheckExtension(enabled: boolean): Extension {
+    return EditorView.contentAttributes.of({
+      spellcheck: enabled ? 'true' : 'false',
+      lang: 'de',
+    });
+  }
+
+  private isInsideCodeContext(state: EditorState, pos: number): boolean {
+    let node: ReturnType<ReturnType<typeof syntaxTree>['resolveInner']> | null =
+      syntaxTree(state).resolveInner(pos, -1);
+    while (node) {
+      if (
+        node.name === 'FencedCode' ||
+        node.name === 'CodeBlock' ||
+        node.name === 'CodeText' ||
+        node.name === 'InlineCode'
+      ) {
+        return true;
+      }
+      node = node.parent;
+    }
+    return false;
+  }
+
+  private handleSmartEnter = (view: EditorView): boolean => {
+    const { state } = view;
+    if (state.selection.ranges.length !== 1 || !state.selection.main.empty) {
+      return false;
+    }
+    const pos = state.selection.main.head;
+    if (this.isInsideCodeContext(state, pos)) {
+      return false;
+    }
+    const line = state.doc.lineAt(pos);
+    const offset = pos - line.from;
+    const action = computeSmartMarkdownEnter(line.text, offset);
+    if (!action) return false;
+
+    if (action.type === 'exit') {
+      const rep = action.replacementLine ?? '';
+      view.dispatch({
+        changes: { from: line.from, to: line.to, insert: rep },
+        selection: { anchor: line.from + rep.length },
+        scrollIntoView: true,
+      });
+      return true;
+    }
+
+    const insert = action.insertText ?? '\n';
+    view.dispatch({
+      changes: { from: pos, to: pos, insert },
+      selection: { anchor: pos + insert.length },
+      scrollIntoView: true,
+    });
+    return true;
+  };
 
   private buildExtensions(): Extension {
     return [
@@ -101,7 +249,6 @@ export class MarkdownEditorController {
       closeBrackets(),
       search({ top: true }),
       highlightSelectionMatches(),
-      EditorView.lineWrapping,
       placeholder('Schreibe hier dein Markdown…'),
       markdown({
         base: markdownLanguage,
@@ -109,6 +256,10 @@ export class MarkdownEditorController {
       }),
       syntaxHighlighting(markdownHighlightStyle),
       keymap.of([
+        {
+          key: 'Enter',
+          run: this.handleSmartEnter,
+        },
         {
           key: 'Mod-b',
           run: () => {
@@ -124,7 +275,14 @@ export class MarkdownEditorController {
           },
         },
         {
-          key: 'Mod-e',
+          key: 'Mod-Shift-x',
+          run: () => {
+            this.applyFormat('strike');
+            return true;
+          },
+        },
+        {
+          key: 'Mod-Shift-e',
           run: () => {
             this.applyFormat('code');
             return true;
@@ -148,6 +306,13 @@ export class MarkdownEditorController {
           key: 'Mod-Shift-q',
           run: () => {
             this.applyFormat('quote');
+            return true;
+          },
+        },
+        {
+          key: 'Mod-Shift-m',
+          run: () => {
+            this.applyFormat('math');
             return true;
           },
         },
@@ -192,23 +357,42 @@ export class MarkdownEditorController {
         scroll: () => {
           this.callbacks.onEditorScrolled();
         },
-        paste: (event) => {
+        paste: (event, view) => {
           const items = event.clipboardData?.items;
-          if (!items) return false;
-          for (const item of Array.from(items)) {
-            if (item.kind === 'file' && item.type.startsWith('image/')) {
-              const file = item.getAsFile();
-              if (!file) continue;
-              event.preventDefault();
-              const mime = file.type || item.type || 'image/png';
-              const reader = new FileReader();
-              reader.onload = () => {
-                if (typeof reader.result === 'string') {
-                  this.callbacks.onPasteImage(mime, reader.result);
-                }
-              };
-              reader.readAsDataURL(file);
-              return true;
+          if (items) {
+            for (const item of Array.from(items)) {
+              if (item.kind === 'file' && item.type.startsWith('image/')) {
+                const file = item.getAsFile();
+                if (!file) continue;
+                event.preventDefault();
+                const mime = file.type || item.type || 'image/png';
+                const reader = new FileReader();
+                reader.onload = () => {
+                  if (typeof reader.result === 'string') {
+                    this.callbacks.onPasteImage(mime, reader.result);
+                  }
+                };
+                reader.readAsDataURL(file);
+                return true;
+              }
+            }
+          }
+
+          // Smart URL paste over selected single-line text -> [selected](url)
+          const plain = event.clipboardData?.getData('text/plain');
+          if (plain) {
+            const range = view.state.selection.main;
+            if (!range.empty) {
+              const selected = view.state.sliceDoc(range.from, range.to);
+              const mdLink = formatSmartUrlPaste(selected, plain);
+              if (mdLink) {
+                event.preventDefault();
+                view.dispatch({
+                  changes: { from: range.from, to: range.to, insert: mdLink },
+                  selection: { anchor: range.from + mdLink.length },
+                });
+                return true;
+              }
             }
           }
           return false;
@@ -220,12 +404,44 @@ export class MarkdownEditorController {
   public createState(content: string): EditorState {
     return EditorState.create({
       doc: content,
-      extensions: this.sharedExtensions,
+      extensions: [
+        this.sharedExtensions,
+        this.wordWrapCompartment.of(this.wordWrapExtension(this.wordWrapEnabled)),
+        this.spellcheckCompartment.of(this.spellcheckExtension(this.spellcheckEnabled)),
+      ],
     });
+  }
+
+  public setWordWrap(enabled: boolean): void {
+    this.wordWrapEnabled = enabled;
+    this.view.dispatch({
+      effects: this.wordWrapCompartment.reconfigure(this.wordWrapExtension(enabled)),
+    });
+  }
+
+  public isWordWrapEnabled(): boolean {
+    return this.wordWrapEnabled;
+  }
+
+  public setSpellcheck(enabled: boolean): void {
+    this.spellcheckEnabled = enabled;
+    this.view.dispatch({
+      effects: this.spellcheckCompartment.reconfigure(this.spellcheckExtension(enabled)),
+    });
+  }
+
+  public isSpellcheckEnabled(): boolean {
+    return this.spellcheckEnabled;
   }
 
   public swapState(state: EditorState, scrollTop = 0): void {
     this.view.setState(state);
+    this.view.dispatch({
+      effects: [
+        this.wordWrapCompartment.reconfigure(this.wordWrapExtension(this.wordWrapEnabled)),
+        this.spellcheckCompartment.reconfigure(this.spellcheckExtension(this.spellcheckEnabled)),
+      ],
+    });
     requestAnimationFrame(() => {
       this.view.scrollDOM.scrollTop = scrollTop;
       const pos = this.view.state.selection.main.head;

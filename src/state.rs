@@ -1,5 +1,6 @@
 use crate::drafts::{load_recovery_snapshot, DraftEntry};
 use crate::fs_ops::{clean_windows_path, normalize_existing_path};
+use crate::window_prefs::UiSessionPrefs;
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -14,6 +15,7 @@ pub enum UserEvent {
     SetWindowTheme(Option<tao::window::Theme>),
     ForceCloseWindow,
     FsChanged { paths: Vec<String> },
+    FrontendEvent { name: String, payload_json: String },
     OpenExternalUrl(String),
     ActivateAndOpen {
         files: Vec<String>,
@@ -27,10 +29,12 @@ pub struct StartupPayload {
     pub initial_files: Vec<String>,
     pub initial_folder: Option<String>,
     pub recovered_drafts: Vec<DraftEntry>,
+    pub ui_prefs: UiSessionPrefs,
 }
 
 pub struct AppStateInner {
     pub startup: StartupPayload,
+    pub ui_prefs: UiSessionPrefs,
     pub workspace_folder: Option<PathBuf>,
     pub allowed_roots: HashSet<PathBuf>,
     pub watched_paths: HashSet<PathBuf>,
@@ -49,12 +53,18 @@ impl AppState {
     pub fn new(
         initial_files: Vec<PathBuf>,
         initial_folder: Option<PathBuf>,
+        ui_prefs: UiSessionPrefs,
         proxy: EventLoopProxy<UserEvent>,
     ) -> Self {
         let mut allowed_roots = HashSet::new();
 
         for file in &initial_files {
             if let Some(parent) = file.parent() {
+                allowed_roots.insert(normalize_existing_path(parent));
+            }
+        }
+        for session_file in &ui_prefs.session_files {
+            if let Some(parent) = Path::new(session_file).parent() {
                 allowed_roots.insert(normalize_existing_path(parent));
             }
         }
@@ -84,10 +94,12 @@ impl AppState {
                 .as_ref()
                 .map(|p| normalize_existing_path(p).to_string_lossy().into_owned()),
             recovered_drafts,
+            ui_prefs: ui_prefs.clone(),
         };
 
         let inner = Arc::new(Mutex::new(AppStateInner {
             startup,
+            ui_prefs,
             workspace_folder: initial_folder.clone(),
             allowed_roots,
             watched_paths: HashSet::new(),

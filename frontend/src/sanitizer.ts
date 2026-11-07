@@ -19,16 +19,57 @@ const SAFE_ATTRIBUTES = [
   'data-line', 'data-task-line', 'data-math', 'data-mermaid', 'data-lang',
 ];
 
-let domPurifyPromise: Promise<typeof import('dompurify')['default']> | undefined;
+let domPurifyPromise: Promise<{
+  sanitize: (source: string, config?: Record<string, unknown>) => string;
+}> | undefined;
 
 function loadDOMPurify() {
-  domPurifyPromise ??= import('dompurify').then((mod) => mod.default ?? mod);
+  domPurifyPromise ??= import('dompurify').then((mod) => {
+    const candidate = (mod.default ?? mod) as unknown as {
+      isSupported?: boolean;
+      sanitize?: (source: string, config?: Record<string, unknown>) => string;
+      (win?: Window): { sanitize: (source: string, config?: Record<string, unknown>) => string };
+    };
+    if (candidate.isSupported && typeof candidate.sanitize === 'function') {
+      return { sanitize: candidate.sanitize.bind(candidate) };
+    }
+    return candidate(window);
+  });
   return domPurifyPromise;
 }
 
 type ElementWithSetHTML = Element & {
   setHTML?: (html: string, options?: { sanitizer?: unknown }) => void;
 };
+
+let nativeSetHTMLSupported: boolean | undefined;
+
+function supportsNativeSetHTMLSanitizer(): boolean {
+  if (nativeSetHTMLSupported !== undefined) return nativeSetHTMLSupported;
+  try {
+    const probe = document.createElement('div') as HTMLElement & ElementWithSetHTML;
+    if (typeof probe.setHTML !== 'function') {
+      nativeSetHTMLSupported = false;
+      return false;
+    }
+    probe.setHTML('<p data-line="1" onclick="x()">ok</p><script>x()</script>', {
+      sanitizer: {
+        elements: ['p'],
+        attributes: ['data-line'],
+      },
+    });
+    const p = probe.querySelector('p');
+    nativeSetHTMLSupported =
+      probe.children.length === 1 &&
+      p !== null &&
+      p.getAttribute('data-line') === '1' &&
+      !p.hasAttribute('onclick') &&
+      probe.querySelector('script') === null;
+  } catch {
+    nativeSetHTMLSupported = false;
+  }
+  return nativeSetHTMLSupported;
+}
 
 const MAX_KATEX_CACHE = 400;
 const katexCache = new Map<string, string>();
@@ -82,7 +123,7 @@ export async function safeSetMarkdownHTML(
   const staging = document.createElement('div') as HTMLElement & ElementWithSetHTML;
   let insertedViaNative = false;
 
-  if ('setHTML' in Element.prototype && typeof staging.setHTML === 'function') {
+  if (supportsNativeSetHTMLSanitizer() && typeof staging.setHTML === 'function') {
     try {
       staging.setHTML(rawHtml, {
         sanitizer: {
@@ -99,11 +140,10 @@ export async function safeSetMarkdownHTML(
   if (!insertedViaNative) {
     const DOMPurify = await loadDOMPurify();
     staging.innerHTML = DOMPurify.sanitize(rawHtml, {
-      ALLOWED_TAGS: [...SAFE_ELEMENTS, '#text'],
+      ALLOWED_TAGS: SAFE_ELEMENTS,
       ALLOWED_ATTR: SAFE_ATTRIBUTES,
       ALLOW_ARIA_ATTR: false,
       ALLOW_DATA_ATTR: false,
-      KEEP_CONTENT: false,
     });
   }
 

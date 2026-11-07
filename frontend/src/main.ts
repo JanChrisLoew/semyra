@@ -9,9 +9,15 @@ import {
   HeadingItem,
   onBackendEvent,
   SearchFileResult,
+  UiSessionPrefs,
+  WorkspaceFileEntry,
 } from './api';
 import { FormatAction, MarkdownEditorController } from './editor';
+import { bindRovingHorizontalKeyNav, syncRovingTabindex } from './navigation-a11y';
+import { CommandPaletteController, PaletteItem } from './palette';
 import { safeSetMarkdownHTML } from './sanitizer';
+import { SyncScrollController } from './sync-scroll';
+import { WELCOME_MARKDOWN } from './welcome';
 
 // Progressive enhancement for Popover API (modern-web-guidance menu)
 if (!('popover' in HTMLElement.prototype)) {
@@ -77,52 +83,6 @@ if (!('closedBy' in HTMLDialogElement.prototype)) {
   }
 }
 
-const WELCOME_MARKDOWN = `# Willkommen bei MarkLive 👋
-
-**MarkLive** ist dein nativer **Windows 11 x64 Markdown-Editor** auf Basis von **Rust** (\`pulldown-cmark\` + \`syntect\`) mit sofortiger Live-Vorschau.
-
-> [!TIP]
-> Öffne eine Datei über **Strg + O**, wähle links einen **Arbeitsordner** aus, füge Screenshots direkt per **Strg + V** ein oder ziehe Dateien aus dem Windows Explorer per **Drag & Drop** hierher!
-
-## Highlights
-
-- [x] **Echtzeit Split-View** mit inkrementellem DOM-Morphing & Sync-Scroll
-- [x] **Multi-Tab Workflow**, **Volltextsuche** (\`Strg + Umschalt + F\`) & **Crash-Recovery**
-- [x] **GitHub-Flavored Markdown (GFM)**: Tabellen, interaktive Checklisten, Hinweise & YAML-Frontmatter
-- [ ] Klicke direkt in der Vorschau auf diese Checkbox, um sie im Markdown abzuhaken!
-
-## Syntax-Highlighting (Rust \`syntect\`)
-
-\`\`\`rust
-fn gruss_aus_windows_11(name: &str) -> String {
-    format!("Hallo {name}, viel Spaß beim Schreiben in MarkLive!")
-}
-\`\`\`
-
-## Tabellen & Mathematik
-
-| Funktion | Tastenkürzel | Beschreibung |
-| :--- | :---: | :--- |
-| Datei speichern | \`Strg + S\` | Speichert Änderungen direkt auf der Festplatte |
-| Volltextsuche | \`Strg + Umschalt + F\` | Durchsucht alle Markdown-Dateien im Arbeitsordner |
-| Screenshot einfügen | \`Strg + V\` | Speichert Zwischenablage-Bilder automatisch unter \`assets/\` |
-| Ansichtsmodus | \`Alt + 1 / 2 / 3\` | Wechselt zwischen Editor, Split & Lesemodus |
-
-Auch mathematische Formeln mit KaTeX wie $E = mc^2$ oder abgesetzte Gleichungen funktionieren sofort:
-
-$$
-f(x) = \\frac{1}{\\sigma\\sqrt{2\\pi}} \\exp\\left(-\\frac{(x - \\mu)^2}{2\\sigma^2}\\right)
-$$
-
-## Mermaid-Diagramme
-
-\`\`\`mermaid
-flowchart LR
-  Editor["CodeMirror 6 Editor"] --> Rust["Rust Markdown-Engine"]
-  Rust --> Preview["Windows 11 Live-Vorschau"]
-\`\`\`
-`;
-
 interface OpenTab {
   id: string;
   name: string;
@@ -131,6 +91,7 @@ interface OpenTab {
   savedContent: string;
   currentContent: string;
   lineEnding: 'CRLF' | 'LF';
+  encoding: string;
   isDirty: boolean;
   editorState: EditorState;
   editorScrollTop: number;
@@ -154,20 +115,33 @@ function parentDirOfPath(filePath: string): string | null {
   return idx > 0 ? filePath.slice(0, idx) : null;
 }
 
+function baseNameOfPath(filePath: string): string {
+  const idx = Math.max(filePath.lastIndexOf('\\'), filePath.lastIndexOf('/'));
+  return idx >= 0 ? filePath.slice(idx + 1) : filePath;
+}
+
 class MarkLiveApp {
   private tabs: OpenTab[] = [];
   private activeTabId = '';
   private untitledCounter = 1;
   private workspaceTree: FileTreeNode | null = null;
-  private editor!: MarkdownEditorController;
+  private workspaceFilesCache: WorkspaceFileEntry[] | null = null;
 
-  private syncScrollEnabled = true;
+  private editor!: MarkdownEditorController;
+  private syncScroll!: SyncScrollController;
+  private palette!: CommandPaletteController;
+
+  private splitRatio = 50;
+  private zoomPercent = 100;
   private autoSaveEnabled = false;
-  private scrollSyncLock: 'editor' | 'preview' | null = null;
-  private scrollUnlockTimer: number | undefined;
+  private recentFiles: string[] = [];
+  private recentFolders: string[] = [];
+  private activeHeadingSlug: string | null = null;
+
   private renderDebounceTimer: number | undefined;
   private autoSaveTimer: number | undefined;
   private draftSyncTimer: number | undefined;
+  private prefsSyncTimer: number | undefined;
   private searchDebounceTimer: number | undefined;
   private renderSeq = 0;
   private searchSeq = 0;
@@ -196,7 +170,9 @@ class MarkLiveApp {
   private statusCursorEl = document.getElementById('status-cursor')!;
   private statusWordsEl = document.getElementById('status-words')!;
   private statusReadtimeEl = document.getElementById('status-readtime')!;
-  private statusEolEl = document.getElementById('status-eol')!;
+  private statusZoomBtn = document.getElementById('status-zoom') as HTMLButtonElement;
+  private statusEolBtn = document.getElementById('status-eol') as HTMLButtonElement;
+  private statusEncodingEl = document.getElementById('status-encoding')!;
   private dropOverlayEl = document.getElementById('drop-overlay')!;
   private externalBannerEl = document.getElementById('external-banner')!;
   private contextPopoverEl = document.getElementById('tree-context-menu') as HTMLElement & {
@@ -211,33 +187,75 @@ class MarkLiveApp {
       onCursorChanged: (line, col) => {
         this.statusCursorEl.textContent = `Zeile ${line}, Spalte ${col}`;
       },
-      onEditorScrolled: () => this.syncEditorToPreview(),
+      onEditorScrolled: () => this.syncScroll.syncEditorToPreview(),
       onFormatCommand: (cmd) => this.editor.applyFormat(cmd),
       onPasteImage: (mimeType, dataUrl) => {
         void this.handlePasteImage(mimeType, dataUrl);
       },
     });
 
+    this.syncScroll = new SyncScrollController({
+      appEl: this.appEl,
+      previewPaneEl: this.previewPaneEl,
+      previewContentEl: this.previewContentEl,
+      getEditor: () => this.editor,
+      getOutline: () => this.activeTab?.outline ?? [],
+      onActiveHeadingChange: (slug) => {
+        this.activeHeadingSlug = slug;
+        this.highlightCurrentHeadingInOutline();
+      },
+    });
+
+    this.palette = new CommandPaletteController(
+      document.getElementById('palette-dialog') as HTMLDialogElement,
+      document.getElementById('palette-input') as HTMLInputElement,
+      document.getElementById('palette-results')!,
+      {
+        getFileItems: () => this.buildPaletteFileItems(),
+        getCommandItems: () => this.buildPaletteCommandItems(),
+      },
+    );
+
+    this.bindCompositeKeyboardNav();
     this.bindUIEvents();
     this.bindThemeSystem();
     this.bindBackendEvents();
 
-    // Check startup payload (CLI args + last workspace + crash-recovered drafts)
+    // Restore startup payload (UI prefs, CLI files, last workspace, session tabs, crash drafts)
     try {
       const startup = await backend.getStartup();
+      this.applyRestoredUiPrefs(startup.uiPrefs);
+
       if (startup.initialFolder) {
-        await this.loadWorkspaceFolder(startup.initialFolder);
+        await this.loadWorkspaceFolder(startup.initialFolder, false);
       }
+
       if (startup.initialFiles.length > 0) {
         for (const filePath of startup.initialFiles) {
-          await this.openFileByPath(filePath);
+          await this.openFileByPath(filePath, false);
+        }
+      } else if (startup.uiPrefs.sessionFiles.length > 0) {
+        for (const sessionPath of startup.uiPrefs.sessionFiles) {
+          await this.openFileByPath(sessionPath, false);
+        }
+        if (startup.uiPrefs.activeSessionFile) {
+          const lower = startup.uiPrefs.activeSessionFile.toLowerCase();
+          const match = this.tabs.find((t) => t.path?.toLowerCase() === lower);
+          if (match) {
+            this.activateTab(match.id);
+          }
         }
       }
+
       if (startup.recoveredDrafts.length > 0) {
         this.restoreRecoveredDrafts(startup.recoveredDrafts);
       }
     } catch {
       // Fallback to welcome tab
+    }
+
+    if (!this.workspaceTree) {
+      this.renderEmptySidebarWithRecents();
     }
 
     if (this.tabs.length === 0) {
@@ -249,8 +267,380 @@ class MarkLiveApp {
     return this.tabs.find((t) => t.id === this.activeTabId);
   }
 
+  private bindCompositeKeyboardNav(): void {
+    bindRovingHorizontalKeyNav(this.tabBarEl, {
+      itemSelector: 'button[role="tab"]',
+      activateOnFocus: false,
+    });
+    bindRovingHorizontalKeyNav(document.getElementById('sidebar-tabs')!, {
+      itemSelector: 'button[role="tab"]',
+      activateOnFocus: true,
+    });
+    bindRovingHorizontalKeyNav(document.getElementById('format-bar')!, {
+      itemSelector: 'button.fmt-btn',
+      activateOnFocus: false,
+    });
+  }
+
   // ==========================================================================
-  // Crash-Recovery Draft Persistence & Clipboard Image Paste
+  // Preferences, Recent History & Zoom Management
+  // ==========================================================================
+
+  private applyRestoredUiPrefs(prefs: UiSessionPrefs): void {
+    this.setSplitRatio(prefs.splitRatio || 50, false);
+    this.setZoomPercent(prefs.zoomPercent || 100, false);
+
+    this.syncScroll.setEnabled(prefs.syncScroll);
+    const syncBtn = document.getElementById('btn-sync-scroll')!;
+    syncBtn.classList.toggle('is-active', prefs.syncScroll);
+    syncBtn.setAttribute('aria-pressed', String(prefs.syncScroll));
+
+    this.autoSaveEnabled = prefs.autoSave;
+    const autoBtn = document.getElementById('btn-autosave')!;
+    autoBtn.classList.toggle('is-active', prefs.autoSave);
+    autoBtn.setAttribute('aria-pressed', String(prefs.autoSave));
+
+    this.editor.setWordWrap(prefs.wordWrap);
+    const wrapBtn = document.getElementById('btn-word-wrap')!;
+    wrapBtn.classList.toggle('is-active', prefs.wordWrap);
+    wrapBtn.setAttribute('aria-pressed', String(prefs.wordWrap));
+
+    this.editor.setSpellcheck(prefs.spellcheck);
+
+    this.recentFiles = prefs.recentFiles ?? [];
+    this.recentFolders = prefs.recentFolders ?? [];
+  }
+
+  private setSplitRatio(pct: number, persist = true): void {
+    const clamped = Math.max(20, Math.min(80, pct));
+    this.splitRatio = clamped;
+    document.documentElement.style.setProperty('--split-ratio', `${clamped.toFixed(2)}%`);
+    document.getElementById('split-resizer')?.setAttribute('aria-valuenow', String(Math.round(clamped)));
+    if (persist) {
+      this.schedulePrefsSave();
+    }
+  }
+
+  private setZoomPercent(pct: number, persist = true): void {
+    const clamped = Math.max(75, Math.min(175, Math.round(pct / 5) * 5));
+    this.zoomPercent = clamped;
+    document.documentElement.style.setProperty('--doc-zoom', String(clamped / 100));
+    this.statusZoomBtn.textContent = `${clamped}%`;
+    if (persist) {
+      this.schedulePrefsSave();
+    }
+  }
+
+  private pushRecentFile(filePath: string): void {
+    const lower = filePath.toLowerCase();
+    this.recentFiles = [
+      filePath,
+      ...this.recentFiles.filter((p) => p.toLowerCase() !== lower),
+    ].slice(0, 12);
+    if (!this.workspaceTree) {
+      this.renderEmptySidebarWithRecents();
+    }
+  }
+
+  private pushRecentFolder(folderPath: string): void {
+    const lower = folderPath.toLowerCase();
+    this.recentFolders = [
+      folderPath,
+      ...this.recentFolders.filter((p) => p.toLowerCase() !== lower),
+    ].slice(0, 8);
+  }
+
+  private buildCurrentUiPrefs(): UiSessionPrefs {
+    const sessionFiles = this.tabs
+      .map((t) => t.path)
+      .filter((p): p is string => Boolean(p));
+    return {
+      splitRatio: this.splitRatio,
+      zoomPercent: this.zoomPercent,
+      syncScroll: this.syncScroll.isEnabled(),
+      autoSave: this.autoSaveEnabled,
+      wordWrap: this.editor.isWordWrapEnabled(),
+      spellcheck: this.editor.isSpellcheckEnabled(),
+      recentFiles: this.recentFiles,
+      recentFolders: this.recentFolders,
+      sessionFiles,
+      activeSessionFile: this.activeTab?.path ?? null,
+    };
+  }
+
+  private schedulePrefsSave(): void {
+    window.clearTimeout(this.prefsSyncTimer);
+    this.prefsSyncTimer = window.setTimeout(() => {
+      void backend.saveUiPrefs(this.buildCurrentUiPrefs()).catch(() => {});
+    }, 350);
+  }
+
+  // ==========================================================================
+  // Quick-Open & Command Palette Items
+  // ==========================================================================
+
+  private async buildPaletteFileItems(): Promise<PaletteItem[]> {
+    const items: PaletteItem[] = [];
+    const seenPaths = new Set<string>();
+
+    for (const tab of this.tabs) {
+      if (tab.path) {
+        seenPaths.add(tab.path.toLowerCase());
+      }
+      items.push({
+        id: `tab:${tab.id}`,
+        kind: 'tab',
+        label: tab.name,
+        subtitle: tab.path ?? 'Ungespeicherter Tab',
+        badge: tab.id === this.activeTabId ? 'Aktiv' : 'Geöffnet',
+        run: () => this.activateTab(tab.id),
+      });
+    }
+
+    if (this.workspaceTree) {
+      if (!this.workspaceFilesCache) {
+        try {
+          const res = await backend.listWorkspaceFiles(this.workspaceTree.path);
+          this.workspaceFilesCache = res.files;
+        } catch {
+          this.workspaceFilesCache = [];
+        }
+      }
+      for (const f of this.workspaceFilesCache) {
+        const lower = f.path.toLowerCase();
+        if (seenPaths.has(lower)) continue;
+        seenPaths.add(lower);
+        items.push({
+          id: `ws:${f.path}`,
+          kind: 'file',
+          label: f.name,
+          subtitle: f.relPath,
+          badge: 'Arbeitsordner',
+          run: () => this.openFileByPath(f.path),
+        });
+      }
+    }
+
+    for (const recentPath of this.recentFiles) {
+      const lower = recentPath.toLowerCase();
+      if (seenPaths.has(lower)) continue;
+      seenPaths.add(lower);
+      items.push({
+        id: `recent:${recentPath}`,
+        kind: 'recent',
+        label: baseNameOfPath(recentPath),
+        subtitle: recentPath,
+        badge: 'Zuletzt geöffnet',
+        run: () => this.openFileByPath(recentPath),
+      });
+    }
+
+    for (const folderPath of this.recentFolders) {
+      if (this.workspaceTree?.path.toLowerCase() === folderPath.toLowerCase()) continue;
+      items.push({
+        id: `folder:${folderPath}`,
+        kind: 'folder',
+        label: baseNameOfPath(folderPath),
+        subtitle: folderPath,
+        badge: 'Ordnerverlauf',
+        run: async () => {
+          await this.loadWorkspaceFolder(folderPath);
+          this.switchSidebarPanel('files');
+        },
+      });
+    }
+
+    return items;
+  }
+
+  private buildPaletteCommandItems(): PaletteItem[] {
+    const wrapActive = this.editor.isWordWrapEnabled();
+    const spellActive = this.editor.isSpellcheckEnabled();
+    const syncActive = this.syncScroll.isEnabled();
+    const autoActive = this.autoSaveEnabled;
+    const currentEol = this.activeTab?.lineEnding ?? 'CRLF';
+
+    return [
+      {
+        id: 'cmd:new-tab',
+        kind: 'command',
+        label: 'Datei: Neues Markdown-Dokument',
+        shortcut: 'Strg+N',
+        run: () => this.createNewTab(),
+      },
+      {
+        id: 'cmd:open-file',
+        kind: 'command',
+        label: 'Datei: Markdown-Datei öffnen…',
+        shortcut: 'Strg+O',
+        run: () => this.triggerOpenFilesDialog(),
+      },
+      {
+        id: 'cmd:open-folder',
+        kind: 'command',
+        label: 'Arbeitsbereich: Ordner öffnen…',
+        shortcut: 'Strg+Umschalt+O',
+        run: () => this.triggerOpenFolderDialog(),
+      },
+      {
+        id: 'cmd:save',
+        kind: 'command',
+        label: 'Datei: Speichern',
+        shortcut: 'Strg+S',
+        run: () => {
+          if (this.activeTab) void this.saveTab(this.activeTab, false);
+        },
+      },
+      {
+        id: 'cmd:save-as',
+        kind: 'command',
+        label: 'Datei: Speichern unter…',
+        shortcut: 'Strg+Umschalt+S',
+        run: () => {
+          if (this.activeTab) void this.saveTab(this.activeTab, true);
+        },
+      },
+      {
+        id: 'cmd:export-html',
+        kind: 'command',
+        label: 'Export: Als eigenständige HTML-Datei exportieren…',
+        run: () => this.exportCurrentTabHtml(),
+      },
+      {
+        id: 'cmd:print',
+        kind: 'command',
+        label: 'Export: Drucken / Als PDF speichern…',
+        shortcut: 'Strg+P',
+        run: () => window.print(),
+      },
+      {
+        id: 'cmd:view-split',
+        kind: 'command',
+        label: 'Ansicht: Split-Vorschau (Editor & Live-Vorschau)',
+        shortcut: 'Alt+2',
+        run: () => this.setViewMode('split'),
+      },
+      {
+        id: 'cmd:view-editor',
+        kind: 'command',
+        label: 'Ansicht: Nur Editor',
+        shortcut: 'Alt+1',
+        run: () => this.setViewMode('editor'),
+      },
+      {
+        id: 'cmd:view-preview',
+        kind: 'command',
+        label: 'Ansicht: Nur Lese-Vorschau',
+        shortcut: 'Alt+3',
+        run: () => this.setViewMode('preview'),
+      },
+      {
+        id: 'cmd:toggle-wrap',
+        kind: 'command',
+        label: `Editor: Zeilenumbruch ${wrapActive ? 'deaktivieren' : 'aktivieren'}`,
+        badge: wrapActive ? 'Aktiv' : 'Aus',
+        shortcut: 'Alt+Z',
+        run: () => this.toggleWordWrap(),
+      },
+      {
+        id: 'cmd:toggle-spellcheck',
+        kind: 'command',
+        label: `Editor: Rechtschreibprüfung ${spellActive ? 'deaktivieren' : 'aktivieren'}`,
+        badge: spellActive ? 'Aktiv' : 'Aus',
+        run: () => {
+          this.editor.setSpellcheck(!spellActive);
+          this.schedulePrefsSave();
+        },
+      },
+      {
+        id: 'cmd:toggle-sync-scroll',
+        kind: 'command',
+        label: `Vorschau: Synchronisiertes Scrollen ${syncActive ? 'ausschalten' : 'einschalten'}`,
+        badge: syncActive ? 'Aktiv' : 'Aus',
+        run: () => this.toggleSyncScroll(),
+      },
+      {
+        id: 'cmd:toggle-autosave',
+        kind: 'command',
+        label: `Datei: Auto-Save ${autoActive ? 'ausschalten' : 'einschalten'}`,
+        badge: autoActive ? 'Aktiv' : 'Aus',
+        run: () => this.toggleAutoSave(),
+      },
+      {
+        id: 'cmd:toggle-eol',
+        kind: 'command',
+        label: `Dokument: Zeilenenden auf ${currentEol === 'CRLF' ? 'LF (Unix)' : 'CRLF (Windows)'} umstellen`,
+        badge: currentEol,
+        run: () => this.toggleActiveTabLineEnding(),
+      },
+      {
+        id: 'cmd:zoom-in',
+        kind: 'command',
+        label: 'Ansicht: Dokument vergrößern (Zoom +)',
+        shortcut: 'Strg++',
+        run: () => this.setZoomPercent(this.zoomPercent + 10),
+      },
+      {
+        id: 'cmd:zoom-out',
+        kind: 'command',
+        label: 'Ansicht: Dokument verkleinern (Zoom -)',
+        shortcut: 'Strg+-',
+        run: () => this.setZoomPercent(this.zoomPercent - 10),
+      },
+      {
+        id: 'cmd:zoom-reset',
+        kind: 'command',
+        label: 'Ansicht: Dokument-Zoom auf 100 % zurücksetzen',
+        shortcut: 'Strg+0',
+        run: () => this.setZoomPercent(100),
+      },
+      {
+        id: 'cmd:search-workspace',
+        kind: 'command',
+        label: 'Suche: Volltextsuche im Arbeitsordner öffnen',
+        shortcut: 'Strg+Umschalt+F',
+        run: () => this.switchSidebarPanel('search'),
+      },
+      {
+        id: 'cmd:outline',
+        kind: 'command',
+        label: 'Navigation: Dokument-Gliederung (Inhaltsverzeichnis) anzeigen',
+        run: () => this.switchSidebarPanel('outline'),
+      },
+      {
+        id: 'cmd:zen',
+        kind: 'command',
+        label: 'Ansicht: Zen-Fokusmodus umschalten',
+        shortcut: 'F11',
+        run: () => this.appEl.classList.toggle('is-zen'),
+      },
+      {
+        id: 'cmd:theme',
+        kind: 'command',
+        label: 'Darstellung: Hell-/Dunkel-Design umschalten',
+        run: () => document.getElementById('btn-theme-toggle')?.click(),
+      },
+      {
+        id: 'cmd:reveal',
+        kind: 'command',
+        label: 'Windows: Aktuelle Datei im Explorer anzeigen',
+        run: () => {
+          const p = this.activeTab?.path ?? this.workspaceTree?.path;
+          if (p) void backend.revealInExplorer(p);
+        },
+      },
+      {
+        id: 'cmd:shortcuts',
+        kind: 'command',
+        label: 'Hilfe: Tastenkürzel-Übersicht anzeigen',
+        shortcut: 'F1',
+        run: () => (document.getElementById('shortcuts-dialog') as HTMLDialogElement).showModal(),
+      },
+    ];
+  }
+
+  // ==========================================================================
+  // Crash-Recovery Draft Persistence & Image Insertion
   // ==========================================================================
 
   private restoreRecoveredDrafts(drafts: DraftEntry[]): void {
@@ -278,6 +668,7 @@ class MarkLiveApp {
         savedContent: draft.savedContent,
         currentContent: draft.content,
         lineEnding: draft.lineEnding === 'LF' ? 'LF' : 'CRLF',
+        encoding: 'UTF-8',
         isDirty: true,
         editorState: this.editor.createState(draft.content),
         editorScrollTop: 0,
@@ -326,6 +717,29 @@ class MarkLiveApp {
     }
   }
 
+  private async handleDroppedImages(imagePaths: string[]): Promise<void> {
+    const tab = this.activeTab;
+    if (!tab) return;
+    const targetBaseDir = tab.parentDir ?? this.workspaceTree?.path ?? null;
+    const snippets: string[] = [];
+
+    for (const imgPath of imagePaths) {
+      try {
+        const res = await backend.importDroppedImage(targetBaseDir, imgPath);
+        snippets.push(res.markdownSnippet);
+      } catch (err) {
+        console.error('Bild konnte nicht importiert werden:', err);
+      }
+    }
+
+    if (snippets.length > 0) {
+      this.editor.insertSnippet(snippets.join('\n'));
+      if (this.workspaceTree) {
+        void this.refreshWorkspaceTree();
+      }
+    }
+  }
+
   // ==========================================================================
   // Tab & File Lifecycle
   // ==========================================================================
@@ -345,6 +759,7 @@ class MarkLiveApp {
       savedContent: markDirty ? '' : initialContent,
       currentContent: initialContent,
       lineEnding: 'CRLF',
+      encoding: 'UTF-8',
       isDirty: markDirty,
       editorState: state,
       editorScrollTop: 0,
@@ -383,6 +798,8 @@ class MarkLiveApp {
     this.highlightActiveFileInTree();
     this.updateStatusBar();
     this.syncWindowMetadata();
+    this.schedulePrefsSave();
+
     void this.renderPreviewImmediate(
       target.currentContent,
       target.parentDir ?? this.workspaceTree?.path ?? null,
@@ -390,7 +807,7 @@ class MarkLiveApp {
     );
   }
 
-  private async openFileByPath(path: string): Promise<void> {
+  private async openFileByPath(path: string, persistPrefs = true): Promise<void> {
     const normLower = path.toLowerCase();
     const existing = this.tabs.find((t) => t.path?.toLowerCase() === normLower);
     if (existing) {
@@ -400,13 +817,13 @@ class MarkLiveApp {
 
     try {
       const payload = await backend.readFile(path);
-      this.openTabFromPayload(payload);
+      this.openTabFromPayload(payload, persistPrefs);
     } catch (err) {
       console.error('Datei konnte nicht geöffnet werden:', err);
     }
   }
 
-  private openTabFromPayload(payload: FilePayload): void {
+  private openTabFromPayload(payload: FilePayload, persistPrefs = true): void {
     const normLower = payload.path.toLowerCase();
     const existing = this.tabs.find((t) => t.path?.toLowerCase() === normLower);
     if (existing) {
@@ -426,6 +843,8 @@ class MarkLiveApp {
       this.persistActiveTabScrollAndState();
     }
 
+    this.pushRecentFile(payload.path);
+
     const id = crypto.randomUUID();
     const tab: OpenTab = {
       id,
@@ -435,6 +854,7 @@ class MarkLiveApp {
       savedContent: payload.content,
       currentContent: payload.content,
       lineEnding: payload.lineEnding,
+      encoding: payload.encoding || 'UTF-8',
       isDirty: false,
       editorState: this.editor.createState(payload.content),
       editorScrollTop: 0,
@@ -445,6 +865,9 @@ class MarkLiveApp {
 
     this.tabs.push(tab);
     this.activateTab(id);
+    if (persistPrefs) {
+      this.schedulePrefsSave();
+    }
   }
 
   private async saveTab(tab: OpenTab, forceSaveAs = false): Promise<boolean> {
@@ -464,16 +887,34 @@ class MarkLiveApp {
     }
 
     tab.savedContent = tab.currentContent;
+    tab.encoding = 'UTF-8';
     tab.isDirty = false;
+    this.pushRecentFile(tab.path);
+    this.workspaceFilesCache = null;
+
     this.renderTabBar();
     this.updateStatusBar();
     this.syncWindowMetadata();
     this.scheduleDraftSync();
+    this.schedulePrefsSave();
 
     if (this.workspaceTree) {
       void this.refreshWorkspaceTree();
     }
     return true;
+  }
+
+  private toggleActiveTabLineEnding(): void {
+    const tab = this.activeTab;
+    if (!tab) return;
+    tab.lineEnding = tab.lineEnding === 'CRLF' ? 'LF' : 'CRLF';
+    if (tab.path) {
+      tab.isDirty = true;
+      this.renderTabBar();
+      this.syncWindowMetadata();
+      this.scheduleDraftSync();
+    }
+    this.updateStatusBar();
   }
 
   private async requestCloseTab(tabId: string): Promise<void> {
@@ -503,10 +944,11 @@ class MarkLiveApp {
     }
     this.syncWindowMetadata();
     this.scheduleDraftSync();
+    this.schedulePrefsSave();
   }
 
   // ==========================================================================
-  // Live Markdown Rendering & Bidirectional Sync-Scroll
+  // Live Markdown Rendering
   // ==========================================================================
 
   private handleEditorContentChange(content: string): void {
@@ -562,137 +1004,28 @@ class MarkLiveApp {
       if (typeof restoreScrollTop === 'number') {
         this.previewPaneEl.scrollTop = restoreScrollTop;
       }
+      this.syncScroll.updateActiveHeadingFromViewport();
     } catch (err) {
       console.error('Markdown-Rendering fehlgeschlagen:', err);
     }
   }
 
-  private getPreviewLineAnchors(): Array<{ line: number; top: number }> {
-    const paneRect = this.previewPaneEl.getBoundingClientRect();
-    const scrollTop = this.previewPaneEl.scrollTop;
-    const nodes = this.previewContentEl.querySelectorAll<HTMLElement>('[data-line]');
-    const anchors: Array<{ line: number; top: number }> = [];
-
-    for (const el of nodes) {
-      const line = Number(el.getAttribute('data-line'));
-      if (!Number.isFinite(line)) continue;
-      const top = el.getBoundingClientRect().top - paneRect.top + scrollTop;
-      if (anchors.length === 0 || anchors[anchors.length - 1].line !== line) {
-        anchors.push({ line, top });
-      }
-    }
-    anchors.sort((a, b) => a.line - b.line);
-    return anchors;
-  }
-
-  private syncEditorToPreview(): void {
-    if (!this.syncScrollEnabled || this.scrollSyncLock === 'preview') return;
-    if (this.appEl.getAttribute('data-view') !== 'split') return;
-
-    const edScroller = this.editor.view.scrollDOM;
-    const edMax = edScroller.scrollHeight - edScroller.clientHeight;
-    const pvMax = this.previewPaneEl.scrollHeight - this.previewPaneEl.clientHeight;
-    if (edMax <= 0 || pvMax <= 0) return;
-
-    this.lockScrollSource('editor');
-
-    if (edScroller.scrollTop <= 2) {
-      this.previewPaneEl.scrollTop = 0;
-      return;
-    }
-    if (edScroller.scrollTop >= edMax - 2) {
-      this.previewPaneEl.scrollTop = pvMax;
-      return;
-    }
-
-    const topLine = this.editor.getTopViewportLine();
-    const anchors = this.getPreviewLineAnchors();
-    if (anchors.length === 0) {
-      this.previewPaneEl.scrollTop = (edScroller.scrollTop / edMax) * pvMax;
-      return;
-    }
-
-    let prev = { line: 1, top: 0 };
-    let next = { line: this.editor.view.state.doc.lines + 1, top: pvMax };
-
-    for (const a of anchors) {
-      if (a.line <= topLine) {
-        prev = a;
-      } else {
-        next = a;
-        break;
-      }
-    }
-
-    const span = Math.max(1, next.line - prev.line);
-    const ratio = Math.max(0, Math.min(1, (topLine - prev.line) / span));
-    this.previewPaneEl.scrollTop = prev.top + (next.top - prev.top) * ratio;
-  }
-
-  private syncPreviewToEditor(): void {
-    if (!this.syncScrollEnabled || this.scrollSyncLock === 'editor') return;
-    if (this.appEl.getAttribute('data-view') !== 'split') return;
-
-    const pvTop = this.previewPaneEl.scrollTop;
-    const pvMax = this.previewPaneEl.scrollHeight - this.previewPaneEl.clientHeight;
-    const edMax =
-      this.editor.view.scrollDOM.scrollHeight - this.editor.view.scrollDOM.clientHeight;
-    if (pvMax <= 0 || edMax <= 0) return;
-
-    this.lockScrollSource('preview');
-
-    if (pvTop <= 2) {
-      this.editor.view.scrollDOM.scrollTop = 0;
-      return;
-    }
-    if (pvTop >= pvMax - 2) {
-      this.editor.view.scrollDOM.scrollTop = edMax;
-      return;
-    }
-
-    const anchors = this.getPreviewLineAnchors();
-    if (anchors.length === 0) {
-      this.editor.view.scrollDOM.scrollTop = (pvTop / pvMax) * edMax;
-      return;
-    }
-
-    let prev = { line: 1, top: 0 };
-    let next = { line: this.editor.view.state.doc.lines, top: pvMax };
-
-    for (const a of anchors) {
-      if (a.top <= pvTop + 8) {
-        prev = a;
-      } else {
-        next = a;
-        break;
-      }
-    }
-
-    const pxSpan = Math.max(1, next.top - prev.top);
-    const ratio = Math.max(0, Math.min(1, (pvTop - prev.top) / pxSpan));
-    const targetLine = prev.line + (next.line - prev.line) * ratio;
-    this.editor.scrollToSourceLine(targetLine);
-  }
-
-  private lockScrollSource(source: 'editor' | 'preview'): void {
-    this.scrollSyncLock = source;
-    window.clearTimeout(this.scrollUnlockTimer);
-    this.scrollUnlockTimer = window.setTimeout(() => {
-      this.scrollSyncLock = null;
-    }, 90);
-  }
-
   // ==========================================================================
-  // Workspace Explorer, Full-Text Search & Document Outline
+  // Workspace Explorer, Recent History, Search & Outline
   // ==========================================================================
 
   private switchSidebarPanel(panel: 'files' | 'search' | 'outline'): void {
     this.sidebarEl.classList.remove('is-collapsed');
-    for (const b of document.querySelectorAll<HTMLButtonElement>('[data-sidebar-panel]')) {
+    const sidebarTabs = document.getElementById('sidebar-tabs')!;
+    let activeBtn: HTMLButtonElement | null = null;
+    for (const b of sidebarTabs.querySelectorAll<HTMLButtonElement>('[data-sidebar-panel]')) {
       const active = b.dataset.sidebarPanel === panel;
       b.classList.toggle('is-active', active);
       b.setAttribute('aria-selected', String(active));
+      if (active) activeBtn = b;
     }
+    syncRovingTabindex(sidebarTabs, 'button[role="tab"]', activeBtn);
+
     document.getElementById('panel-files')!.hidden = panel !== 'files';
     document.getElementById('panel-search')!.hidden = panel !== 'search';
     document.getElementById('panel-outline')!.hidden = panel !== 'outline';
@@ -704,6 +1037,91 @@ class MarkLiveApp {
         void this.runWorkspaceSearch();
       }
     }
+  }
+
+  private renderEmptySidebarWithRecents(): void {
+    if (this.workspaceTree) return;
+    this.fileTreeEl.replaceChildren();
+
+    const wrap = document.createElement('div');
+    wrap.className = 'empty-sidebar-state';
+
+    const p = document.createElement('p');
+    p.textContent = 'Öffne einen Ordner oder ziehe Dateien per Drag & Drop in das Fenster.';
+
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.className = 'secondary-action-btn';
+    openBtn.textContent = 'Ordner auswählen…';
+    openBtn.addEventListener('click', () => {
+      void this.triggerOpenFolderDialog();
+    });
+
+    wrap.append(p, openBtn);
+
+    if (this.recentFolders.length > 0) {
+      const sec = document.createElement('div');
+      sec.className = 'recent-section';
+      const h = document.createElement('h3');
+      h.className = 'recent-heading';
+      h.textContent = 'Zuletzt geöffnete Ordner';
+      sec.appendChild(h);
+
+      for (const folderPath of this.recentFolders.slice(0, 5)) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'recent-entry-btn';
+        btn.title = folderPath;
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'recent-entry-name';
+        nameSpan.textContent = `📁 ${baseNameOfPath(folderPath)}`;
+
+        const pathSpan = document.createElement('span');
+        pathSpan.className = 'recent-entry-path';
+        pathSpan.textContent = folderPath;
+
+        btn.append(nameSpan, pathSpan);
+        btn.addEventListener('click', () => {
+          void this.loadWorkspaceFolder(folderPath);
+        });
+        sec.appendChild(btn);
+      }
+      wrap.appendChild(sec);
+    }
+
+    if (this.recentFiles.length > 0) {
+      const sec = document.createElement('div');
+      sec.className = 'recent-section';
+      const h = document.createElement('h3');
+      h.className = 'recent-heading';
+      h.textContent = 'Zuletzt geöffnete Dateien';
+      sec.appendChild(h);
+
+      for (const filePath of this.recentFiles.slice(0, 6)) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'recent-entry-btn';
+        btn.title = filePath;
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'recent-entry-name';
+        nameSpan.textContent = `📝 ${baseNameOfPath(filePath)}`;
+
+        const pathSpan = document.createElement('span');
+        pathSpan.className = 'recent-entry-path';
+        pathSpan.textContent = parentDirOfPath(filePath) ?? filePath;
+
+        btn.append(nameSpan, pathSpan);
+        btn.addEventListener('click', () => {
+          void this.openFileByPath(filePath);
+        });
+        sec.appendChild(btn);
+      }
+      wrap.appendChild(sec);
+    }
+
+    this.fileTreeEl.appendChild(wrap);
   }
 
   private async runWorkspaceSearch(): Promise<void> {
@@ -754,7 +1172,7 @@ class MarkLiveApp {
     const totalHits = results.reduce((acc, f) => acc + f.matches.length, 0);
     const summary = document.createElement('div');
     summary.className = 'search-summary';
-    summary.textContent = `${totalHits} ${totalHits === 1 ? 'Treffer' : 'Treffer'} in ${results.length} ${results.length === 1 ? 'Datei' : 'Dateien'}`;
+    summary.textContent = `${totalHits} Treffer in ${results.length} ${results.length === 1 ? 'Datei' : 'Dateien'}`;
     this.searchResultsEl.appendChild(summary);
 
     for (const fileRes of results) {
@@ -804,10 +1222,10 @@ class MarkLiveApp {
     }
   }
 
-  private async loadWorkspaceFolder(path: string): Promise<void> {
+  private async loadWorkspaceFolder(path: string, persistPrefs = true): Promise<void> {
     try {
       const tree = await backend.listTree(path);
-      this.setWorkspaceTree(tree);
+      this.setWorkspaceTree(tree, persistPrefs);
     } catch (err) {
       console.error('Ordnerbaum konnte nicht geladen werden:', err);
     }
@@ -815,11 +1233,17 @@ class MarkLiveApp {
 
   private async refreshWorkspaceTree(): Promise<void> {
     if (!this.workspaceTree) return;
-    await this.loadWorkspaceFolder(this.workspaceTree.path);
+    await this.loadWorkspaceFolder(this.workspaceTree.path, false);
   }
 
-  private setWorkspaceTree(tree: FileTreeNode): void {
+  private setWorkspaceTree(tree: FileTreeNode, persistPrefs = true): void {
     this.workspaceTree = tree;
+    this.workspaceFilesCache = null;
+    this.pushRecentFolder(tree.path);
+    if (persistPrefs) {
+      this.schedulePrefsSave();
+    }
+
     this.workspaceTitleEl.textContent = tree.name;
     this.workspaceTitleEl.title = tree.path;
     document.getElementById('btn-new-folder-file')!.hidden = false;
@@ -853,7 +1277,7 @@ class MarkLiveApp {
       summary.dataset.dirpath = node.path;
       summary.dataset.entryname = node.name;
       summary.title = node.path;
-      summary.innerHTML = `<span class="tree-chevron">▶</span><span>📁</span><span></span>`;
+      summary.innerHTML = `<span class="tree-chevron">▶</span><span aria-hidden="true">📁</span><span></span>`;
       summary.lastElementChild!.textContent = node.name;
       details.appendChild(summary);
 
@@ -873,7 +1297,7 @@ class MarkLiveApp {
     btn.dataset.entryname = node.name;
     btn.title = node.path;
     const icon = node.isMarkdown ? '📝' : '📄';
-    btn.innerHTML = `<span>${icon}</span><span></span>`;
+    btn.innerHTML = `<span aria-hidden="true">${icon}</span><span></span>`;
     btn.lastElementChild!.textContent = node.name;
     btn.addEventListener('click', () => {
       if (node.isMarkdown) {
@@ -908,6 +1332,7 @@ class MarkLiveApp {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = `outline-item outline-lvl-${item.level}`;
+      btn.dataset.headingSlug = item.slug;
       btn.textContent = item.text || 'Überschrift';
       btn.title = `Zeile ${item.line}: ${item.text}`;
       btn.addEventListener('click', () => {
@@ -918,6 +1343,17 @@ class MarkLiveApp {
         headingEl?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
       this.outlineEl.appendChild(btn);
+    }
+    this.highlightCurrentHeadingInOutline();
+  }
+
+  private highlightCurrentHeadingInOutline(): void {
+    const items = this.outlineEl.querySelectorAll<HTMLButtonElement>('.outline-item');
+    for (const btn of items) {
+      const isCurrent = Boolean(
+        this.activeHeadingSlug && btn.dataset.headingSlug === this.activeHeadingSlug,
+      );
+      btn.classList.toggle('is-current', isCurrent);
     }
   }
 
@@ -1076,34 +1512,56 @@ class MarkLiveApp {
 
       await this.refreshWorkspaceTree();
       this.scheduleDraftSync();
+      this.schedulePrefsSave();
     } catch (err) {
       console.error('Löschen in Papierkorb fehlgeschlagen:', err);
     }
   }
 
   // ==========================================================================
-  // Chrome, Tabs, Status Bar & Dialogs
+  // Chrome, Accessible Sibling Tabs, Status Bar & Dialogs
   // ==========================================================================
 
   private renderTabBar(): void {
     this.tabBarEl.replaceChildren();
+    let activeTabBtn: HTMLButtonElement | null = null;
+
     for (const tab of this.tabs) {
-      const item = document.createElement('div');
-      item.className = `tab-item ${tab.id === this.activeTabId ? 'is-active' : ''}`;
-      item.setAttribute('role', 'tab');
-      item.setAttribute('aria-selected', String(tab.id === this.activeTabId));
-      item.title = tab.path ?? `${tab.name} (Ungespeichert)`;
+      const isSelected = tab.id === this.activeTabId;
+
+      const slot = document.createElement('div');
+      slot.className = `tab-slot ${isSelected ? 'is-active' : ''}`;
+      slot.setAttribute('role', 'presentation');
+      slot.addEventListener('auxclick', (e) => {
+        if (e.button === 1) {
+          e.preventDefault();
+          void this.requestCloseTab(tab.id);
+        }
+      });
+
+      const selectBtn = document.createElement('button');
+      selectBtn.type = 'button';
+      selectBtn.className = 'tab-select-btn';
+      selectBtn.setAttribute('role', 'tab');
+      selectBtn.setAttribute('aria-selected', String(isSelected));
+      selectBtn.tabIndex = isSelected ? 0 : -1;
+      selectBtn.title = tab.path ?? `${tab.name} (Ungespeichert)`;
+      selectBtn.addEventListener('click', () => this.activateTab(tab.id));
 
       const titleSpan = document.createElement('span');
       titleSpan.className = 'tab-title';
       titleSpan.textContent = tab.name;
-      item.appendChild(titleSpan);
+      selectBtn.appendChild(titleSpan);
 
       if (tab.isDirty) {
         const dot = document.createElement('span');
         dot.className = 'tab-dirty-dot';
         dot.title = 'Ungespeicherte Änderungen';
-        item.appendChild(dot);
+        selectBtn.appendChild(dot);
+      }
+
+      if (isSelected) {
+        activeTabBtn = selectBtn;
       }
 
       const closeBtn = document.createElement('button');
@@ -1111,22 +1569,15 @@ class MarkLiveApp {
       closeBtn.className = 'tab-close-btn';
       closeBtn.setAttribute('aria-label', `${tab.name} schließen`);
       closeBtn.textContent = '×';
-      closeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
+      closeBtn.addEventListener('click', () => {
         void this.requestCloseTab(tab.id);
       });
-      item.appendChild(closeBtn);
 
-      item.addEventListener('click', () => this.activateTab(tab.id));
-      item.addEventListener('auxclick', (e) => {
-        if (e.button === 1) {
-          e.preventDefault();
-          void this.requestCloseTab(tab.id);
-        }
-      });
-
-      this.tabBarEl.appendChild(item);
+      slot.append(selectBtn, closeBtn);
+      this.tabBarEl.appendChild(slot);
     }
+
+    syncRovingTabindex(this.tabBarEl, 'button[role="tab"]', activeTabBtn);
   }
 
   private updateStatusBar(): void {
@@ -1149,7 +1600,9 @@ class MarkLiveApp {
       const mins = Math.ceil(readingTimeSec / 60);
       this.statusReadtimeEl.textContent = `~${mins} Min. Lesezeit`;
     }
-    this.statusEolEl.textContent = tab.lineEnding;
+    this.statusZoomBtn.textContent = `${this.zoomPercent}%`;
+    this.statusEolBtn.textContent = tab.lineEnding;
+    this.statusEncodingEl.textContent = tab.encoding;
   }
 
   private syncWindowMetadata(): void {
@@ -1209,7 +1662,6 @@ class MarkLiveApp {
 
     syncNativeWindowTheme(false);
 
-    // Listen to OS preference changes without deleting stored user override
     media.addEventListener('change', () => {
       syncNativeWindowTheme(true);
     });
@@ -1258,11 +1710,75 @@ class MarkLiveApp {
   }
 
   // ==========================================================================
-  // UI & Global Shortcuts Wiring
+  // View, Toolbar & Global Shortcuts Wiring
   // ==========================================================================
 
+  private setViewMode(mode: 'editor' | 'split' | 'preview'): void {
+    this.appEl.setAttribute('data-view', mode);
+    for (const b of document.querySelectorAll<HTMLButtonElement>('[data-set-view]')) {
+      b.classList.toggle('is-active', b.dataset.setView === mode);
+    }
+    this.syncScroll.updateActiveHeadingFromViewport();
+  }
+
+  private toggleWordWrap(): void {
+    const next = !this.editor.isWordWrapEnabled();
+    this.editor.setWordWrap(next);
+    const btn = document.getElementById('btn-word-wrap')!;
+    btn.classList.toggle('is-active', next);
+    btn.setAttribute('aria-pressed', String(next));
+    this.schedulePrefsSave();
+  }
+
+  private toggleSyncScroll(): void {
+    const next = !this.syncScroll.isEnabled();
+    this.syncScroll.setEnabled(next);
+    const btn = document.getElementById('btn-sync-scroll')!;
+    btn.classList.toggle('is-active', next);
+    btn.setAttribute('aria-pressed', String(next));
+    this.schedulePrefsSave();
+  }
+
+  private toggleAutoSave(): void {
+    this.autoSaveEnabled = !this.autoSaveEnabled;
+    const btn = document.getElementById('btn-autosave')!;
+    btn.classList.toggle('is-active', this.autoSaveEnabled);
+    btn.setAttribute('aria-pressed', String(this.autoSaveEnabled));
+    this.schedulePrefsSave();
+  }
+
+  private async triggerOpenFilesDialog(): Promise<void> {
+    const res = await backend.openFilesDialog();
+    for (const f of res.files) {
+      this.openTabFromPayload(f);
+    }
+  }
+
+  private async triggerOpenFolderDialog(): Promise<void> {
+    const res = await backend.openFolderDialog();
+    if (res.tree) {
+      this.setWorkspaceTree(res.tree);
+      this.switchSidebarPanel('files');
+    }
+  }
+
+  private exportCurrentTabHtml(): void {
+    const tab = this.activeTab;
+    if (!tab) return;
+    void backend.exportHtmlDialog(
+      tab.name,
+      tab.currentContent,
+      tab.parentDir ?? this.workspaceTree?.path ?? null,
+      tab.parentDir ?? this.workspaceTree?.path ?? null,
+    );
+  }
+
   private bindUIEvents(): void {
-    // Primary toolbar actions
+    // Keep unsaved-changes Escape guard in a cancel listener alongside closedby="none"
+    document.getElementById('unsaved-dialog')!.addEventListener('cancel', (e) => {
+      e.preventDefault();
+    });
+
     document.getElementById('btn-toggle-sidebar')!.addEventListener('click', () => {
       this.sidebarEl.classList.toggle('is-collapsed');
     });
@@ -1271,31 +1787,21 @@ class MarkLiveApp {
     document.getElementById('btn-new-tab')!.addEventListener('click', newTabFn);
     document.getElementById('btn-tab-add')!.addEventListener('click', newTabFn);
 
-    const openFilesFn = async () => {
-      const res = await backend.openFilesDialog();
-      for (const f of res.files) {
-        this.openTabFromPayload(f);
-      }
-    };
-    document.getElementById('btn-open-file')!.addEventListener('click', openFilesFn);
+    document.getElementById('btn-open-file')!.addEventListener('click', () => {
+      void this.triggerOpenFilesDialog();
+    });
 
-    const openFolderFn = async () => {
-      const res = await backend.openFolderDialog();
-      if (res.tree) {
-        this.setWorkspaceTree(res.tree);
-        this.switchSidebarPanel('files');
-      }
-    };
-    document.getElementById('btn-open-folder')!.addEventListener('click', openFolderFn);
-    document
-      .getElementById('btn-sidebar-open-folder')!
-      .addEventListener('click', openFolderFn);
+    document.getElementById('btn-open-folder')!.addEventListener('click', () => {
+      void this.triggerOpenFolderDialog();
+    });
+    document.getElementById('btn-sidebar-open-folder')?.addEventListener('click', () => {
+      void this.triggerOpenFolderDialog();
+    });
 
     document.getElementById('btn-refresh-tree')!.addEventListener('click', () => {
       void this.refreshWorkspaceTree();
     });
 
-    // Sidebar header quick actions: New File & New Subfolder
     document.getElementById('btn-new-folder-file')!.addEventListener('click', () => {
       if (!this.workspaceTree) return;
       this.openEntryDialog('new-file', this.workspaceTree.path);
@@ -1306,7 +1812,6 @@ class MarkLiveApp {
       this.openEntryDialog('new-folder', this.workspaceTree.path);
     });
 
-    // Explorer right-click context menu & action dispatch
     this.fileTreeEl.addEventListener('contextmenu', (e) => {
       this.openTreeContextMenu(e);
     });
@@ -1337,6 +1842,10 @@ class MarkLiveApp {
     const entryInput = document.getElementById('new-file-name') as HTMLInputElement;
     const entryError = document.getElementById('new-file-error')!;
 
+    entryDialog.addEventListener('close', () => {
+      entryDialog.returnValue = '';
+    });
+
     document.getElementById('new-file-form')!.addEventListener('submit', async (e) => {
       const submitter = (e as SubmitEvent).submitter as HTMLButtonElement | null;
       if (submitter?.value !== 'create') return;
@@ -1359,7 +1868,6 @@ class MarkLiveApp {
           const renamed = await backend.renamePath(targetPath, rawName);
           entryDialog.close();
 
-          // Update any open tabs referencing the renamed file or directory
           const oldLower = targetPath.toLowerCase();
           const oldPrefix = `${oldLower}\\`;
           for (const t of this.tabs) {
@@ -1381,6 +1889,7 @@ class MarkLiveApp {
           this.updateStatusBar();
           this.syncWindowMetadata();
           this.scheduleDraftSync();
+          this.schedulePrefsSave();
         }
       } catch (err) {
         entryError.textContent =
@@ -1424,59 +1933,38 @@ class MarkLiveApp {
     });
 
     document.getElementById('btn-export-html')!.addEventListener('click', () => {
-      const tab = this.activeTab;
-      if (!tab) return;
-      void backend.exportHtmlDialog(
-        tab.name,
-        tab.currentContent,
-        tab.parentDir ?? this.workspaceTree?.path ?? null,
-        tab.parentDir ?? this.workspaceTree?.path ?? null,
-      );
+      this.exportCurrentTabHtml();
     });
 
     document.getElementById('btn-print')!.addEventListener('click', () => {
       window.print();
     });
 
-    // View mode switcher
-    const setViewMode = (mode: 'editor' | 'split' | 'preview') => {
-      this.appEl.setAttribute('data-view', mode);
-      for (const b of document.querySelectorAll<HTMLButtonElement>('[data-set-view]')) {
-        b.classList.toggle('is-active', b.dataset.setView === mode);
-      }
-    };
     for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-set-view]')) {
       btn.addEventListener('click', () => {
-        setViewMode(btn.dataset.setView as 'editor' | 'split' | 'preview');
+        this.setViewMode(btn.dataset.setView as 'editor' | 'split' | 'preview');
       });
     }
 
-    // Sync-Scroll & Auto-Save toggles
-    const syncBtn = document.getElementById('btn-sync-scroll')!;
-    syncBtn.addEventListener('click', () => {
-      this.syncScrollEnabled = !this.syncScrollEnabled;
-      syncBtn.classList.toggle('is-active', this.syncScrollEnabled);
-      syncBtn.setAttribute('aria-pressed', String(this.syncScrollEnabled));
+    document.getElementById('btn-word-wrap')!.addEventListener('click', () => {
+      this.toggleWordWrap();
     });
-
-    const autoSaveBtn = document.getElementById('btn-autosave')!;
-    autoSaveBtn.addEventListener('click', () => {
-      this.autoSaveEnabled = !this.autoSaveEnabled;
-      autoSaveBtn.classList.toggle('is-active', this.autoSaveEnabled);
-      autoSaveBtn.setAttribute('aria-pressed', String(this.autoSaveEnabled));
+    document.getElementById('btn-sync-scroll')!.addEventListener('click', () => {
+      this.toggleSyncScroll();
+    });
+    document.getElementById('btn-autosave')!.addEventListener('click', () => {
+      this.toggleAutoSave();
     });
 
     const toggleZen = () => this.appEl.classList.toggle('is-zen');
     document.getElementById('btn-zen')!.addEventListener('click', toggleZen);
 
-    // Formatting toolbar buttons
     document.getElementById('format-bar')!.addEventListener('click', (e) => {
       const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-fmt]');
       if (!btn) return;
       this.editor.applyFormat(btn.dataset.fmt as FormatAction);
     });
 
-    // Table generator dialog close handler (reset returnValue per modern-web-guidance dialog)
     const tableDialog = document.getElementById('table-dialog') as HTMLDialogElement;
     tableDialog.addEventListener('close', () => {
       const action = tableDialog.returnValue;
@@ -1508,7 +1996,11 @@ class MarkLiveApp {
       this.editor.insertSnippet(`\n${lines.join('\n')}\n`);
     });
 
-    // Sidebar tab switcher (Dateien | Suche | Gliederung)
+    const shortcutsDialog = document.getElementById('shortcuts-dialog') as HTMLDialogElement;
+    shortcutsDialog.addEventListener('close', () => {
+      shortcutsDialog.returnValue = '';
+    });
+
     for (const tabBtn of document.querySelectorAll<HTMLButtonElement>('[data-sidebar-panel]')) {
       tabBtn.addEventListener('click', () => {
         const target = tabBtn.dataset.sidebarPanel as 'files' | 'search' | 'outline';
@@ -1516,7 +2008,7 @@ class MarkLiveApp {
       });
     }
 
-    // Draggable Split-View Resizer
+    // Draggable & Keyboard-Accessible Split-View Resizer
     const resizer = document.getElementById('split-resizer')!;
     const splitContainer = document.getElementById('split-container')!;
     resizer.addEventListener('pointerdown', (e) => {
@@ -1526,8 +2018,8 @@ class MarkLiveApp {
 
       const onMove = (ev: PointerEvent) => {
         const rect = splitContainer.getBoundingClientRect();
-        const pct = Math.max(20, Math.min(80, ((ev.clientX - rect.left) / rect.width) * 100));
-        document.documentElement.style.setProperty('--split-ratio', `${pct.toFixed(2)}%`);
+        const pct = ((ev.clientX - rect.left) / rect.width) * 100;
+        this.setSplitRatio(pct, false);
       };
 
       const onUp = (ev: PointerEvent) => {
@@ -1535,6 +2027,7 @@ class MarkLiveApp {
         resizer.classList.remove('is-dragging');
         resizer.removeEventListener('pointermove', onMove);
         resizer.removeEventListener('pointerup', onUp);
+        this.schedulePrefsSave();
       };
 
       resizer.addEventListener('pointermove', onMove);
@@ -1542,11 +2035,23 @@ class MarkLiveApp {
     });
 
     resizer.addEventListener('dblclick', () => {
-      document.documentElement.style.setProperty('--split-ratio', '50%');
+      this.setSplitRatio(50);
     });
 
-    // Preview Pane interactions: Sync-scroll, Interactive Checkboxes, Copy-Code, External Links
-    this.previewPaneEl.addEventListener('scroll', () => this.syncPreviewToEditor(), {
+    resizer.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        this.setSplitRatio(this.splitRatio - 3);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        this.setSplitRatio(this.splitRatio + 3);
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        this.setSplitRatio(50);
+      }
+    });
+
+    this.previewPaneEl.addEventListener('scroll', () => this.syncScroll.syncPreviewToEditor(), {
       passive: true,
     });
 
@@ -1563,7 +2068,6 @@ class MarkLiveApp {
     this.previewContentEl.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
 
-      // Copy Code Block button
       const copyBtn = target.closest<HTMLButtonElement>('.copy-code-btn');
       if (copyBtn) {
         const codeEl = copyBtn.closest('.code-block-wrapper')?.querySelector('pre code');
@@ -1578,7 +2082,6 @@ class MarkLiveApp {
         return;
       }
 
-      // Links in Markdown Preview
       const anchor = target.closest<HTMLAnchorElement>('a[href]');
       if (anchor) {
         const href = anchor.getAttribute('href') ?? '';
@@ -1603,10 +2106,18 @@ class MarkLiveApp {
       }
     });
 
-    // Status bar file path -> Reveal in Windows Explorer
+    // Status bar interactive buttons
     this.statusPathBtn.addEventListener('click', () => {
       const p = this.activeTab?.path ?? this.workspaceTree?.path;
       if (p) void backend.revealInExplorer(p);
+    });
+
+    this.statusZoomBtn.addEventListener('click', () => {
+      this.setZoomPercent(100);
+    });
+
+    this.statusEolBtn.addEventListener('click', () => {
+      this.toggleActiveTabLineEnding();
     });
 
     // External modification reload banner
@@ -1620,6 +2131,8 @@ class MarkLiveApp {
         const payload = await backend.readFile(tab.path);
         tab.savedContent = payload.content;
         tab.currentContent = payload.content;
+        tab.encoding = payload.encoding || 'UTF-8';
+        tab.lineEnding = payload.lineEnding;
         tab.isDirty = false;
         if (tab.id === this.activeTabId) {
           this.editor.replaceAllContent(payload.content);
@@ -1641,15 +2154,21 @@ class MarkLiveApp {
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
 
-      if (mod && !e.shiftKey && key === 'n') {
+      if (mod && !e.shiftKey && key === 'e') {
+        e.preventDefault();
+        this.palette.open('files');
+      } else if (mod && e.shiftKey && key === 'p') {
+        e.preventDefault();
+        this.palette.open('commands');
+      } else if (mod && !e.shiftKey && key === 'n') {
         e.preventDefault();
         newTabFn();
       } else if (mod && !e.shiftKey && key === 'o') {
         e.preventDefault();
-        void openFilesFn();
+        void this.triggerOpenFilesDialog();
       } else if (mod && e.shiftKey && key === 'o') {
         e.preventDefault();
-        void openFolderFn();
+        void this.triggerOpenFolderDialog();
       } else if (mod && e.shiftKey && key === 'f') {
         e.preventDefault();
         this.switchSidebarPanel('search');
@@ -1659,7 +2178,7 @@ class MarkLiveApp {
       } else if (mod && e.shiftKey && key === 's') {
         e.preventDefault();
         if (this.activeTab) void this.saveTab(this.activeTab, true);
-      } else if (mod && key === 'p') {
+      } else if (mod && !e.shiftKey && key === 'p') {
         e.preventDefault();
         window.print();
       } else if (mod && key === 'w') {
@@ -1668,21 +2187,33 @@ class MarkLiveApp {
       } else if (mod && e.key === '\\') {
         e.preventDefault();
         this.sidebarEl.classList.toggle('is-collapsed');
+      } else if (mod && (e.key === '+' || e.key === '=')) {
+        e.preventDefault();
+        this.setZoomPercent(this.zoomPercent + 10);
+      } else if (mod && e.key === '-') {
+        e.preventDefault();
+        this.setZoomPercent(this.zoomPercent - 10);
+      } else if (mod && e.key === '0') {
+        e.preventDefault();
+        this.setZoomPercent(100);
+      } else if (e.altKey && !mod && key === 'z') {
+        e.preventDefault();
+        this.toggleWordWrap();
       } else if (e.altKey && e.key === '1') {
         e.preventDefault();
-        setViewMode('editor');
+        this.setViewMode('editor');
       } else if (e.altKey && e.key === '2') {
         e.preventDefault();
-        setViewMode('split');
+        this.setViewMode('split');
       } else if (e.altKey && e.key === '3') {
         e.preventDefault();
-        setViewMode('preview');
+        this.setViewMode('preview');
       } else if (e.key === 'F11') {
         e.preventDefault();
         toggleZen();
       } else if (e.key === 'F1') {
         e.preventDefault();
-        (document.getElementById('shortcuts-dialog') as HTMLDialogElement).showModal();
+        shortcutsDialog.showModal();
       }
     });
   }
@@ -1696,7 +2227,7 @@ class MarkLiveApp {
       this.dropOverlayEl.hidden = true;
     });
 
-    onBackendEvent('files-dropped', async ({ files, folder }) => {
+    onBackendEvent('files-dropped', async ({ files, images, folder }) => {
       this.dropOverlayEl.hidden = true;
       if (folder) {
         await this.loadWorkspaceFolder(folder);
@@ -1704,6 +2235,9 @@ class MarkLiveApp {
       }
       for (const f of files) {
         await this.openFileByPath(f);
+      }
+      if (images && images.length > 0) {
+        await this.handleDroppedImages(images);
       }
     });
 
@@ -1721,9 +2255,10 @@ class MarkLiveApp {
             continue;
           }
           if (!tab.isDirty) {
-            // Auto-reload unmodified tab smoothly
             tab.savedContent = disk.content;
             tab.currentContent = disk.content;
+            tab.encoding = disk.encoding || 'UTF-8';
+            tab.lineEnding = disk.lineEnding;
             if (tab.id === this.activeTabId) {
               this.editor.replaceAllContent(disk.content);
             } else {
@@ -1746,6 +2281,7 @@ class MarkLiveApp {
     onBackendEvent('close-requested', async () => {
       const dirtyTabs = this.tabs.filter((t) => t.isDirty);
       if (dirtyTabs.length === 0) {
+        await backend.saveUiPrefs(this.buildCurrentUiPrefs()).catch(() => {});
         await backend.clearDrafts().catch(() => {});
         await backend.forceCloseWindow();
         return;
@@ -1763,6 +2299,7 @@ class MarkLiveApp {
           if (!ok) return;
         }
       }
+      await backend.saveUiPrefs(this.buildCurrentUiPrefs()).catch(() => {});
       await backend.clearDrafts().catch(() => {});
       await backend.forceCloseWindow();
     });
