@@ -8,17 +8,28 @@ MarkLive is a native **Windows 11 x64 Markdown editor with live preview**, compi
   - `src/main.rs`: Win32 `tao` event loop, `wry` Edge WebView2 host (`https://marklive.localhost`), Windows 11 Mica backdrop (`window-vibrancy`), multi-monitor window bounds restoration, Explorer file/image/folder drag-and-drop, and `notify` filesystem watcher.
   - `src/ipc.rs`: Asynchronous custom-protocol router (`with_asynchronous_custom_protocol("marklive", ...)`). Serves embedded static assets via `rust-embed` (`#[folder = "frontend/dist"]`) and handles JSON RPC endpoints under `/api/*`. Heavy CPU and disk routes (`render`, `read-file`, `write-file`, `list-tree`, `workspace-files`, `search-workspace`, `drafts/save`, `/api/local-asset`) MUST run off the Win32 UI thread (`std::thread::spawn` + `responder.respond(...)`). Only native `rfd` OS dialogs and `tao` window mutations run on the main thread.
   - `src/markdown.rs`: `pulldown-cmark` + `syntect` GFM pipeline (tables, task checkboxes with `data-task-line`, GitHub alerts `[!NOTE]`..`[!CAUTION]`, footnotes, YAML frontmatter cards, inline/display math placeholders, Mermaid placeholders, `data-line` scroll-sync anchors, heading outline & reading-time stats).
-  - `src/fs_ops.rs`: Encoding-aware text reader (UTF-8, UTF-8 BOM, UTF-16 LE/BE BOM, Windows-1252 fallback), atomic temp-file + rename UTF-8 writer preserving `CRLF`/`LF`, clipboard & dropped image importer (`./assets/`), Recycle Bin deletion (`trash`), workspace search, and standalone HTML exporter.
+  - `src/fs_ops/`: Modular filesystem & export subsystem:
+    - `mod.rs`: Path canonicalization (`clean_windows_path`, `normalize_existing_path`), Markdown/image extension filters, and `explorer.exe /select,` integration.
+    - `encoding.rs`: Encoding-aware text reader (UTF-8, UTF-8 BOM, UTF-16 LE/BE BOM, Windows-1252 fallback) and atomic temp-file + rename UTF-8 writer preserving `CRLF`/`LF`.
+    - `workspace.rs`: Directory tree builder, Quick-Open file indexer, safe file/subfolder creation, rename, and Windows Recycle Bin deletion (`trash`).
+    - `search.rs`: Workspace full-text search across Markdown documents.
+    - `assets.rs`: Clipboard (`data:image/...;base64`) and dropped image importer into `./assets/`.
+    - `html_export.rs`: Self-contained dark/light standalone HTML exporter.
   - `src/single_instance.rs`: Named Win32 mutex (`Local\MarkLive_SingleInstance_v1`) + localhost IPC handoff so Explorer file launches open as tabs in the existing window (`--new-window` bypasses single-instance to spawn an independent window with a per-PID WebView2 profile).
   - `src/icon_gen.rs` & `build.rs`: Shared multi-DPI (`16, 32, 48, 256` px) procedural icon generator used for both the PE `.exe` resource (`winres`) and the runtime window icon.
 
 - **Modular TypeScript / Vite Frontend (`frontend/src/`)**:
-  - `main.ts`: Application shell, tab lifecycle, session & preference persistence, sidebar explorer/search/outline, context menu, and global shortcuts.
+  - `main.ts`: Application shell orchestrating tab lifecycle, editor/live-preview coordination, session & crash-draft persistence, document outline, status bar, split resizer, and global shortcuts.
+  - `sidebar-explorer.ts`: Workspace directory tree, empty-state recent folders/files view, context menu popover, file/folder creation & rename dialog, and Recycle Bin confirmation.
+  - `workspace-search.ts`: Debounced, sequence-guarded full-text workspace search panel.
+  - `palette.ts` & `palette-items.ts`: Fuzzy-matched Quick-Open (`Strg+E`) & Command Palette (`Strg+Umschalt+P` / `>`) controller and decoupled, unit-tested item builders.
   - `editor.ts`: CodeMirror 6 controller with dynamic `Compartment`s (`wordWrap`, `spellcheck`), smart Markdown list/task/blockquote `Enter` continuation, and smart URL paste over selected text.
   - `sanitizer.ts`: Capability-probed HTML sanitization (`setHTML` self-test with `DOMPurify` fallback), LRU-cached KaTeX & lazy-loaded Mermaid rendering, and incremental DOM reconciliation (`reconcileChildren`) that preserves unchanged nodes and `<details>` open state.
   - `sync-scroll.ts`: Bidirectional fractional `[data-line]` scroll synchronization and active TOC section tracking.
-  - `palette.ts`: Fuzzy-matched Quick-Open (`Strg+E`) & Command Palette (`Strg+Umschalt+P` / `>`).
-  - `navigation-a11y.ts`: Roving `tabindex` (`0` / `-1`) and horizontal arrow-key navigation for `[role="tablist"]` and `[role="toolbar"]`.
+  - `theme.ts`, `path-utils.ts`, `polyfills.ts`, `navigation-a11y.ts`: Win32/CSS theme synchronization, Windows/relative Markdown path helpers, progressive-enhancement polyfills, and roving `tabindex` keyboard navigation.
+  - `styles.css` & `styles/*.css`: Thematic CSS modules (`tokens.css`, `chrome.css`, `sidebar.css`, `editor.css`, `markdown.css`, `dialogs-print.css`) bundled inline by Vite.
+
+> **Modularity Principle**: Split modules along clear domain responsibilities and unit-testability boundaries so unrelated concerns do not mix — there is intentionally **no rigid maximum line-of-code limit** for cohesive single-purpose modules.
 
 ## 2. Mandatory Build & Verification Order
 

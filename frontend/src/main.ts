@@ -5,83 +5,24 @@ import {
   DocStats,
   DraftEntry,
   FilePayload,
-  FileTreeNode,
   HeadingItem,
   onBackendEvent,
-  SearchFileResult,
   UiSessionPrefs,
-  WorkspaceFileEntry,
 } from './api';
 import { FormatAction, MarkdownEditorController } from './editor';
 import { bindRovingHorizontalKeyNav, syncRovingTabindex } from './navigation-a11y';
-import { CommandPaletteController, PaletteItem } from './palette';
+import { CommandPaletteController } from './palette';
+import { buildPaletteCommandItems, buildPaletteFileItems } from './palette-items';
+import { parentDirOfPath, resolveRelativeMarkdownPath } from './path-utils';
+import { installProgressiveEnhancements } from './polyfills';
 import { safeSetMarkdownHTML } from './sanitizer';
+import { SidebarExplorerController } from './sidebar-explorer';
 import { SyncScrollController } from './sync-scroll';
+import { bindThemeSystem } from './theme';
 import { WELCOME_MARKDOWN } from './welcome';
+import { WorkspaceSearchController } from './workspace-search';
 
-// Progressive enhancement for Popover API (modern-web-guidance menu)
-if (!('popover' in HTMLElement.prototype)) {
-  import('@oddbird/popover-polyfill');
-}
-
-// Progressive enhancement for declarative Invoker Commands (<button command="show-modal" commandfor="...">)
-if (!('commandForElement' in HTMLButtonElement.prototype)) {
-  import('invokers-polyfill');
-}
-
-// Progressive enhancement fallback for focusgroup="menu nomemory" (modern-web-guidance menu)
-if (!('focusGroup' in HTMLElement.prototype)) {
-  for (const fg of document.querySelectorAll<HTMLElement>('[focusgroup~="menu"]')) {
-    fg.setAttribute('role', 'menu');
-    for (const btn of fg.querySelectorAll<HTMLButtonElement>('button')) {
-      if (!btn.hasAttribute('role')) {
-        btn.setAttribute('role', 'menuitem');
-      }
-    }
-    fg.addEventListener('keydown', (e) => {
-      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
-      const items = Array.from(fg.querySelectorAll<HTMLButtonElement>('button')).filter(
-        (b) => !b.disabled && !b.hidden && b.offsetParent !== null,
-      );
-      if (items.length === 0) return;
-      e.preventDefault();
-      const activeIdx = items.indexOf(document.activeElement as HTMLButtonElement);
-      let nextIdx = 0;
-      if (e.key === 'Home') {
-        nextIdx = 0;
-      } else if (e.key === 'End') {
-        nextIdx = items.length - 1;
-      } else if (e.key === 'ArrowDown') {
-        nextIdx = activeIdx < 0 ? 0 : (activeIdx + 1) % items.length;
-      } else if (e.key === 'ArrowUp') {
-        nextIdx = activeIdx <= 0 ? items.length - 1 : activeIdx - 1;
-      }
-      items[nextIdx]?.focus();
-    });
-  }
-}
-
-// Fallback for <dialog closedby="any"> light-dismiss where native closedBy is absent
-if (!('closedBy' in HTMLDialogElement.prototype)) {
-  const outside = (e: PointerEvent, dialog: HTMLDialogElement) => {
-    const r = dialog.getBoundingClientRect();
-    return (
-      e.clientX < r.left ||
-      e.clientX > r.right ||
-      e.clientY < r.top ||
-      e.clientY > r.bottom
-    );
-  };
-  for (const dialog of document.querySelectorAll<HTMLDialogElement>('dialog[closedby="any"]')) {
-    let pressedOutside = false;
-    dialog.addEventListener('pointerdown', (e) => {
-      pressedOutside = outside(e, dialog);
-    });
-    dialog.addEventListener('pointerup', (e) => {
-      if (pressedOutside && outside(e, dialog)) dialog.close();
-    });
-  }
-}
+installProgressiveEnhancements();
 
 interface OpenTab {
   id: string;
@@ -100,36 +41,16 @@ interface OpenTab {
   stats: DocStats;
 }
 
-type EntryDialogMode = 'new-file' | 'new-folder' | 'rename';
-
-interface ContextMenuTarget {
-  path: string;
-  parentDir: string;
-  name: string;
-  isDir: boolean;
-  isWorkspaceRoot: boolean;
-}
-
-function parentDirOfPath(filePath: string): string | null {
-  const idx = Math.max(filePath.lastIndexOf('\\'), filePath.lastIndexOf('/'));
-  return idx > 0 ? filePath.slice(0, idx) : null;
-}
-
-function baseNameOfPath(filePath: string): string {
-  const idx = Math.max(filePath.lastIndexOf('\\'), filePath.lastIndexOf('/'));
-  return idx >= 0 ? filePath.slice(idx + 1) : filePath;
-}
-
 class MarkLiveApp {
   private tabs: OpenTab[] = [];
   private activeTabId = '';
   private untitledCounter = 1;
-  private workspaceTree: FileTreeNode | null = null;
-  private workspaceFilesCache: WorkspaceFileEntry[] | null = null;
 
   private editor!: MarkdownEditorController;
   private syncScroll!: SyncScrollController;
   private palette!: CommandPaletteController;
+  private explorer!: SidebarExplorerController;
+  private workspaceSearch!: WorkspaceSearchController;
 
   private splitRatio = 50;
   private zoomPercent = 100;
@@ -142,17 +63,8 @@ class MarkLiveApp {
   private autoSaveTimer: number | undefined;
   private draftSyncTimer: number | undefined;
   private prefsSyncTimer: number | undefined;
-  private searchDebounceTimer: number | undefined;
   private renderSeq = 0;
-  private searchSeq = 0;
-  private searchCaseSensitive = false;
   private externalChangedPath: string | null = null;
-
-  private contextTarget: ContextMenuTarget | null = null;
-  private entryDialogState: { mode: EntryDialogMode; targetPath: string } = {
-    mode: 'new-file',
-    targetPath: '',
-  };
 
   // DOM References
   private appEl = document.getElementById('app')!;
@@ -160,11 +72,7 @@ class MarkLiveApp {
   private tabBarEl = document.getElementById('tab-bar')!;
   private previewPaneEl = document.getElementById('preview-pane')!;
   private previewContentEl = document.getElementById('preview-content')!;
-  private fileTreeEl = document.getElementById('file-tree-container')!;
-  private searchInputEl = document.getElementById('workspace-search-input') as HTMLInputElement;
-  private searchResultsEl = document.getElementById('search-results-container')!;
   private outlineEl = document.getElementById('outline-container')!;
-  private workspaceTitleEl = document.getElementById('workspace-title')!;
   private statusPathBtn = document.getElementById('status-filepath') as HTMLButtonElement;
   private statusSaveBadge = document.getElementById('status-save-badge')!;
   private statusCursorEl = document.getElementById('status-cursor')!;
@@ -175,10 +83,6 @@ class MarkLiveApp {
   private statusEncodingEl = document.getElementById('status-encoding')!;
   private dropOverlayEl = document.getElementById('drop-overlay')!;
   private externalBannerEl = document.getElementById('external-banner')!;
-  private contextPopoverEl = document.getElementById('tree-context-menu') as HTMLElement & {
-    showPopover?: () => void;
-    hidePopover?: () => void;
-  };
 
   public async init(): Promise<void> {
     const cmHost = document.getElementById('codemirror-host')!;
@@ -206,19 +110,115 @@ class MarkLiveApp {
       },
     });
 
+    this.explorer = new SidebarExplorerController({
+      fileTreeEl: document.getElementById('file-tree-container')!,
+      workspaceTitleEl: document.getElementById('workspace-title')!,
+      contextPopoverEl: document.getElementById('tree-context-menu') as HTMLElement,
+      getActiveFilePath: () => this.activeTab?.path ?? null,
+      onOpenFilePath: (filePath) => this.openFileByPath(filePath),
+      onOpenCreatedFile: (payload) => this.openTabFromPayload(payload),
+      onTriggerOpenFolderDialog: () => this.triggerOpenFolderDialog(),
+      onWorkspaceFolderLoaded: (folderPath, persistPrefs) => {
+        this.pushRecentFolder(folderPath);
+        if (persistPrefs) {
+          this.schedulePrefsSave();
+        }
+      },
+      onEntryRenamed: (oldPath, newPath, newName) => {
+        this.handleExplorerEntryRenamed(oldPath, newPath, newName);
+      },
+      onEntryDeleted: (deletedPath) => {
+        this.handleExplorerEntryDeleted(deletedPath);
+      },
+    });
+
+    this.workspaceSearch = new WorkspaceSearchController({
+      searchInputEl: document.getElementById('workspace-search-input') as HTMLInputElement,
+      caseToggleBtn: document.getElementById('btn-search-case')!,
+      resultsContainerEl: document.getElementById('search-results-container')!,
+      getWorkspaceRootPath: () => this.explorer.rootPath,
+      onOpenMatch: async (filePath, line) => {
+        await this.openFileByPath(filePath);
+        requestAnimationFrame(() => {
+          this.editor.jumpToLine(line);
+        });
+      },
+    });
+
     this.palette = new CommandPaletteController(
       document.getElementById('palette-dialog') as HTMLDialogElement,
       document.getElementById('palette-input') as HTMLInputElement,
       document.getElementById('palette-results')!,
       {
-        getFileItems: () => this.buildPaletteFileItems(),
-        getCommandItems: () => this.buildPaletteCommandItems(),
+        getFileItems: () =>
+          buildPaletteFileItems({
+            tabs: this.tabs,
+            activeTabId: this.activeTabId,
+            workspaceRootPath: this.explorer.rootPath,
+            getWorkspaceFiles: () => this.explorer.getWorkspaceFiles(),
+            recentFiles: this.recentFiles,
+            recentFolders: this.recentFolders,
+            onActivateTab: (tabId) => this.activateTab(tabId),
+            onOpenFile: (filePath) => this.openFileByPath(filePath),
+            onOpenFolder: async (folderPath) => {
+              await this.explorer.loadFolder(folderPath, true);
+              this.switchSidebarPanel('files');
+            },
+          }),
+        getCommandItems: () =>
+          buildPaletteCommandItems({
+            wordWrapActive: this.editor.isWordWrapEnabled(),
+            spellcheckActive: this.editor.isSpellcheckEnabled(),
+            syncScrollActive: this.syncScroll.isEnabled(),
+            autoSaveActive: this.autoSaveEnabled,
+            currentLineEnding: this.activeTab?.lineEnding ?? 'CRLF',
+            onNewTab: () => this.createNewTab(),
+            onOpenFileDialog: () => this.triggerOpenFilesDialog(),
+            onOpenFolderDialog: () => this.triggerOpenFolderDialog(),
+            onSave: () => {
+              if (this.activeTab) void this.saveTab(this.activeTab, false);
+            },
+            onSaveAs: () => {
+              if (this.activeTab) void this.saveTab(this.activeTab, true);
+            },
+            onExportHtml: () => this.exportCurrentTabHtml(),
+            onPrint: () => window.print(),
+            onSetViewMode: (mode) => this.setViewMode(mode),
+            onToggleWordWrap: () => this.toggleWordWrap(),
+            onToggleSpellcheck: () => {
+              this.editor.setSpellcheck(!this.editor.isSpellcheckEnabled());
+              this.schedulePrefsSave();
+            },
+            onToggleSyncScroll: () => this.toggleSyncScroll(),
+            onToggleAutoSave: () => this.toggleAutoSave(),
+            onToggleLineEnding: () => this.toggleActiveTabLineEnding(),
+            onZoomDelta: (delta) => this.setZoomPercent(this.zoomPercent + delta),
+            onZoomReset: () => this.setZoomPercent(100),
+            onOpenSearchPanel: () => this.switchSidebarPanel('search'),
+            onOpenOutlinePanel: () => this.switchSidebarPanel('outline'),
+            onToggleZen: () => this.appEl.classList.toggle('is-zen'),
+            onToggleTheme: () => document.getElementById('btn-theme-toggle')?.click(),
+            onRevealInExplorer: () => {
+              const p = this.activeTab?.path ?? this.explorer.rootPath;
+              if (p) void backend.revealInExplorer(p);
+            },
+            onShowShortcuts: () => {
+              (document.getElementById('shortcuts-dialog') as HTMLDialogElement).showModal();
+            },
+          }),
       },
     );
 
     this.bindCompositeKeyboardNav();
     this.bindUIEvents();
-    this.bindThemeSystem();
+    bindThemeSystem(() => {
+      if (this.activeTab) {
+        void this.renderPreviewImmediate(
+          this.activeTab.currentContent,
+          this.activeTab.parentDir ?? this.explorer.rootPath,
+        );
+      }
+    });
     this.bindBackendEvents();
 
     // Restore startup payload (UI prefs, CLI files, last workspace, session tabs, crash drafts)
@@ -227,7 +227,7 @@ class MarkLiveApp {
       this.applyRestoredUiPrefs(startup.uiPrefs);
 
       if (startup.initialFolder) {
-        await this.loadWorkspaceFolder(startup.initialFolder, false);
+        await this.explorer.loadFolder(startup.initialFolder, false);
       }
 
       if (startup.initialFiles.length > 0) {
@@ -254,8 +254,8 @@ class MarkLiveApp {
       // Fallback to welcome tab
     }
 
-    if (!this.workspaceTree) {
-      this.renderEmptySidebarWithRecents();
+    if (!this.explorer.hasWorkspace) {
+      this.explorer.renderEmptyStateWithRecents(this.recentFolders, this.recentFiles);
     }
 
     if (this.tabs.length === 0) {
@@ -315,7 +315,9 @@ class MarkLiveApp {
     const clamped = Math.max(20, Math.min(80, pct));
     this.splitRatio = clamped;
     document.documentElement.style.setProperty('--split-ratio', `${clamped.toFixed(2)}%`);
-    document.getElementById('split-resizer')?.setAttribute('aria-valuenow', String(Math.round(clamped)));
+    document
+      .getElementById('split-resizer')
+      ?.setAttribute('aria-valuenow', String(Math.round(clamped)));
     if (persist) {
       this.schedulePrefsSave();
     }
@@ -337,8 +339,8 @@ class MarkLiveApp {
       filePath,
       ...this.recentFiles.filter((p) => p.toLowerCase() !== lower),
     ].slice(0, 12);
-    if (!this.workspaceTree) {
-      this.renderEmptySidebarWithRecents();
+    if (!this.explorer.hasWorkspace) {
+      this.explorer.renderEmptyStateWithRecents(this.recentFolders, this.recentFiles);
     }
   }
 
@@ -376,270 +378,6 @@ class MarkLiveApp {
   }
 
   // ==========================================================================
-  // Quick-Open & Command Palette Items
-  // ==========================================================================
-
-  private async buildPaletteFileItems(): Promise<PaletteItem[]> {
-    const items: PaletteItem[] = [];
-    const seenPaths = new Set<string>();
-
-    for (const tab of this.tabs) {
-      if (tab.path) {
-        seenPaths.add(tab.path.toLowerCase());
-      }
-      items.push({
-        id: `tab:${tab.id}`,
-        kind: 'tab',
-        label: tab.name,
-        subtitle: tab.path ?? 'Ungespeicherter Tab',
-        badge: tab.id === this.activeTabId ? 'Aktiv' : 'Geöffnet',
-        run: () => this.activateTab(tab.id),
-      });
-    }
-
-    if (this.workspaceTree) {
-      if (!this.workspaceFilesCache) {
-        try {
-          const res = await backend.listWorkspaceFiles(this.workspaceTree.path);
-          this.workspaceFilesCache = res.files;
-        } catch {
-          this.workspaceFilesCache = [];
-        }
-      }
-      for (const f of this.workspaceFilesCache) {
-        const lower = f.path.toLowerCase();
-        if (seenPaths.has(lower)) continue;
-        seenPaths.add(lower);
-        items.push({
-          id: `ws:${f.path}`,
-          kind: 'file',
-          label: f.name,
-          subtitle: f.relPath,
-          badge: 'Arbeitsordner',
-          run: () => this.openFileByPath(f.path),
-        });
-      }
-    }
-
-    for (const recentPath of this.recentFiles) {
-      const lower = recentPath.toLowerCase();
-      if (seenPaths.has(lower)) continue;
-      seenPaths.add(lower);
-      items.push({
-        id: `recent:${recentPath}`,
-        kind: 'recent',
-        label: baseNameOfPath(recentPath),
-        subtitle: recentPath,
-        badge: 'Zuletzt geöffnet',
-        run: () => this.openFileByPath(recentPath),
-      });
-    }
-
-    for (const folderPath of this.recentFolders) {
-      if (this.workspaceTree?.path.toLowerCase() === folderPath.toLowerCase()) continue;
-      items.push({
-        id: `folder:${folderPath}`,
-        kind: 'folder',
-        label: baseNameOfPath(folderPath),
-        subtitle: folderPath,
-        badge: 'Ordnerverlauf',
-        run: async () => {
-          await this.loadWorkspaceFolder(folderPath);
-          this.switchSidebarPanel('files');
-        },
-      });
-    }
-
-    return items;
-  }
-
-  private buildPaletteCommandItems(): PaletteItem[] {
-    const wrapActive = this.editor.isWordWrapEnabled();
-    const spellActive = this.editor.isSpellcheckEnabled();
-    const syncActive = this.syncScroll.isEnabled();
-    const autoActive = this.autoSaveEnabled;
-    const currentEol = this.activeTab?.lineEnding ?? 'CRLF';
-
-    return [
-      {
-        id: 'cmd:new-tab',
-        kind: 'command',
-        label: 'Datei: Neues Markdown-Dokument',
-        shortcut: 'Strg+N',
-        run: () => this.createNewTab(),
-      },
-      {
-        id: 'cmd:open-file',
-        kind: 'command',
-        label: 'Datei: Markdown-Datei öffnen…',
-        shortcut: 'Strg+O',
-        run: () => this.triggerOpenFilesDialog(),
-      },
-      {
-        id: 'cmd:open-folder',
-        kind: 'command',
-        label: 'Arbeitsbereich: Ordner öffnen…',
-        shortcut: 'Strg+Umschalt+O',
-        run: () => this.triggerOpenFolderDialog(),
-      },
-      {
-        id: 'cmd:save',
-        kind: 'command',
-        label: 'Datei: Speichern',
-        shortcut: 'Strg+S',
-        run: () => {
-          if (this.activeTab) void this.saveTab(this.activeTab, false);
-        },
-      },
-      {
-        id: 'cmd:save-as',
-        kind: 'command',
-        label: 'Datei: Speichern unter…',
-        shortcut: 'Strg+Umschalt+S',
-        run: () => {
-          if (this.activeTab) void this.saveTab(this.activeTab, true);
-        },
-      },
-      {
-        id: 'cmd:export-html',
-        kind: 'command',
-        label: 'Export: Als eigenständige HTML-Datei exportieren…',
-        run: () => this.exportCurrentTabHtml(),
-      },
-      {
-        id: 'cmd:print',
-        kind: 'command',
-        label: 'Export: Drucken / Als PDF speichern…',
-        shortcut: 'Strg+P',
-        run: () => window.print(),
-      },
-      {
-        id: 'cmd:view-split',
-        kind: 'command',
-        label: 'Ansicht: Split-Vorschau (Editor & Live-Vorschau)',
-        shortcut: 'Alt+2',
-        run: () => this.setViewMode('split'),
-      },
-      {
-        id: 'cmd:view-editor',
-        kind: 'command',
-        label: 'Ansicht: Nur Editor',
-        shortcut: 'Alt+1',
-        run: () => this.setViewMode('editor'),
-      },
-      {
-        id: 'cmd:view-preview',
-        kind: 'command',
-        label: 'Ansicht: Nur Lese-Vorschau',
-        shortcut: 'Alt+3',
-        run: () => this.setViewMode('preview'),
-      },
-      {
-        id: 'cmd:toggle-wrap',
-        kind: 'command',
-        label: `Editor: Zeilenumbruch ${wrapActive ? 'deaktivieren' : 'aktivieren'}`,
-        badge: wrapActive ? 'Aktiv' : 'Aus',
-        shortcut: 'Alt+Z',
-        run: () => this.toggleWordWrap(),
-      },
-      {
-        id: 'cmd:toggle-spellcheck',
-        kind: 'command',
-        label: `Editor: Rechtschreibprüfung ${spellActive ? 'deaktivieren' : 'aktivieren'}`,
-        badge: spellActive ? 'Aktiv' : 'Aus',
-        run: () => {
-          this.editor.setSpellcheck(!spellActive);
-          this.schedulePrefsSave();
-        },
-      },
-      {
-        id: 'cmd:toggle-sync-scroll',
-        kind: 'command',
-        label: `Vorschau: Synchronisiertes Scrollen ${syncActive ? 'ausschalten' : 'einschalten'}`,
-        badge: syncActive ? 'Aktiv' : 'Aus',
-        run: () => this.toggleSyncScroll(),
-      },
-      {
-        id: 'cmd:toggle-autosave',
-        kind: 'command',
-        label: `Datei: Auto-Save ${autoActive ? 'ausschalten' : 'einschalten'}`,
-        badge: autoActive ? 'Aktiv' : 'Aus',
-        run: () => this.toggleAutoSave(),
-      },
-      {
-        id: 'cmd:toggle-eol',
-        kind: 'command',
-        label: `Dokument: Zeilenenden auf ${currentEol === 'CRLF' ? 'LF (Unix)' : 'CRLF (Windows)'} umstellen`,
-        badge: currentEol,
-        run: () => this.toggleActiveTabLineEnding(),
-      },
-      {
-        id: 'cmd:zoom-in',
-        kind: 'command',
-        label: 'Ansicht: Dokument vergrößern (Zoom +)',
-        shortcut: 'Strg++',
-        run: () => this.setZoomPercent(this.zoomPercent + 10),
-      },
-      {
-        id: 'cmd:zoom-out',
-        kind: 'command',
-        label: 'Ansicht: Dokument verkleinern (Zoom -)',
-        shortcut: 'Strg+-',
-        run: () => this.setZoomPercent(this.zoomPercent - 10),
-      },
-      {
-        id: 'cmd:zoom-reset',
-        kind: 'command',
-        label: 'Ansicht: Dokument-Zoom auf 100 % zurücksetzen',
-        shortcut: 'Strg+0',
-        run: () => this.setZoomPercent(100),
-      },
-      {
-        id: 'cmd:search-workspace',
-        kind: 'command',
-        label: 'Suche: Volltextsuche im Arbeitsordner öffnen',
-        shortcut: 'Strg+Umschalt+F',
-        run: () => this.switchSidebarPanel('search'),
-      },
-      {
-        id: 'cmd:outline',
-        kind: 'command',
-        label: 'Navigation: Dokument-Gliederung (Inhaltsverzeichnis) anzeigen',
-        run: () => this.switchSidebarPanel('outline'),
-      },
-      {
-        id: 'cmd:zen',
-        kind: 'command',
-        label: 'Ansicht: Zen-Fokusmodus umschalten',
-        shortcut: 'F11',
-        run: () => this.appEl.classList.toggle('is-zen'),
-      },
-      {
-        id: 'cmd:theme',
-        kind: 'command',
-        label: 'Darstellung: Hell-/Dunkel-Design umschalten',
-        run: () => document.getElementById('btn-theme-toggle')?.click(),
-      },
-      {
-        id: 'cmd:reveal',
-        kind: 'command',
-        label: 'Windows: Aktuelle Datei im Explorer anzeigen',
-        run: () => {
-          const p = this.activeTab?.path ?? this.workspaceTree?.path;
-          if (p) void backend.revealInExplorer(p);
-        },
-      },
-      {
-        id: 'cmd:shortcuts',
-        kind: 'command',
-        label: 'Hilfe: Tastenkürzel-Übersicht anzeigen',
-        shortcut: 'F1',
-        run: () => (document.getElementById('shortcuts-dialog') as HTMLDialogElement).showModal(),
-      },
-    ];
-  }
-
-  // ==========================================================================
   // Crash-Recovery Draft Persistence & Image Insertion
   // ==========================================================================
 
@@ -664,7 +402,7 @@ class MarkLiveApp {
         id,
         name: draft.name || `Unbenannt-${this.untitledCounter++}.md`,
         path: draft.path,
-        parentDir: draft.parentDir ?? this.workspaceTree?.path ?? null,
+        parentDir: draft.parentDir ?? this.explorer.rootPath,
         savedContent: draft.savedContent,
         currentContent: draft.content,
         lineEnding: draft.lineEnding === 'LF' ? 'LF' : 'CRLF',
@@ -705,12 +443,12 @@ class MarkLiveApp {
   private async handlePasteImage(mimeType: string, dataUrl: string): Promise<void> {
     const tab = this.activeTab;
     if (!tab) return;
-    const targetBaseDir = tab.parentDir ?? this.workspaceTree?.path ?? null;
+    const targetBaseDir = tab.parentDir ?? this.explorer.rootPath;
     try {
       const res = await backend.savePastedImage(targetBaseDir, mimeType, dataUrl);
       this.editor.insertSnippet(res.markdownSnippet);
-      if (this.workspaceTree) {
-        void this.refreshWorkspaceTree();
+      if (this.explorer.hasWorkspace) {
+        void this.explorer.refresh();
       }
     } catch (err) {
       console.error('Bild aus Zwischenablage konnte nicht gespeichert werden:', err);
@@ -720,7 +458,7 @@ class MarkLiveApp {
   private async handleDroppedImages(imagePaths: string[]): Promise<void> {
     const tab = this.activeTab;
     if (!tab) return;
-    const targetBaseDir = tab.parentDir ?? this.workspaceTree?.path ?? null;
+    const targetBaseDir = tab.parentDir ?? this.explorer.rootPath;
     const snippets: string[] = [];
 
     for (const imgPath of imagePaths) {
@@ -734,8 +472,8 @@ class MarkLiveApp {
 
     if (snippets.length > 0) {
       this.editor.insertSnippet(snippets.join('\n'));
-      if (this.workspaceTree) {
-        void this.refreshWorkspaceTree();
+      if (this.explorer.hasWorkspace) {
+        void this.explorer.refresh();
       }
     }
   }
@@ -755,7 +493,7 @@ class MarkLiveApp {
       id,
       name: tabName,
       path: null,
-      parentDir: this.workspaceTree?.path ?? null,
+      parentDir: this.explorer.rootPath,
       savedContent: markDirty ? '' : initialContent,
       currentContent: initialContent,
       lineEnding: 'CRLF',
@@ -795,14 +533,14 @@ class MarkLiveApp {
     this.editor.swapState(target.editorState, target.editorScrollTop);
 
     this.renderTabBar();
-    this.highlightActiveFileInTree();
+    this.explorer.highlightActiveFile();
     this.updateStatusBar();
     this.syncWindowMetadata();
     this.schedulePrefsSave();
 
     void this.renderPreviewImmediate(
       target.currentContent,
-      target.parentDir ?? this.workspaceTree?.path ?? null,
+      target.parentDir ?? this.explorer.rootPath,
       target.previewScrollTop,
     );
   }
@@ -875,7 +613,7 @@ class MarkLiveApp {
       const res = await backend.saveFileDialog(
         tab.currentContent,
         tab.name,
-        tab.parentDir ?? this.workspaceTree?.path ?? null,
+        tab.parentDir ?? this.explorer.rootPath,
         tab.lineEnding,
       );
       if (!res.saved || !res.path) return false;
@@ -890,7 +628,7 @@ class MarkLiveApp {
     tab.encoding = 'UTF-8';
     tab.isDirty = false;
     this.pushRecentFile(tab.path);
-    this.workspaceFilesCache = null;
+    this.explorer.invalidateFilesCache();
 
     this.renderTabBar();
     this.updateStatusBar();
@@ -898,8 +636,8 @@ class MarkLiveApp {
     this.scheduleDraftSync();
     this.schedulePrefsSave();
 
-    if (this.workspaceTree) {
-      void this.refreshWorkspaceTree();
+    if (this.explorer.hasWorkspace) {
+      void this.explorer.refresh();
     }
     return true;
   }
@@ -947,8 +685,66 @@ class MarkLiveApp {
     this.schedulePrefsSave();
   }
 
+  private handleExplorerEntryRenamed(
+    oldPath: string,
+    newPath: string,
+    newName: string,
+  ): void {
+    const oldLower = oldPath.toLowerCase();
+    const oldPrefix = `${oldLower}\\`;
+    for (const t of this.tabs) {
+      if (!t.path) continue;
+      const tabLower = t.path.toLowerCase();
+      if (tabLower === oldLower) {
+        t.path = newPath;
+        t.name = newName;
+        t.parentDir = parentDirOfPath(newPath);
+      } else if (tabLower.startsWith(oldPrefix)) {
+        const suffix = t.path.slice(oldPath.length);
+        t.path = `${newPath}${suffix}`;
+        t.parentDir = parentDirOfPath(t.path);
+      }
+    }
+
+    this.renderTabBar();
+    this.updateStatusBar();
+    this.syncWindowMetadata();
+    this.scheduleDraftSync();
+    this.schedulePrefsSave();
+  }
+
+  private handleExplorerEntryDeleted(deletedPath: string): void {
+    const lowerTarget = deletedPath.toLowerCase();
+    const prefix = `${lowerTarget}\\`;
+
+    for (let i = this.tabs.length - 1; i >= 0; i--) {
+      const t = this.tabs[i];
+      if (!t.path) continue;
+      const lowerTab = t.path.toLowerCase();
+      if (lowerTab === lowerTarget || lowerTab.startsWith(prefix)) {
+        if (!t.isDirty) {
+          this.tabs.splice(i, 1);
+        } else {
+          t.path = null;
+        }
+      }
+    }
+
+    if (this.tabs.length === 0) {
+      this.createNewTab();
+    } else if (!this.tabs.some((t) => t.id === this.activeTabId)) {
+      this.activateTab(this.tabs[0].id);
+    } else {
+      this.renderTabBar();
+      this.updateStatusBar();
+    }
+
+    this.scheduleDraftSync();
+    this.schedulePrefsSave();
+  }
+
   // ==========================================================================
-  // Live Markdown Rendering
+  // Live Markdown Rendering & Document Outline
   // ==========================================================================
 
   private handleEditorContentChange(content: string): void {
@@ -969,7 +765,7 @@ class MarkLiveApp {
     this.renderDebounceTimer = window.setTimeout(() => {
       void this.renderPreviewImmediate(
         content,
-        tab.parentDir ?? this.workspaceTree?.path ?? null,
+        tab.parentDir ?? this.explorer.rootPath,
       );
     }, 35);
 
@@ -1010,10 +806,6 @@ class MarkLiveApp {
     }
   }
 
-  // ==========================================================================
-  // Workspace Explorer, Recent History, Search & Outline
-  // ==========================================================================
-
   private switchSidebarPanel(panel: 'files' | 'search' | 'outline'): void {
     this.sidebarEl.classList.remove('is-collapsed');
     const sidebarTabs = document.getElementById('sidebar-tabs')!;
@@ -1031,290 +823,7 @@ class MarkLiveApp {
     document.getElementById('panel-outline')!.hidden = panel !== 'outline';
 
     if (panel === 'search') {
-      this.searchInputEl.focus();
-      this.searchInputEl.select();
-      if (this.searchInputEl.value.trim()) {
-        void this.runWorkspaceSearch();
-      }
-    }
-  }
-
-  private renderEmptySidebarWithRecents(): void {
-    if (this.workspaceTree) return;
-    this.fileTreeEl.replaceChildren();
-
-    const wrap = document.createElement('div');
-    wrap.className = 'empty-sidebar-state';
-
-    const p = document.createElement('p');
-    p.textContent = 'Öffne einen Ordner oder ziehe Dateien per Drag & Drop in das Fenster.';
-
-    const openBtn = document.createElement('button');
-    openBtn.type = 'button';
-    openBtn.className = 'secondary-action-btn';
-    openBtn.textContent = 'Ordner auswählen…';
-    openBtn.addEventListener('click', () => {
-      void this.triggerOpenFolderDialog();
-    });
-
-    wrap.append(p, openBtn);
-
-    if (this.recentFolders.length > 0) {
-      const sec = document.createElement('div');
-      sec.className = 'recent-section';
-      const h = document.createElement('h3');
-      h.className = 'recent-heading';
-      h.textContent = 'Zuletzt geöffnete Ordner';
-      sec.appendChild(h);
-
-      for (const folderPath of this.recentFolders.slice(0, 5)) {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'recent-entry-btn';
-        btn.title = folderPath;
-
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'recent-entry-name';
-        nameSpan.textContent = `📁 ${baseNameOfPath(folderPath)}`;
-
-        const pathSpan = document.createElement('span');
-        pathSpan.className = 'recent-entry-path';
-        pathSpan.textContent = folderPath;
-
-        btn.append(nameSpan, pathSpan);
-        btn.addEventListener('click', () => {
-          void this.loadWorkspaceFolder(folderPath);
-        });
-        sec.appendChild(btn);
-      }
-      wrap.appendChild(sec);
-    }
-
-    if (this.recentFiles.length > 0) {
-      const sec = document.createElement('div');
-      sec.className = 'recent-section';
-      const h = document.createElement('h3');
-      h.className = 'recent-heading';
-      h.textContent = 'Zuletzt geöffnete Dateien';
-      sec.appendChild(h);
-
-      for (const filePath of this.recentFiles.slice(0, 6)) {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'recent-entry-btn';
-        btn.title = filePath;
-
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'recent-entry-name';
-        nameSpan.textContent = `📝 ${baseNameOfPath(filePath)}`;
-
-        const pathSpan = document.createElement('span');
-        pathSpan.className = 'recent-entry-path';
-        pathSpan.textContent = parentDirOfPath(filePath) ?? filePath;
-
-        btn.append(nameSpan, pathSpan);
-        btn.addEventListener('click', () => {
-          void this.openFileByPath(filePath);
-        });
-        sec.appendChild(btn);
-      }
-      wrap.appendChild(sec);
-    }
-
-    this.fileTreeEl.appendChild(wrap);
-  }
-
-  private async runWorkspaceSearch(): Promise<void> {
-    const query = this.searchInputEl.value.trim();
-    if (!this.workspaceTree) {
-      this.searchResultsEl.replaceChildren();
-      const hint = document.createElement('p');
-      hint.className = 'muted-hint';
-      hint.textContent = 'Bitte öffne zuerst einen Arbeitsordner (Strg+Umschalt+O).';
-      this.searchResultsEl.appendChild(hint);
-      return;
-    }
-
-    if (!query) {
-      this.searchResultsEl.replaceChildren();
-      const hint = document.createElement('p');
-      hint.className = 'muted-hint';
-      hint.textContent =
-        'Suchbegriff eingeben, um alle Markdown-Dateien im Ordner zu durchsuchen.';
-      this.searchResultsEl.appendChild(hint);
-      return;
-    }
-
-    const seq = ++this.searchSeq;
-    try {
-      const { results } = await backend.searchWorkspace(
-        this.workspaceTree.path,
-        query,
-        this.searchCaseSensitive,
-      );
-      if (seq !== this.searchSeq) return;
-      this.renderSearchResults(results);
-    } catch (err) {
-      console.error('Ordnersuche fehlgeschlagen:', err);
-    }
-  }
-
-  private renderSearchResults(results: SearchFileResult[]): void {
-    this.searchResultsEl.replaceChildren();
-    if (results.length === 0) {
-      const hint = document.createElement('p');
-      hint.className = 'muted-hint';
-      hint.textContent = 'Keine Treffer gefunden.';
-      this.searchResultsEl.appendChild(hint);
-      return;
-    }
-
-    const totalHits = results.reduce((acc, f) => acc + f.matches.length, 0);
-    const summary = document.createElement('div');
-    summary.className = 'search-summary';
-    summary.textContent = `${totalHits} Treffer in ${results.length} ${results.length === 1 ? 'Datei' : 'Dateien'}`;
-    this.searchResultsEl.appendChild(summary);
-
-    for (const fileRes of results) {
-      const group = document.createElement('div');
-      group.className = 'search-file-group';
-
-      const header = document.createElement('div');
-      header.className = 'search-file-header';
-      header.title = fileRes.path;
-
-      const nameSpan = document.createElement('span');
-      nameSpan.className = 'search-file-name';
-      nameSpan.textContent = fileRes.relPath || fileRes.name;
-
-      const countSpan = document.createElement('span');
-      countSpan.className = 'search-hit-count';
-      countSpan.textContent = String(fileRes.matches.length);
-
-      header.append(nameSpan, countSpan);
-      group.appendChild(header);
-
-      for (const match of fileRes.matches) {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'search-match-btn';
-        btn.title = `Zeile ${match.line}, Spalte ${match.column}`;
-
-        const lineBadge = document.createElement('span');
-        lineBadge.className = 'search-line-badge';
-        lineBadge.textContent = `${match.line}:`;
-
-        const previewSpan = document.createElement('span');
-        previewSpan.className = 'search-match-preview';
-        previewSpan.textContent = match.preview;
-
-        btn.append(lineBadge, previewSpan);
-        btn.addEventListener('click', async () => {
-          await this.openFileByPath(fileRes.path);
-          requestAnimationFrame(() => {
-            this.editor.jumpToLine(match.line);
-          });
-        });
-        group.appendChild(btn);
-      }
-
-      this.searchResultsEl.appendChild(group);
-    }
-  }
-
-  private async loadWorkspaceFolder(path: string, persistPrefs = true): Promise<void> {
-    try {
-      const tree = await backend.listTree(path);
-      this.setWorkspaceTree(tree, persistPrefs);
-    } catch (err) {
-      console.error('Ordnerbaum konnte nicht geladen werden:', err);
-    }
-  }
-
-  private async refreshWorkspaceTree(): Promise<void> {
-    if (!this.workspaceTree) return;
-    await this.loadWorkspaceFolder(this.workspaceTree.path, false);
-  }
-
-  private setWorkspaceTree(tree: FileTreeNode, persistPrefs = true): void {
-    this.workspaceTree = tree;
-    this.workspaceFilesCache = null;
-    this.pushRecentFolder(tree.path);
-    if (persistPrefs) {
-      this.schedulePrefsSave();
-    }
-
-    this.workspaceTitleEl.textContent = tree.name;
-    this.workspaceTitleEl.title = tree.path;
-    document.getElementById('btn-new-folder-file')!.hidden = false;
-    document.getElementById('btn-new-subfolder')!.hidden = false;
-    document.getElementById('btn-refresh-tree')!.hidden = false;
-
-    this.fileTreeEl.replaceChildren();
-    const children = tree.children ?? [];
-    if (children.length === 0) {
-      const p = document.createElement('p');
-      p.className = 'muted-hint';
-      p.textContent = 'Keine Markdown-Dateien in diesem Ordner.';
-      this.fileTreeEl.appendChild(p);
-      return;
-    }
-
-    for (const node of children) {
-      this.fileTreeEl.appendChild(this.renderTreeNode(node, 0));
-    }
-    this.highlightActiveFileInTree();
-  }
-
-  private renderTreeNode(node: FileTreeNode, depth: number): HTMLElement {
-    if (node.isDir) {
-      const details = document.createElement('details');
-      details.className = 'tree-dir-details';
-      if (depth < 1) details.open = true;
-
-      const summary = document.createElement('summary');
-      summary.className = 'tree-row';
-      summary.dataset.dirpath = node.path;
-      summary.dataset.entryname = node.name;
-      summary.title = node.path;
-      summary.innerHTML = `<span class="tree-chevron">▶</span><span aria-hidden="true">📁</span><span></span>`;
-      summary.lastElementChild!.textContent = node.name;
-      details.appendChild(summary);
-
-      const childrenBox = document.createElement('div');
-      childrenBox.className = 'tree-children';
-      for (const child of node.children ?? []) {
-        childrenBox.appendChild(this.renderTreeNode(child, depth + 1));
-      }
-      details.appendChild(childrenBox);
-      return details;
-    }
-
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = `tree-row ${node.isMarkdown ? '' : 'is-non-md'}`;
-    btn.dataset.filepath = node.path;
-    btn.dataset.entryname = node.name;
-    btn.title = node.path;
-    const icon = node.isMarkdown ? '📝' : '📄';
-    btn.innerHTML = `<span aria-hidden="true">${icon}</span><span></span>`;
-    btn.lastElementChild!.textContent = node.name;
-    btn.addEventListener('click', () => {
-      if (node.isMarkdown) {
-        void this.openFileByPath(node.path);
-      } else {
-        void backend.revealInExplorer(node.path);
-      }
-    });
-    return btn;
-  }
-
-  private highlightActiveFileInTree(): void {
-    const activePath = this.activeTab?.path?.toLowerCase() ?? '';
-    const rows = this.fileTreeEl.querySelectorAll<HTMLElement>('.tree-row[data-filepath]');
-    for (const row of rows) {
-      const p = (row.dataset.filepath ?? '').toLowerCase();
-      row.classList.toggle('is-active', Boolean(activePath && p === activePath));
+      this.workspaceSearch.focusAndRunIfPopulated();
     }
   }
 
@@ -1358,168 +867,7 @@ class MarkLiveApp {
   }
 
   // ==========================================================================
-  // Explorer Context Menu & File/Folder Entry Dialogs
-  // ==========================================================================
-
-  private openTreeContextMenu(e: MouseEvent): void {
-    if (!this.workspaceTree) return;
-    e.preventDefault();
-
-    const row = (e.target as HTMLElement).closest<HTMLElement>('.tree-row');
-    if (row?.dataset.filepath) {
-      const path = row.dataset.filepath;
-      this.contextTarget = {
-        path,
-        parentDir: parentDirOfPath(path) ?? this.workspaceTree.path,
-        name: row.dataset.entryname ?? 'Datei.md',
-        isDir: false,
-        isWorkspaceRoot: false,
-      };
-    } else if (row?.dataset.dirpath) {
-      const path = row.dataset.dirpath;
-      this.contextTarget = {
-        path,
-        parentDir: path,
-        name: row.dataset.entryname ?? 'Ordner',
-        isDir: true,
-        isWorkspaceRoot: false,
-      };
-    } else {
-      this.contextTarget = {
-        path: this.workspaceTree.path,
-        parentDir: this.workspaceTree.path,
-        name: this.workspaceTree.name,
-        isDir: true,
-        isWorkspaceRoot: true,
-      };
-    }
-
-    const renameBtn = document.getElementById('ctx-btn-rename') as HTMLButtonElement;
-    const deleteBtn = document.getElementById('ctx-btn-delete') as HTMLButtonElement;
-    renameBtn.disabled = this.contextTarget.isWorkspaceRoot;
-    deleteBtn.disabled = this.contextTarget.isWorkspaceRoot;
-
-    this.contextPopoverEl.style.left = `${e.clientX}px`;
-    this.contextPopoverEl.style.top = `${e.clientY}px`;
-    this.contextPopoverEl.showPopover?.();
-
-    requestAnimationFrame(() => {
-      const rect = this.contextPopoverEl.getBoundingClientRect();
-      const clampedLeft = Math.max(6, Math.min(e.clientX, window.innerWidth - rect.width - 8));
-      const clampedTop = Math.max(6, Math.min(e.clientY, window.innerHeight - rect.height - 8));
-      this.contextPopoverEl.style.left = `${clampedLeft}px`;
-      this.contextPopoverEl.style.top = `${clampedTop}px`;
-
-      const firstItem = this.contextPopoverEl.querySelector<HTMLButtonElement>(
-        '[focusgroup~="menu"] > button:not(:disabled)',
-      );
-      firstItem?.focus();
-    });
-  }
-
-  private openEntryDialog(
-    mode: EntryDialogMode,
-    targetPath: string,
-    initialValue = '',
-  ): void {
-    this.entryDialogState = { mode, targetPath };
-
-    const dialog = document.getElementById('new-file-dialog') as HTMLDialogElement;
-    const titleEl = document.getElementById('new-file-dialog-title')!;
-    const labelEl = document.getElementById('new-file-label')!;
-    const inputEl = document.getElementById('new-file-name') as HTMLInputElement;
-    const submitBtn = document.getElementById('new-file-submit-btn') as HTMLButtonElement;
-    const errorEl = document.getElementById('new-file-error')!;
-
-    errorEl.textContent = '';
-    errorEl.classList.remove('is-visible');
-
-    if (mode === 'new-file') {
-      titleEl.textContent = 'Neue Markdown-Datei erstellen';
-      labelEl.textContent = 'Dateiname';
-      inputEl.placeholder = 'z. B. Notizen.md';
-      submitBtn.textContent = 'Erstellen';
-    } else if (mode === 'new-folder') {
-      titleEl.textContent = 'Neuen Unterordner erstellen';
-      labelEl.textContent = 'Ordnername';
-      inputEl.placeholder = 'z. B. Kapitel-1';
-      submitBtn.textContent = 'Erstellen';
-    } else {
-      titleEl.textContent = 'Element umbenennen';
-      labelEl.textContent = 'Neuer Name';
-      inputEl.placeholder = '';
-      submitBtn.textContent = 'Umbenennen';
-    }
-
-    inputEl.value = initialValue;
-    dialog.showModal();
-
-    requestAnimationFrame(() => {
-      inputEl.focus();
-      const dotIdx = initialValue.lastIndexOf('.');
-      if (mode === 'rename' && dotIdx > 0) {
-        inputEl.setSelectionRange(0, dotIdx);
-      } else {
-        inputEl.select();
-      }
-    });
-  }
-
-  private async confirmMoveToRecycleBin(target: ContextMenuTarget): Promise<void> {
-    const dialog = document.getElementById('delete-dialog') as HTMLDialogElement;
-    const desc = document.getElementById('delete-dialog-desc')!;
-    desc.textContent = `Möchtest du „${target.name}“ wirklich in den Windows-Papierkorb verschieben?`;
-
-    const confirmed = await new Promise<boolean>((resolve) => {
-      const onClose = () => {
-        dialog.removeEventListener('close', onClose);
-        const val = dialog.returnValue;
-        dialog.returnValue = '';
-        resolve(val === 'delete');
-      };
-      dialog.addEventListener('close', onClose);
-      dialog.showModal();
-    });
-
-    if (!confirmed) return;
-
-    try {
-      await backend.deletePath(target.path);
-      const lowerTarget = target.path.toLowerCase();
-      const prefix = `${lowerTarget}\\`;
-
-      for (let i = this.tabs.length - 1; i >= 0; i--) {
-        const t = this.tabs[i];
-        if (!t.path) continue;
-        const lowerTab = t.path.toLowerCase();
-        if (lowerTab === lowerTarget || lowerTab.startsWith(prefix)) {
-          if (!t.isDirty) {
-            this.tabs.splice(i, 1);
-          } else {
-            t.path = null;
-          }
-        }
-      }
-
-      if (this.tabs.length === 0) {
-        this.createNewTab();
-      } else if (!this.tabs.some((t) => t.id === this.activeTabId)) {
-        this.activateTab(this.tabs[0].id);
-      } else {
-        this.renderTabBar();
-        this.updateStatusBar();
-      }
-
-      await this.refreshWorkspaceTree();
-      this.scheduleDraftSync();
-      this.schedulePrefsSave();
-    } catch (err) {
-      console.error('Löschen in Papierkorb fehlgeschlagen:', err);
-    }
-  }
-
-  // ==========================================================================
-  // Chrome, Accessible Sibling Tabs, Status Bar & Dialogs
+  // Chrome, Accessible Sibling Tabs, Status Bar & Unsaved Prompt
   // ==========================================================================
 
   private renderTabBar(): void {
@@ -1640,76 +988,6 @@ class MarkLiveApp {
   }
 
   // ==========================================================================
-  // Dark Mode Toggle (modern-web-guidance dark-mode & dark-mode-toggle)
-  // ==========================================================================
-
-  private bindThemeSystem(): void {
-    const meta = document.querySelector('meta[name="color-scheme"]') as HTMLMetaElement;
-    const media = window.matchMedia('(prefers-color-scheme: dark)');
-
-    const syncNativeWindowTheme = (rerenderDiagrams = false) => {
-      const content = meta.content;
-      const theme =
-        content === 'dark' ? 'dark' : content === 'light' ? 'light' : 'system';
-      void backend.setWindowState({ theme });
-      if (rerenderDiagrams && this.activeTab) {
-        void this.renderPreviewImmediate(
-          this.activeTab.currentContent,
-          this.activeTab.parentDir ?? this.workspaceTree?.path ?? null,
-        );
-      }
-    };
-
-    syncNativeWindowTheme(false);
-
-    media.addEventListener('change', () => {
-      syncNativeWindowTheme(true);
-    });
-
-    window.addEventListener('storage', (e) => {
-      if (e.key === 'color-scheme') {
-        meta.content = e.newValue ?? 'light dark';
-        syncNativeWindowTheme(true);
-      }
-    });
-
-    const toggleBtn = document.getElementById('btn-theme-toggle')!;
-    toggleBtn.addEventListener('click', () => {
-      let stored: string | null = null;
-      try {
-        stored = localStorage.getItem('color-scheme');
-      } catch {}
-
-      const systemDark = media.matches;
-      const currentlyDark =
-        stored === 'dark' ? true : stored === 'light' ? false : systemDark;
-      const target = currentlyDark ? 'light' : 'dark';
-      const systemScheme = systemDark ? 'dark' : 'light';
-
-      if (target === systemScheme) {
-        try {
-          localStorage.removeItem('color-scheme');
-        } catch {}
-        meta.content = 'light dark';
-      } else {
-        try {
-          localStorage.setItem('color-scheme', target);
-        } catch {}
-        meta.content = target;
-      }
-      syncNativeWindowTheme(true);
-    });
-
-    toggleBtn.addEventListener('dblclick', () => {
-      try {
-        localStorage.removeItem('color-scheme');
-      } catch {}
-      meta.content = 'light dark';
-      syncNativeWindowTheme(true);
-    });
-  }
-
-  // ==========================================================================
   // View, Toolbar & Global Shortcuts Wiring
   // ==========================================================================
 
@@ -1757,7 +1035,7 @@ class MarkLiveApp {
   private async triggerOpenFolderDialog(): Promise<void> {
     const res = await backend.openFolderDialog();
     if (res.tree) {
-      this.setWorkspaceTree(res.tree);
+      this.explorer.setTree(res.tree);
       this.switchSidebarPanel('files');
     }
   }
@@ -1765,16 +1043,11 @@ class MarkLiveApp {
   private exportCurrentTabHtml(): void {
     const tab = this.activeTab;
     if (!tab) return;
-    void backend.exportHtmlDialog(
-      tab.name,
-      tab.currentContent,
-      tab.parentDir ?? this.workspaceTree?.path ?? null,
-      tab.parentDir ?? this.workspaceTree?.path ?? null,
-    );
+    const baseDir = tab.parentDir ?? this.explorer.rootPath;
+    void backend.exportHtmlDialog(tab.name, tab.currentContent, baseDir, baseDir);
   }
 
   private bindUIEvents(): void {
-    // Keep unsaved-changes Escape guard in a cancel listener alongside closedby="none"
     document.getElementById('unsaved-dialog')!.addEventListener('cancel', (e) => {
       e.preventDefault();
     });
@@ -1793,135 +1066,6 @@ class MarkLiveApp {
 
     document.getElementById('btn-open-folder')!.addEventListener('click', () => {
       void this.triggerOpenFolderDialog();
-    });
-    document.getElementById('btn-sidebar-open-folder')?.addEventListener('click', () => {
-      void this.triggerOpenFolderDialog();
-    });
-
-    document.getElementById('btn-refresh-tree')!.addEventListener('click', () => {
-      void this.refreshWorkspaceTree();
-    });
-
-    document.getElementById('btn-new-folder-file')!.addEventListener('click', () => {
-      if (!this.workspaceTree) return;
-      this.openEntryDialog('new-file', this.workspaceTree.path);
-    });
-
-    document.getElementById('btn-new-subfolder')!.addEventListener('click', () => {
-      if (!this.workspaceTree) return;
-      this.openEntryDialog('new-folder', this.workspaceTree.path);
-    });
-
-    this.fileTreeEl.addEventListener('contextmenu', (e) => {
-      this.openTreeContextMenu(e);
-    });
-
-    this.contextPopoverEl.addEventListener('click', (e) => {
-      const actionBtn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-ctx-action]');
-      if (!actionBtn || actionBtn.disabled || !this.contextTarget) return;
-
-      const target = this.contextTarget;
-      const action = actionBtn.dataset.ctxAction;
-      this.contextPopoverEl.hidePopover?.();
-
-      if (action === 'new-file') {
-        this.openEntryDialog('new-file', target.parentDir);
-      } else if (action === 'new-folder') {
-        this.openEntryDialog('new-folder', target.parentDir);
-      } else if (action === 'rename' && !target.isWorkspaceRoot) {
-        this.openEntryDialog('rename', target.path, target.name);
-      } else if (action === 'reveal') {
-        void backend.revealInExplorer(target.path);
-      } else if (action === 'delete' && !target.isWorkspaceRoot) {
-        void this.confirmMoveToRecycleBin(target);
-      }
-    });
-
-    // Unified entry form submit (New File / New Subfolder / Rename)
-    const entryDialog = document.getElementById('new-file-dialog') as HTMLDialogElement;
-    const entryInput = document.getElementById('new-file-name') as HTMLInputElement;
-    const entryError = document.getElementById('new-file-error')!;
-
-    entryDialog.addEventListener('close', () => {
-      entryDialog.returnValue = '';
-    });
-
-    document.getElementById('new-file-form')!.addEventListener('submit', async (e) => {
-      const submitter = (e as SubmitEvent).submitter as HTMLButtonElement | null;
-      if (submitter?.value !== 'create') return;
-      e.preventDefault();
-
-      const { mode, targetPath } = this.entryDialogState;
-      const rawName = entryInput.value;
-
-      try {
-        if (mode === 'new-file') {
-          const created = await backend.createFile(targetPath, rawName);
-          entryDialog.close();
-          await this.refreshWorkspaceTree();
-          this.openTabFromPayload(created);
-        } else if (mode === 'new-folder') {
-          await backend.createFolder(targetPath, rawName);
-          entryDialog.close();
-          await this.refreshWorkspaceTree();
-        } else if (mode === 'rename') {
-          const renamed = await backend.renamePath(targetPath, rawName);
-          entryDialog.close();
-
-          const oldLower = targetPath.toLowerCase();
-          const oldPrefix = `${oldLower}\\`;
-          for (const t of this.tabs) {
-            if (!t.path) continue;
-            const tabLower = t.path.toLowerCase();
-            if (tabLower === oldLower) {
-              t.path = renamed.path;
-              t.name = renamed.name;
-              t.parentDir = parentDirOfPath(renamed.path);
-            } else if (tabLower.startsWith(oldPrefix)) {
-              const suffix = t.path.slice(targetPath.length);
-              t.path = `${renamed.path}${suffix}`;
-              t.parentDir = parentDirOfPath(t.path);
-            }
-          }
-
-          await this.refreshWorkspaceTree();
-          this.renderTabBar();
-          this.updateStatusBar();
-          this.syncWindowMetadata();
-          this.scheduleDraftSync();
-          this.schedulePrefsSave();
-        }
-      } catch (err) {
-        entryError.textContent =
-          err instanceof Error ? err.message : 'Aktion fehlgeschlagen.';
-        entryError.classList.add('is-visible');
-      }
-    });
-
-    // Workspace full-text search wiring
-    this.searchInputEl.addEventListener('input', () => {
-      window.clearTimeout(this.searchDebounceTimer);
-      this.searchDebounceTimer = window.setTimeout(() => {
-        void this.runWorkspaceSearch();
-      }, 180);
-    });
-
-    this.searchInputEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        window.clearTimeout(this.searchDebounceTimer);
-        void this.runWorkspaceSearch();
-      }
-    });
-
-    const caseBtn = document.getElementById('btn-search-case')!;
-    caseBtn.addEventListener('click', () => {
-      this.searchCaseSensitive = !this.searchCaseSensitive;
-      caseBtn.classList.toggle('is-active', this.searchCaseSensitive);
-      caseBtn.setAttribute('aria-pressed', String(this.searchCaseSensitive));
-      if (this.searchInputEl.value.trim()) {
-        void this.runWorkspaceSearch();
-      }
     });
 
     document.getElementById('btn-save')!.addEventListener('click', () => {
@@ -1973,11 +1117,17 @@ class MarkLiveApp {
 
       const cols = Math.max(
         1,
-        Math.min(12, Number((document.getElementById('table-cols') as HTMLInputElement).value) || 3),
+        Math.min(
+          12,
+          Number((document.getElementById('table-cols') as HTMLInputElement).value) || 3,
+        ),
       );
       const rows = Math.max(
         1,
-        Math.min(50, Number((document.getElementById('table-rows') as HTMLInputElement).value) || 3),
+        Math.min(
+          50,
+          Number((document.getElementById('table-rows') as HTMLInputElement).value) || 3,
+        ),
       );
       const align = (document.getElementById('table-align') as HTMLSelectElement).value;
       const sepCell =
@@ -2098,9 +1248,9 @@ class MarkLiveApp {
         ) {
           e.preventDefault();
           void backend.openExternalUrl(href);
-        } else if (href.endsWith('.md') && this.activeTab?.parentDir) {
+        } else if (/\.md(?:#.*)?$/i.test(href) && this.activeTab?.parentDir) {
           e.preventDefault();
-          const joined = `${this.activeTab.parentDir}\\${href.replace(/\//g, '\\')}`;
+          const joined = resolveRelativeMarkdownPath(this.activeTab.parentDir, href);
           void this.openFileByPath(joined);
         }
       }
@@ -2108,7 +1258,7 @@ class MarkLiveApp {
 
     // Status bar interactive buttons
     this.statusPathBtn.addEventListener('click', () => {
-      const p = this.activeTab?.path ?? this.workspaceTree?.path;
+      const p = this.activeTab?.path ?? this.explorer.rootPath;
       if (p) void backend.revealInExplorer(p);
     });
 
@@ -2230,7 +1380,7 @@ class MarkLiveApp {
     onBackendEvent('files-dropped', async ({ files, images, folder }) => {
       this.dropOverlayEl.hidden = true;
       if (folder) {
-        await this.loadWorkspaceFolder(folder);
+        await this.explorer.loadFolder(folder, true);
         this.sidebarEl.classList.remove('is-collapsed');
       }
       for (const f of files) {
@@ -2273,8 +1423,8 @@ class MarkLiveApp {
         }
       }
 
-      if (this.workspaceTree) {
-        void this.refreshWorkspaceTree();
+      if (this.explorer.hasWorkspace) {
+        void this.explorer.refresh();
       }
     });
 

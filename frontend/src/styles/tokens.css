@@ -1,0 +1,208 @@
+/* ==========================================================================
+   MarkLive – Design Tokens, Color Scheme, Scrollbars & Base Accessibility
+   ========================================================================== */
+
+:root {
+  /* Raw Light / Dark Palette Tokens */
+  --bg-chrome-light: rgba(243, 245, 249, 0.82);
+  --bg-chrome-dark: rgba(24, 26, 32, 0.80);
+
+  --bg-sidebar-light: rgba(246, 248, 252, 0.78);
+  --bg-sidebar-dark: rgba(28, 31, 38, 0.76);
+
+  --bg-surface-light: rgba(255, 255, 255, 0.94);
+  --bg-surface-dark: rgba(20, 22, 28, 0.92);
+
+  --bg-elevated-light: #ffffff;
+  --bg-elevated-dark: #232731;
+
+  --bg-subtle-light: #f1f4f9;
+  --bg-subtle-dark: #282d38;
+
+  --bg-hover-light: rgba(15, 23, 42, 0.06);
+  --bg-hover-dark: rgba(255, 255, 255, 0.07);
+
+  --bg-active-light: rgba(37, 99, 235, 0.11);
+  --bg-active-dark: rgba(96, 165, 250, 0.16);
+
+  --fg-primary-light: #181c24;
+  --fg-primary-dark: #e8ecf4;
+
+  --fg-secondary-light: #525c6e;
+  --fg-secondary-dark: #9ba5b7;
+
+  --fg-muted-light: #758094;
+  --fg-muted-dark: #6f7a8e;
+
+  --border-subtle-light: rgba(15, 23, 42, 0.10);
+  --border-subtle-dark: rgba(255, 255, 255, 0.09);
+
+  --border-strong-light: rgba(15, 23, 42, 0.18);
+  --border-strong-dark: rgba(255, 255, 255, 0.16);
+
+  --accent-light: #005fb8;
+  --accent-dark: #60cdff;
+
+  --accent-fg-light: #ffffff;
+  --accent-fg-dark: #061826;
+
+  --danger-light: #c42b1c;
+  --danger-dark: #ff99a4;
+
+  --scrollbar-thumb-light: rgba(100, 112, 132, 0.45);
+  --scrollbar-thumb-dark: rgba(148, 163, 184, 0.36);
+  --scrollbar-track-light: transparent;
+  --scrollbar-track-dark: transparent;
+
+  /* Fallback defaults for browsers without light-dark() */
+  --bg-chrome: var(--bg-chrome-light);
+  --bg-sidebar: var(--bg-sidebar-light);
+  --bg-surface: var(--bg-surface-light);
+  --bg-elevated: var(--bg-elevated-light);
+  --bg-subtle: var(--bg-subtle-light);
+  --bg-hover: var(--bg-hover-light);
+  --bg-active: var(--bg-active-light);
+  --fg-primary: var(--fg-primary-light);
+  --fg-secondary: var(--fg-secondary-light);
+  --fg-muted: var(--fg-muted-light);
+  --border-subtle: var(--border-subtle-light);
+  --border-strong: var(--border-strong-light);
+  --accent: var(--accent-light);
+  --accent-fg: var(--accent-fg-light);
+  --danger: var(--danger-light);
+  --scrollbar-thumb: var(--scrollbar-thumb-light);
+  --scrollbar-track: var(--scrollbar-track-light);
+
+  @media (prefers-color-scheme: dark) {
+    --bg-chrome: var(--bg-chrome-dark);
+    --bg-sidebar: var(--bg-sidebar-dark);
+    --bg-surface: var(--bg-surface-dark);
+    --bg-elevated: var(--bg-elevated-dark);
+    --bg-subtle: var(--bg-subtle-dark);
+    --bg-hover: var(--bg-hover-dark);
+    --bg-active: var(--bg-active-dark);
+    --fg-primary: var(--fg-primary-dark);
+    --fg-secondary: var(--fg-secondary-dark);
+    --fg-muted: var(--fg-muted-dark);
+    --border-subtle: var(--border-subtle-dark);
+    --border-strong: var(--border-strong-dark);
+    --accent: var(--accent-dark);
+    --accent-fg: var(--accent-fg-dark);
+    --danger: var(--danger-dark);
+    --scrollbar-thumb: var(--scrollbar-thumb-dark);
+    --scrollbar-track: var(--scrollbar-track-dark);
+  }
+
+  @supports (color: light-dark(white, black)) {
+    --bg-chrome: light-dark(var(--bg-chrome-light), var(--bg-chrome-dark));
+    --bg-sidebar: light-dark(var(--bg-sidebar-light), var(--bg-sidebar-dark));
+    --bg-surface: light-dark(var(--bg-surface-light), var(--bg-surface-dark));
+    --bg-elevated: light-dark(var(--bg-elevated-light), var(--bg-elevated-dark));
+    --bg-subtle: light-dark(var(--bg-subtle-light), var(--bg-subtle-dark));
+    --bg-hover: light-dark(var(--bg-hover-light), var(--bg-hover-dark));
+    --bg-active: light-dark(var(--bg-active-light), var(--bg-active-dark));
+    --fg-primary: light-dark(var(--fg-primary-light), var(--fg-primary-dark));
+    --fg-secondary: light-dark(var(--fg-secondary-light), var(--fg-secondary-dark));
+    --fg-muted: light-dark(var(--fg-muted-light), var(--fg-muted-dark));
+    --border-subtle: light-dark(var(--border-subtle-light), var(--border-subtle-dark));
+    --border-strong: light-dark(var(--border-strong-light), var(--border-strong-dark));
+    --accent: light-dark(var(--accent-light), var(--accent-dark));
+    --accent-fg: light-dark(var(--accent-fg-light), var(--accent-fg-dark));
+    --danger: light-dark(var(--danger-light), var(--danger-dark));
+    --scrollbar-thumb: light-dark(var(--scrollbar-thumb-light), var(--scrollbar-thumb-dark));
+    --scrollbar-track: light-dark(var(--scrollbar-track-light), var(--scrollbar-track-dark));
+  }
+
+  /* MANDATORY: Apply color-scheme to :root and reflect <meta name="color-scheme"> override */
+  color-scheme: light dark;
+  accent-color: var(--accent);
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+
+  &:has(> head > meta[name="color-scheme"][content="dark"]) {
+    color-scheme: dark;
+  }
+  &:has(> head > meta[name="color-scheme"][content="light"]) {
+    color-scheme: light;
+  }
+
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "Cascadia Code", "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 11px;
+  --split-ratio: 50%;
+  --doc-zoom: 1;
+}
+
+/* Theme toggle icon visibility without JS dependency */
+.theme-opt-to-light {
+  display: none;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not(:has(> head > meta[name="color-scheme"][content="light"])) .theme-opt-to-dark {
+    display: none;
+  }
+  :root:not(:has(> head > meta[name="color-scheme"][content="light"])) .theme-opt-to-light {
+    display: inline-flex;
+  }
+}
+:root:has(> head > meta[name="color-scheme"][content="dark"]) .theme-opt-to-dark {
+  display: none;
+}
+:root:has(> head > meta[name="color-scheme"][content="dark"]) .theme-opt-to-light {
+  display: inline-flex;
+}
+
+/* Standard Scrollbar Styling (do NOT transition scrollbar-color) */
+.scroller,
+.cm-scroller {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+@supports not (scrollbar-color: auto) {
+  .scroller::-webkit-scrollbar,
+  .cm-scroller::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  .scroller::-webkit-scrollbar-thumb,
+  .cm-scroller::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 5px;
+  }
+  .scroller::-webkit-scrollbar-track,
+  .cm-scroller::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  color: var(--fg-primary);
+  background: transparent;
+  user-select: none;
+}
+
+.visually-hidden:where(:not(:focus-within, :active)),
+.sr-only {
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
