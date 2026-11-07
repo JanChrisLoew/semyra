@@ -977,7 +977,11 @@ class MarkLiveApp {
           css: 'css',
         };
         const lang = langMap[ext] ?? (ext || 'text');
-        markdownToRender = `\`\`\`${lang}\n${markdown}\n\`\`\``;
+        let fence = '```';
+        while (markdown.includes(fence)) {
+          fence += '`';
+        }
+        markdownToRender = `${fence}${lang}\n${markdown}\n${fence}`;
       }
 
       const res = await backend.renderMarkdown(markdownToRender, baseDir);

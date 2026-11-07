@@ -252,6 +252,7 @@ export class MarkdownEditorController {
   private wordWrapCompartment = new Compartment();
   private spellcheckCompartment = new Compartment();
   private languageCompartment = new Compartment();
+  private currentLanguageFile = '';
   private wordWrapEnabled = true;
   private spellcheckEnabled = false;
   private sharedExtensions: Extension;
@@ -809,6 +810,7 @@ export class MarkdownEditorController {
   }
 
   public async setLanguageForFile(fileName: string): Promise<void> {
+    this.currentLanguageFile = fileName;
     const isMd = isMarkdownPath(fileName);
     if (isMd) {
       this.view.dispatch({
@@ -826,10 +828,12 @@ export class MarkdownEditorController {
     if (desc) {
       try {
         const support = await desc.load();
+        if (this.currentLanguageFile !== fileName) return;
         this.view.dispatch({
           effects: this.languageCompartment.reconfigure(support),
         });
       } catch {
+        if (this.currentLanguageFile !== fileName) return;
         this.view.dispatch({
           effects: this.languageCompartment.reconfigure([]),
         });
