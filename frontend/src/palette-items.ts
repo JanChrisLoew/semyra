@@ -64,6 +64,9 @@ export interface PaletteCommandContext {
   onInsertTableColumnLeft?: () => void;
   onInsertTableColumnRight?: () => void;
   onDeleteTableColumn?: () => void;
+  onToggleSplitOrientation?: () => void;
+  onShowDocStats?: () => void;
+  splitOrientation?: 'vertical' | 'horizontal';
 }
 
 export async function buildPaletteFileItems(ctx: PaletteFileContext): Promise<PaletteItem[]> {
@@ -347,6 +350,29 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
       shortcut: 'Alt+3',
       run: () => ctx.onSetViewMode('preview'),
     },
+    ...(ctx.onToggleSplitOrientation
+      ? [
+          {
+            id: 'cmd:toggle-split-orientation',
+            kind: 'command' as const,
+            label: `Ansicht: Geteilte Ansicht drehen (${
+              ctx.splitOrientation === 'horizontal' ? 'Zu vertikaler Teilung' : 'Zu horizontaler Teilung'
+            })`,
+            shortcut: 'Alt+Umschalt+S',
+            run: () => ctx.onToggleSplitOrientation?.(),
+          },
+        ]
+      : []),
+    ...(ctx.onShowDocStats
+      ? [
+          {
+            id: 'cmd:show-doc-stats',
+            kind: 'command' as const,
+            label: 'Dokument: Detaillierte Statistiken & Lesbarkeit anzeigen',
+            run: () => ctx.onShowDocStats?.(),
+          },
+        ]
+      : []),
     {
       id: 'cmd:toggle-wrap',
       kind: 'command',

@@ -10,6 +10,10 @@ fn default_split_ratio() -> f64 {
     50.0
 }
 
+fn default_split_orientation() -> String {
+    "vertical".to_string()
+}
+
 fn default_zoom_percent() -> u16 {
     100
 }
@@ -19,6 +23,8 @@ fn default_zoom_percent() -> u16 {
 pub struct UiSessionPrefs {
     #[serde(default = "default_split_ratio")]
     pub split_ratio: f64,
+    #[serde(default = "default_split_orientation")]
+    pub split_orientation: String,
     #[serde(default = "default_zoom_percent")]
     pub zoom_percent: u16,
     #[serde(default = "default_true")]
@@ -43,6 +49,7 @@ impl Default for UiSessionPrefs {
     fn default() -> Self {
         Self {
             split_ratio: default_split_ratio(),
+            split_orientation: default_split_orientation(),
             zoom_percent: default_zoom_percent(),
             sync_scroll: true,
             auto_save: false,

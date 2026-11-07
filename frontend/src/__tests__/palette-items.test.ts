@@ -152,6 +152,9 @@ describe('palette-items', () => {
       onCopyAiContext: onCopyAi,
       onInsertTableRowAbove: onInsertRowAbove,
       onInsertTableColumnLeft: onInsertColLeft,
+      onToggleSplitOrientation: vi.fn(),
+      onShowDocStats: vi.fn(),
+      splitOrientation: 'vertical',
     });
 
     const copyMdCmd = cmds.find((c) => c.id === 'cmd:copy-markdown');
@@ -201,5 +204,14 @@ describe('palette-items', () => {
     expect(colLeftCmd?.label).toContain('Spalte links');
     colLeftCmd?.run();
     expect(onInsertColLeft).toHaveBeenCalledTimes(1);
+
+    const splitCmd = cmds.find((c) => c.id === 'cmd:toggle-split-orientation');
+    expect(splitCmd).toBeDefined();
+    expect(splitCmd?.shortcut).toBe('Alt+Umschalt+S');
+    expect(splitCmd?.label).toContain('Zu horizontaler Teilung');
+
+    const statsCmd = cmds.find((c) => c.id === 'cmd:show-doc-stats');
+    expect(statsCmd).toBeDefined();
+    expect(statsCmd?.label).toContain('Detaillierte Statistiken');
   });
 });

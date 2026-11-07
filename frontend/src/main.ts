@@ -24,6 +24,7 @@ import {
 import { installProgressiveEnhancements } from './polyfills';
 import { safeSetMarkdownHTML } from './sanitizer';
 import { SidebarExplorerController } from './sidebar-explorer';
+import { calculateDetailedStats } from './stats-utils';
 import { SyncScrollController } from './sync-scroll';
 import { reorderTabList } from './tab-utils';
 import { bindThemeSystem } from './theme';
@@ -70,6 +71,7 @@ class MarkLiveApp {
   private workspaceSearch!: WorkspaceSearchController;
 
   private splitRatio = 50;
+  private splitOrientation: 'vertical' | 'horizontal' = 'vertical';
   private zoomPercent = 100;
   private autoSaveEnabled = false;
   private recentFiles: string[] = [];
@@ -293,6 +295,9 @@ class MarkLiveApp {
               }
             },
             onSetViewMode: (mode) => this.setViewMode(mode),
+            splitOrientation: this.splitOrientation,
+            onToggleSplitOrientation: () => this.toggleSplitOrientation(),
+            onShowDocStats: () => this.openDocStatsPopover(),
             onToggleWordWrap: () => this.toggleWordWrap(),
             onToggleSpellcheck: () => {
               this.editor.setSpellcheck(!this.editor.isSpellcheckEnabled());
@@ -405,6 +410,7 @@ class MarkLiveApp {
 
   private applyRestoredUiPrefs(prefs: UiSessionPrefs): void {
     this.setSplitRatio(prefs.splitRatio || 50, false);
+    this.setSplitOrientation(prefs.splitOrientation ?? 'vertical', false);
     this.setZoomPercent(prefs.zoomPercent || 100, false);
 
     this.syncScroll.setEnabled(prefs.syncScroll);
@@ -450,6 +456,86 @@ class MarkLiveApp {
     }
   }
 
+  private setSplitOrientation(orientation: 'vertical' | 'horizontal', persist = true): void {
+    this.splitOrientation = orientation;
+    const splitContainer = document.getElementById('split-container');
+    if (splitContainer) {
+      splitContainer.dataset.orientation = orientation;
+    }
+    const resizer = document.getElementById('split-resizer');
+    resizer?.setAttribute('aria-orientation', orientation);
+
+    const btn = document.getElementById('btn-toggle-split-orientation');
+    if (btn) {
+      btn.title =
+        orientation === 'horizontal'
+          ? 'Auf vertikale Teilung umschalten (Alt+Umschalt+S)'
+          : 'Auf horizontale Teilung umschalten (Alt+Umschalt+S)';
+      const iconVert = btn.querySelector<HTMLElement>('.icon-split-vert');
+      const iconHoriz = btn.querySelector<HTMLElement>('.icon-split-horiz');
+      if (iconVert) iconVert.style.display = orientation === 'horizontal' ? 'none' : 'block';
+      if (iconHoriz) iconHoriz.style.display = orientation === 'horizontal' ? 'block' : 'none';
+    }
+
+    if (persist) {
+      this.schedulePrefsSave();
+    }
+  }
+
+  private toggleSplitOrientation(): void {
+    const next = this.splitOrientation === 'horizontal' ? 'vertical' : 'horizontal';
+    this.setSplitOrientation(next);
+    this.showToast(
+      next === 'horizontal'
+        ? 'Horizontale Teilung (Editor oben)'
+        : 'Vertikale Teilung (Editor links)',
+    );
+  }
+
+  private openDocStatsPopover(): void {
+    const popover = document.getElementById('doc-stats-popover') as HTMLElement & {
+      showPopover?: () => void;
+      hidePopover?: () => void;
+    };
+    if (!popover) return;
+
+    const content = this.activeTab?.currentContent ?? '';
+    const stats = calculateDetailedStats(content, this.lastSelection);
+
+    document.getElementById('stat-words')!.textContent = stats.wordsTotal.toLocaleString('de-DE');
+    document.getElementById('stat-words-sub')!.textContent =
+      stats.wordsSelected > 0
+        ? `${stats.wordsSelected.toLocaleString('de-DE')} markiert`
+        : 'Im Dokument';
+
+    document.getElementById('stat-chars')!.textContent = stats.charsTotal.toLocaleString('de-DE');
+    document.getElementById('stat-chars-no-space')!.textContent =
+      `${stats.charsNoSpaces.toLocaleString('de-DE')} ohne Leerzeichen${
+        stats.charsSelected > 0 ? ` (${stats.charsSelected} markiert)` : ''
+      }`;
+
+    document.getElementById('stat-paragraphs')!.textContent = stats.paragraphsTotal.toLocaleString('de-DE');
+    document.getElementById('stat-lines')!.textContent = `${stats.linesTotal.toLocaleString('de-DE')} Zeilen`;
+
+    document.getElementById('stat-read-time')!.textContent = stats.readingTimeString;
+    document.getElementById('stat-speak-time')!.textContent = `Sprechzeit: ${stats.speakingTimeString}`;
+
+    document.getElementById('stat-flesch-score')!.textContent = `${stats.fleschScore} / 100`;
+    document.getElementById('stat-flesch-grade')!.textContent = stats.fleschGrade;
+
+    document.getElementById('stat-tokens')!.textContent = `~${stats.tokensEstimate.toLocaleString('de-DE')} Tokens`;
+
+    if (typeof popover.showPopover === 'function') {
+      try {
+        popover.showPopover();
+      } catch {
+        popover.style.display = 'block';
+      }
+    } else {
+      popover.style.display = 'block';
+    }
+  }
+
   private pushRecentFile(filePath: string): void {
     const lower = filePath.toLowerCase();
     this.recentFiles = [
@@ -475,6 +561,7 @@ class MarkLiveApp {
       .filter((p): p is string => Boolean(p));
     return {
       splitRatio: this.splitRatio,
+      splitOrientation: this.splitOrientation,
       zoomPercent: this.zoomPercent,
       syncScroll: this.syncScroll.isEnabled(),
       autoSave: this.autoSaveEnabled,
@@ -1963,7 +2050,10 @@ class MarkLiveApp {
 
       const onMove = (ev: PointerEvent) => {
         const rect = splitContainer.getBoundingClientRect();
-        const pct = ((ev.clientX - rect.left) / rect.width) * 100;
+        const pct =
+          this.splitOrientation === 'horizontal'
+            ? ((ev.clientY - rect.top) / rect.height) * 100
+            : ((ev.clientX - rect.left) / rect.width) * 100;
         this.setSplitRatio(pct, false);
       };
 
@@ -1984,10 +2074,11 @@ class MarkLiveApp {
     });
 
     resizer.addEventListener('keydown', (e) => {
-      if (e.key === 'ArrowLeft') {
+      const isHoriz = this.splitOrientation === 'horizontal';
+      if ((!isHoriz && e.key === 'ArrowLeft') || (isHoriz && e.key === 'ArrowUp')) {
         e.preventDefault();
         this.setSplitRatio(this.splitRatio - 3);
-      } else if (e.key === 'ArrowRight') {
+      } else if ((!isHoriz && e.key === 'ArrowRight') || (isHoriz && e.key === 'ArrowDown')) {
         e.preventDefault();
         this.setSplitRatio(this.splitRatio + 3);
       } else if (e.key === 'Home') {
@@ -1995,6 +2086,15 @@ class MarkLiveApp {
         this.setSplitRatio(50);
       }
     });
+
+    document.getElementById('btn-toggle-split-orientation')?.addEventListener('click', () => {
+      this.toggleSplitOrientation();
+    });
+
+    const openStats = () => this.openDocStatsPopover();
+    document.getElementById('status-words')?.addEventListener('click', openStats);
+    document.getElementById('status-tokens')?.addEventListener('click', openStats);
+    document.getElementById('status-readtime')?.addEventListener('click', openStats);
 
     this.previewPaneEl.addEventListener('scroll', () => this.syncScroll.syncPreviewToEditor(), {
       passive: true,
@@ -2263,6 +2363,9 @@ class MarkLiveApp {
         } else if (e.altKey && !mod && e.key === '3') {
           consume();
           this.setViewMode('preview');
+        } else if (e.altKey && !mod && e.shiftKey && key === 's') {
+          consume();
+          this.toggleSplitOrientation();
         } else if (e.key === 'F11') {
           consume();
           toggleZen();

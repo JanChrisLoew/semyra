@@ -65,6 +65,7 @@ export interface SearchFileResult {
 
 export interface UiSessionPrefs {
   splitRatio: number;
+  splitOrientation?: 'vertical' | 'horizontal';
   zoomPercent: number;
   syncScroll: boolean;
   autoSave: boolean;
