@@ -511,7 +511,10 @@ pub fn render_markdown(markdown: &str, base_dir: Option<&Path>) -> RenderResult 
                         });
                         html.push_str(&format!("<h{lvl} id=\""));
                         escape_html(&mut html, &slug);
-                        html.push_str(&format!("\" data-line=\"{h_line}\">{inner_html}</h{lvl}>\n"));
+                        html.push_str(&format!("\" data-line=\"{h_line}\"><a class=\"heading-anchor\" href=\"#"));
+                        escape_html(&mut html, &slug);
+                        html.push_str("\" aria-label=\"Abschnitt verlinken\">#</a>");
+                        html.push_str(&format!("{inner_html}</h{lvl}>\n"));
                     }
                 }
                 TagEnd::Paragraph => html.push_str("</p>\n"),

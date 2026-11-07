@@ -706,20 +706,6 @@ body.is-tab-dragging * {
   }
 }
 
-@media (max-width: 1120px) {
-  #btn-open-file span,
-  #btn-open-folder span,
-  #btn-save span {
-    display: none;
-  }
-  #btn-open-file,
-  #btn-open-folder,
-  #btn-save {
-    padding: 0;
-    width: 30px;
-  }
-}
-
 @media (max-width: 960px) {
   #btn-sync-scroll span {
     display: none;

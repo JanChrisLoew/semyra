@@ -2330,6 +2330,10 @@ class MarkLiveApp {
           this.previewContentEl.querySelector(`#${CSS.escape(id)}`)?.scrollIntoView({
             behavior: 'smooth',
           });
+          if (anchor.classList.contains('heading-anchor')) {
+            void navigator.clipboard?.writeText(href);
+            this.showToast('Abschnitt-Link kopiert');
+          }
         } else if (
           href.startsWith('https://') ||
           href.startsWith('http://') ||
