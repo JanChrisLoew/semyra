@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { reorderTabList } from '../tab-utils';
+import { findAdjacentTabId, reorderTabList } from '../tab-utils';
 
 describe('reorderTabList', () => {
   const tabs = [
@@ -51,5 +51,37 @@ describe('reorderTabList', () => {
   it('returns original list if sourceId or targetId not found', () => {
     expect(reorderTabList(tabs, 'invalid', 'tab-2', false)).toBe(tabs);
     expect(reorderTabList(tabs, 'tab-1', 'invalid', true)).toBe(tabs);
+  });
+});
+
+describe('findAdjacentTabId', () => {
+  const tabs = [
+    { id: 'tab-1', name: 'Alpha.md' },
+    { id: 'tab-2', name: 'Beta.md' },
+    { id: 'tab-3', name: 'Gamma.md' },
+  ];
+
+  it('cycles to next tab forward', () => {
+    expect(findAdjacentTabId(tabs, 'tab-1', 1)).toBe('tab-2');
+    expect(findAdjacentTabId(tabs, 'tab-2', 1)).toBe('tab-3');
+  });
+
+  it('wraps around to first tab when advancing past the end', () => {
+    expect(findAdjacentTabId(tabs, 'tab-3', 1)).toBe('tab-1');
+  });
+
+  it('cycles to previous tab backward', () => {
+    expect(findAdjacentTabId(tabs, 'tab-3', -1)).toBe('tab-2');
+    expect(findAdjacentTabId(tabs, 'tab-2', -1)).toBe('tab-1');
+  });
+
+  it('wraps around to last tab when stepping back before the start', () => {
+    expect(findAdjacentTabId(tabs, 'tab-1', -1)).toBe('tab-3');
+  });
+
+  it('returns null if list has 1 or 0 tabs or currentId is missing', () => {
+    expect(findAdjacentTabId([], 'tab-1', 1)).toBeNull();
+    expect(findAdjacentTabId([{ id: 'solo' }], 'solo', 1)).toBeNull();
+    expect(findAdjacentTabId(tabs, 'unknown', 1)).toBeNull();
   });
 });

@@ -25,3 +25,18 @@ export function reorderTabList<T extends { id: string }>(
   copy.splice(targetIndex, 0, moved);
   return copy;
 }
+
+/**
+ * Calculates the next or previous active tab id with circular wrap-around.
+ */
+export function findAdjacentTabId<T extends { id: string }>(
+  tabs: T[],
+  currentId: string,
+  direction: 1 | -1,
+): string | null {
+  if (tabs.length <= 1) return null;
+  const curIdx = tabs.findIndex((t) => t.id === currentId);
+  if (curIdx === -1) return null;
+  const nextIdx = (curIdx + direction + tabs.length) % tabs.length;
+  return tabs[nextIdx].id;
+}

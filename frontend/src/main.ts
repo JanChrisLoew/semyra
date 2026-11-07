@@ -26,7 +26,7 @@ import { safeSetMarkdownHTML } from './sanitizer';
 import { SidebarExplorerController } from './sidebar-explorer';
 import { calculateDetailedStats } from './stats-utils';
 import { SyncScrollController } from './sync-scroll';
-import { reorderTabList } from './tab-utils';
+import { findAdjacentTabId, reorderTabList } from './tab-utils';
 import { bindThemeSystem } from './theme';
 import { estimateTokens } from './token-utils';
 import { WELCOME_MARKDOWN } from './welcome';
@@ -93,6 +93,7 @@ class MarkLiveApp {
   private previewPaneEl = document.getElementById('preview-pane')!;
   private previewContentEl = document.getElementById('preview-content')!;
   private outlineEl = document.getElementById('outline-container')!;
+  private outlineCountBadgeEl = document.getElementById('outline-count-badge');
   private statusPathBtn = document.getElementById('status-filepath') as HTMLButtonElement;
   private statusSaveBadge = document.getElementById('status-save-badge')!;
   private statusCursorEl = document.getElementById('status-cursor')!;
@@ -999,11 +1000,11 @@ class MarkLiveApp {
   }
 
   private cycleActiveTab(direction: 1 | -1): void {
-    if (this.tabs.length <= 1) return;
-    const curIdx = this.tabs.findIndex((t) => t.id === this.activeTabId);
-    if (curIdx === -1) return;
-    const nextIdx = (curIdx + direction + this.tabs.length) % this.tabs.length;
-    this.activateTab(this.tabs[nextIdx].id);
+    if (!this.activeTabId) return;
+    const nextId = findAdjacentTabId(this.tabs, this.activeTabId, direction);
+    if (nextId) {
+      this.activateTab(nextId);
+    }
   }
 
   private async closeOtherTabs(keepTabId: string): Promise<void> {
@@ -1221,6 +1222,18 @@ class MarkLiveApp {
 
   private renderOutline(outline: HeadingItem[]): void {
     this.outlineEl.replaceChildren();
+
+    if (this.outlineCountBadgeEl) {
+      if (outline.length === 0) {
+        this.outlineCountBadgeEl.textContent = '';
+      } else {
+        this.outlineCountBadgeEl.textContent = String(outline.length);
+        this.outlineCountBadgeEl.title = `${outline.length} ${
+          outline.length === 1 ? 'Abschnitt' : 'Abschnitte'
+        }`;
+      }
+    }
+
     if (outline.length === 0) {
       const hint = document.createElement('p');
       hint.className = 'muted-hint';
@@ -1333,6 +1346,7 @@ class MarkLiveApp {
     }
 
     syncRovingTabindex(this.tabBarEl, 'button[role="tab"]', activeTabBtn);
+    activeTabBtn?.closest('.tab-slot')?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
   }
 
   private openTabContextMenu(e: MouseEvent, tabId: string): void {
@@ -2071,6 +2085,32 @@ class MarkLiveApp {
       if ((e.target as HTMLElement).closest('.tab-slot, button')) return;
       this.createNewTab();
     });
+
+    // Horizontal mouse wheel scrolling on tab bar
+    this.tabBarEl.addEventListener(
+      'wheel',
+      (e) => {
+        if (e.deltaY && !e.deltaX) {
+          e.preventDefault();
+          this.tabBarEl.scrollLeft += e.deltaY;
+        }
+      },
+      { passive: false },
+    );
+
+    // Horizontal mouse wheel scrolling on format ribbon
+    const formatScroll = document.querySelector('.format-buttons-scroll');
+    formatScroll?.addEventListener(
+      'wheel',
+      (e) => {
+        const wheelEvt = e as WheelEvent;
+        if (wheelEvt.deltaY && !wheelEvt.deltaX) {
+          wheelEvt.preventDefault();
+          formatScroll.scrollLeft += wheelEvt.deltaY;
+        }
+      },
+      { passive: false },
+    );
 
     // Native Ctrl + MouseWheel document text zoom
     window.addEventListener(
