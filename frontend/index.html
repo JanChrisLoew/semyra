@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- MANDATORY: Declare support for both light and dark themes -->
+  <meta name="color-scheme" content="light dark">
+  <script>
+    try {
+      document.querySelector('meta[name="color-scheme"]').content =
+        localStorage.getItem("color-scheme") ?? "light dark";
+    } catch {}
+  </script>
+  <title>MarkLive</title>
+</head>
+<body>
+  <div id="app" class="app-shell" data-view="split">
+    <!-- Top Command & Formatting Toolbar -->
+    <header class="top-chrome">
+      <div class="toolbar-row primary-bar">
+        <div class="toolbar-group">
+          <button type="button" id="btn-toggle-sidebar" class="icon-btn" title="Seitenleiste ein-/ausblenden (Strg+\)" aria-label="Seitenleiste ein-/ausblenden">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="7.5" y1="3.5" x2="7.5" y2="16.5" stroke="currentColor" stroke-width="1.5"/></svg>
+          </button>
+          <div class="toolbar-divider"></div>
+          <button type="button" id="btn-new-tab" class="tool-btn" title="Neues Dokument (Strg+N)">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3.5h6.5L15.5 7.5v9a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-12a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M11 3.5v4h4M10 10v4M8 12h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <span>Neu</span>
+          </button>
+          <button type="button" id="btn-open-file" class="tool-btn" title="Markdown-Datei öffnen (Strg+O)">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6a1.5 1.5 0 0 1 1.5-1.5h3.6l1.6 1.8h5.8A1.5 1.5 0 0 1 17 7.8v6.7A1.5 1.5 0 0 1 15.5 16h-11A1.5 1.5 0 0 1 3 14.5V6z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+            <span>Öffnen</span>
+          </button>
+          <button type="button" id="btn-open-folder" class="tool-btn" title="Arbeitsordner öffnen (Strg+Umschalt+O)">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 5.5A1.5 1.5 0 0 1 4 4h3.5l1.5 1.8H16A1.5 1.5 0 0 1 17.5 7.3v7.2A1.5 1.5 0 0 1 16 16H4a1.5 1.5 0 0 1-1.5-1.5v-9z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 8.5h15" stroke="currentColor" stroke-width="1.3"/></svg>
+            <span>Ordner</span>
+          </button>
+          <button type="button" id="btn-save" class="tool-btn" title="Speichern (Strg+S)">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 3.5h9.5l2.5 2.5v9.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-11a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6.5 3.5v4h6v-4M6.5 16.5v-5h7v5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
+            <span>Speichern</span>
+          </button>
+          <button type="button" id="btn-save-as" class="icon-btn" title="Speichern unter… (Strg+Umschalt+S)" aria-label="Speichern unter">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h8.5L15 6v4.5M4 3.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h5.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M14 11.5v5M11.5 14l2.5 2.5 2.5-2.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button type="button" id="btn-export-html" class="icon-btn" title="Als eigenständige HTML-Datei exportieren" aria-label="Als HTML exportieren">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6.5 7L3.5 10l3 3M13.5 7l3 3-3 3M11 5.5l-2 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button type="button" id="btn-print" class="icon-btn" title="Drucken / Als PDF speichern (Strg+P)" aria-label="Drucken oder PDF speichern">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 6.5V3.5h8v3M5 13.5H3.5v-5A1.5 1.5 0 0 1 5 7h10a1.5 1.5 0 0 1 1.5 1.5v5H15M6 11.5h8v5H6v-5z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+
+        <!-- View Mode Segmented Switcher -->
+        <div class="view-segmented" role="group" aria-label="Ansichtsmodus">
+          <button type="button" class="seg-btn" data-set-view="editor" title="Nur Editor (Alt+1)">Editor</button>
+          <button type="button" class="seg-btn is-active" data-set-view="split" title="Split-Ansicht: Editor & Live-Vorschau (Alt+2)">Split-Vorschau</button>
+          <button type="button" class="seg-btn" data-set-view="preview" title="Nur Lese-Vorschau (Alt+3)">Lesen</button>
+        </div>
+
+        <!-- Right Utility Controls -->
+        <div class="toolbar-group">
+          <button type="button" id="btn-sync-scroll" class="toggle-chip is-active" title="Synchronisiertes Scrollen zwischen Editor und Vorschau" aria-pressed="true">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6.5 4v11M4 12.5L6.5 15 9 12.5M13.5 16V5M11 7.5L13.5 5 16 7.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Sync-Scroll</span>
+          </button>
+          <button type="button" id="btn-autosave" class="toggle-chip" title="Automatisches Speichern bei Änderungen" aria-pressed="false">
+            <span>Auto-Save</span>
+          </button>
+          <button type="button" id="btn-zen" class="icon-btn" title="Zen-Fokusmodus (F11)" aria-label="Zen-Fokusmodus">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 7V3.5H7M13 3.5h3.5V7M16.5 13v3.5H13M7 16.5H3.5V13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button type="button" id="btn-theme-toggle" class="icon-btn theme-toggle-btn" title="Farbschema wechseln (Doppelklick: Systemstandard)">
+            <span class="theme-opt theme-opt-to-dark">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M14.8 12.6A6 6 0 0 1 7.4 5.2a6 6 0 1 0 7.4 7.4z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+              <span class="sr-only">Zu dunklem Design wechseln</span>
+            </span>
+            <span class="theme-opt theme-opt-to-light">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+              <span class="sr-only">Zu hellem Design wechseln</span>
+            </span>
+          </button>
+          <button type="button" class="icon-btn" command="show-modal" commandfor="shortcuts-dialog" title="Tastenkürzel & Hilfe (F1)" aria-label="Tastenkürzel anzeigen">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8.3 7.8a1.9 1.9 0 0 1 3.5 1c0 1.3-1.8 1.6-1.8 2.8M10 14.3h.01" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Markdown Formatting Ribbon -->
+      <div class="toolbar-row format-bar" id="format-bar" role="toolbar" aria-label="Markdown-Formatierung">
+        <button type="button" class="fmt-btn" data-fmt="bold" title="Fett (Strg+B)"><strong>B</strong></button>
+        <button type="button" class="fmt-btn" data-fmt="italic" title="Kursiv (Strg+I)"><em>I</em></button>
+        <button type="button" class="fmt-btn" data-fmt="strike" title="Durchgestrichen (Alt+Umschalt+5)"><del>S</del></button>
+        <div class="toolbar-divider"></div>
+        <button type="button" class="fmt-btn" data-fmt="h1" title="Überschrift 1 (Strg+1)">H1</button>
+        <button type="button" class="fmt-btn" data-fmt="h2" title="Überschrift 2 (Strg+2)">H2</button>
+        <button type="button" class="fmt-btn" data-fmt="h3" title="Überschrift 3 (Strg+3)">H3</button>
+        <div class="toolbar-divider"></div>
+        <button type="button" class="fmt-btn" data-fmt="ul" title="Aufzählungsliste">• Liste</button>
+        <button type="button" class="fmt-btn" data-fmt="ol" title="Nummerierte Liste">1. Liste</button>
+        <button type="button" class="fmt-btn" data-fmt="task" title="Aufgabenliste / Checkliste">☑ Task</button>
+        <button type="button" class="fmt-btn" data-fmt="quote" title="Zitatblock (Strg+Umschalt+Q)">❝ Zitat</button>
+        <button type="button" class="fmt-btn" data-fmt="alert" title="GitHub Hinweis-Box einfügen">ⓘ Hinweis</button>
+        <div class="toolbar-divider"></div>
+        <button type="button" class="fmt-btn" data-fmt="code" title="Inline-Code (Strg+E)"><code>&lt;/&gt;</code></button>
+        <button type="button" class="fmt-btn" data-fmt="codeblock" title="Code-Block (Strg+Umschalt+C)">Codeblock</button>
+        <button type="button" class="fmt-btn" data-fmt="link" title="Link einfügen (Strg+K)">🔗 Link</button>
+        <button type="button" class="fmt-btn" data-fmt="image" title="Bild einfügen">🖼 Bild</button>
+        <button type="button" class="fmt-btn" command="show-modal" commandfor="table-dialog" title="Markdown-Tabelle einfügen">⊞ Tabelle</button>
+        <button type="button" class="fmt-btn" data-fmt="math" title="LaTeX Mathe-Block einfügen">∑ Mathe</button>
+        <button type="button" class="fmt-btn" data-fmt="mermaid" title="Mermaid-Diagramm einfügen">◇ Diagramm</button>
+        <button type="button" class="fmt-btn" data-fmt="hr" title="Trennlinie einfügen">― Linie</button>
+      </div>
+
+      <!-- Multi-file Tab Strip -->
+      <div class="tab-strip-wrap">
+        <div id="tab-bar" class="tab-bar" role="tablist" aria-label="Geöffnete Dokumente"></div>
+        <button type="button" id="btn-tab-add" class="tab-add-btn" title="Neuer Tab (Strg+N)" aria-label="Neuer Tab">+</button>
+      </div>
+    </header>
+
+    <!-- Notification banner (e.g. external file modification) -->
+    <div id="external-banner" class="info-banner" hidden>
+      <span id="external-banner-text">Die Datei wurde außerhalb von MarkLive geändert.</span>
+      <div class="banner-actions">
+        <button type="button" id="btn-reload-external" class="banner-btn primary">Neu laden</button>
+        <button type="button" id="btn-dismiss-banner" class="banner-btn">Ignorieren</button>
+      </div>
+    </div>
+
+    <!-- Main Workspace Area -->
+    <main class="workspace-area">
+      <!-- Left Sidebar: File Tree + Workspace Search + Document Outline -->
+      <aside id="sidebar" class="sidebar" aria-label="Projekt- und Dokumentnavigation">
+        <div class="sidebar-tabs" role="tablist">
+          <button type="button" class="sidebar-tab is-active" data-sidebar-panel="files" role="tab" aria-selected="true">Dateien</button>
+          <button type="button" class="sidebar-tab" data-sidebar-panel="search" role="tab" aria-selected="false" title="Volltextsuche im Ordner (Strg+Umschalt+F)">Suche</button>
+          <button type="button" class="sidebar-tab" data-sidebar-panel="outline" role="tab" aria-selected="false">Gliederung</button>
+        </div>
+
+        <!-- Explorer Panel -->
+        <section id="panel-files" class="sidebar-panel">
+          <div class="sidebar-subheader">
+            <span id="workspace-title" class="workspace-name" title="Aktueller Arbeitsordner">Kein Ordner geöffnet</span>
+            <div class="sidebar-mini-actions">
+              <button type="button" id="btn-new-folder-file" class="mini-icon-btn" title="Neue Markdown-Datei im Ordner anlegen" aria-label="Neue Datei im Ordner" hidden>+</button>
+              <button type="button" id="btn-new-subfolder" class="mini-icon-btn" title="Neuen Unterordner anlegen" aria-label="Neuer Unterordner" hidden>📁</button>
+              <button type="button" id="btn-refresh-tree" class="mini-icon-btn" title="Ordnerbaum aktualisieren" aria-label="Ordnerbaum aktualisieren" hidden>↻</button>
+            </div>
+          </div>
+          <div id="file-tree-container" class="sidebar-scroll scroller">
+            <div class="empty-sidebar-state">
+              <p>Öffne einen Ordner oder ziehe Dateien per Drag &amp; Drop in das Fenster.</p>
+              <button type="button" id="btn-sidebar-open-folder" class="secondary-action-btn">Ordner auswählen…</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Workspace Full-Text Search Panel -->
+        <section id="panel-search" class="sidebar-panel" hidden>
+          <div class="sidebar-subheader">
+            <span class="workspace-name">Volltextsuche</span>
+          </div>
+          <div class="search-box-row">
+            <input id="workspace-search-input" type="search" class="search-input" placeholder="Im Arbeitsordner suchen…" autocomplete="off" aria-label="Im Arbeitsordner suchen">
+            <button type="button" id="btn-search-case" class="case-toggle-btn" title="Groß-/Kleinschreibung beachten" aria-pressed="false">Aa</button>
+          </div>
+          <div id="search-results-container" class="sidebar-scroll scroller">
+            <p class="muted-hint">Suchbegriff eingeben, um alle Markdown-Dateien im Ordner zu durchsuchen.</p>
+          </div>
+        </section>
+
+        <!-- Document Outline / TOC Panel -->
+        <section id="panel-outline" class="sidebar-panel" hidden>
+          <div class="sidebar-subheader">
+            <span class="workspace-name">Inhaltsverzeichnis</span>
+          </div>
+          <div id="outline-container" class="sidebar-scroll scroller">
+            <p class="muted-hint">Keine Überschriften im Dokument.</p>
+          </div>
+        </section>
+      </aside>
+
+      <!-- Split-View Container: Editor (left) | Resizer | Live Preview (right) -->
+      <div id="split-container" class="split-container">
+        <section id="editor-pane" class="editor-pane" aria-label="Markdown-Editor">
+          <div id="codemirror-host" class="codemirror-host"></div>
+        </section>
+
+        <div id="split-resizer" class="split-resizer" role="separator" aria-orientation="vertical" aria-label="Größe zwischen Editor und Vorschau anpassen" tabindex="0" title="Ziehen zum Anpassen · Doppelklick für 50/50"></div>
+
+        <section id="preview-pane" class="preview-pane scroller" aria-label="Live-Markdown-Vorschau">
+          <article id="preview-content" class="markdown-body"></article>
+        </section>
+      </div>
+    </main>
+
+    <!-- Bottom Windows 11 Status Bar -->
+    <footer id="status-bar" class="status-bar">
+      <div class="status-left">
+        <button type="button" id="status-filepath" class="status-link" title="Klicken, um Datei im Windows Explorer anzuzeigen">Unbenannt.md</button>
+        <span id="status-save-badge" class="status-badge">Entwurf</span>
+      </div>
+      <div class="status-right">
+        <span id="status-cursor">Zeile 1, Spalte 1</span>
+        <span class="status-sep">·</span>
+        <span id="status-words">0 Wörter</span>
+        <span class="status-sep">·</span>
+        <span id="status-readtime">0 Sek. Lesezeit</span>
+        <span class="status-sep">·</span>
+        <span id="status-eol">CRLF</span>
+        <span class="status-sep">·</span>
+        <span>UTF-8</span>
+      </div>
+    </footer>
+
+    <!-- Drag & Drop Visual Overlay -->
+    <div id="drop-overlay" class="drop-overlay" hidden>
+      <div class="drop-card">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0-11L8 8m4-4 4 4M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <strong>Dateien oder Ordner hier ablegen</strong>
+        <span>Markdown-Dokumente werden direkt in Tabs geöffnet</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Native Modal Dialog: Insert Markdown Table -->
+  <dialog id="table-dialog" closedby="any" aria-labelledby="table-dialog-title">
+    <h2 id="table-dialog-title">Tabelle einfügen</h2>
+    <form id="table-dialog-form" method="dialog" class="dialog-form">
+      <div class="form-grid">
+        <label for="table-cols">Spalten</label>
+        <input id="table-cols" name="cols" type="number" min="1" max="12" value="3" autofocus>
+        <label for="table-rows">Zeilen (ohne Kopfzeile)</label>
+        <input id="table-rows" name="rows" type="number" min="1" max="50" value="3">
+        <label for="table-align">Ausrichtung</label>
+        <select id="table-align" name="align">
+          <option value="left">Links</option>
+          <option value="center">Zentriert</option>
+          <option value="right">Rechts</option>
+        </select>
+      </div>
+      <div class="dialog-actions">
+        <button type="submit" value="cancel" class="dialog-btn">Abbrechen</button>
+        <button type="submit" value="insert" class="dialog-btn primary">Einfügen</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Context Menu Popover for Sidebar Explorer (modern-web-guidance menu: nested focusgroup="menu nomemory") -->
+  <div id="tree-context-menu" popover="auto" class="context-popover">
+    <div focusgroup="menu nomemory" aria-label="Datei- und Ordneraktionen">
+      <button type="button" data-ctx-action="new-file">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h5l3 3v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1zm4.5 0v3h3M8 8v3.5M6.25 9.75h3.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+        <span>Neue Markdown-Datei…</span>
+      </button>
+      <button type="button" data-ctx-action="new-folder">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4.5A1 1 0 0 1 3 3.5h3l1.2 1.5H13a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-8z" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
+        <span>Neuer Unterordner…</span>
+      </button>
+      <hr>
+      <button type="button" data-ctx-action="rename" id="ctx-btn-rename">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.8 2.8l2.4 2.4-7.6 7.6H3.2v-2.4l7.6-7.6z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+        <span>Umbenennen…</span>
+      </button>
+      <button type="button" data-ctx-action="reveal">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 3.5H3.5v9h9v-3M9.5 2.5h4v4M13.5 2.5l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Im Explorer anzeigen</span>
+      </button>
+      <hr>
+      <button type="button" data-ctx-action="delete" id="ctx-btn-delete" class="ctx-danger">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 4.5h9M6 4.5V3h4v1.5M4.8 4.5l.6 8.5h5.2l.6-8.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>In Papierkorb verschieben…</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Native Modal Dialog: Create File / Folder / Rename Entry -->
+  <dialog id="new-file-dialog" closedby="any" aria-labelledby="new-file-dialog-title">
+    <h2 id="new-file-dialog-title">Neue Markdown-Datei erstellen</h2>
+    <form id="new-file-form" method="dialog" class="dialog-form">
+      <label id="new-file-label" for="new-file-name">Dateiname</label>
+      <input id="new-file-name" name="filename" type="text" placeholder="z. B. Notizen.md" autocomplete="off" autofocus>
+      <p id="new-file-error" class="form-error" aria-live="polite"></p>
+      <div class="dialog-actions">
+        <button type="submit" value="cancel" class="dialog-btn">Abbrechen</button>
+        <button type="submit" id="new-file-submit-btn" value="create" class="dialog-btn primary">Erstellen</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Native Modal Dialog: Confirm Recycle Bin Deletion -->
+  <dialog id="delete-dialog" closedby="any" aria-labelledby="delete-dialog-title">
+    <h2 id="delete-dialog-title">In den Papierkorb verschieben</h2>
+    <p id="delete-dialog-desc">Möchtest du dieses Element wirklich in den Windows-Papierkorb verschieben?</p>
+    <form method="dialog" class="dialog-form">
+      <div class="dialog-actions">
+        <button type="submit" value="cancel" class="dialog-btn" autofocus>Abbrechen</button>
+        <button type="submit" value="delete" class="dialog-btn danger" aria-describedby="delete-dialog-desc">In Papierkorb verschieben</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Native Modal Dialog: Unsaved Changes Confirmation -->
+  <dialog id="unsaved-dialog" closedby="none" aria-labelledby="unsaved-dialog-title">
+    <h2 id="unsaved-dialog-title">Ungespeicherte Änderungen</h2>
+    <p id="unsaved-dialog-desc">Möchtest du deine Änderungen vor dem Schließen speichern?</p>
+    <form method="dialog" class="dialog-form">
+      <div class="dialog-actions">
+        <button type="submit" value="discard" class="dialog-btn danger" aria-describedby="unsaved-dialog-desc">Nicht speichern</button>
+        <button type="submit" value="cancel" class="dialog-btn" autofocus>Abbrechen</button>
+        <button type="submit" value="save" class="dialog-btn primary">Speichern</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Native Modal Dialog: Keyboard Shortcuts -->
+  <dialog id="shortcuts-dialog" closedby="any" aria-labelledby="shortcuts-dialog-title">
+    <h2 id="shortcuts-dialog-title">Tastenkürzel in MarkLive</h2>
+    <div class="shortcuts-grid">
+      <div><kbd>Strg</kbd> + <kbd>N</kbd></div><div>Neuer Tab</div>
+      <div><kbd>Strg</kbd> + <kbd>O</kbd></div><div>Datei öffnen</div>
+      <div><kbd>Strg</kbd> + <kbd>Umschalt</kbd> + <kbd>O</kbd></div><div>Arbeitsordner öffnen</div>
+      <div><kbd>Strg</kbd> + <kbd>S</kbd></div><div>Speichern</div>
+      <div><kbd>Strg</kbd> + <kbd>Umschalt</kbd> + <kbd>S</kbd></div><div>Speichern unter…</div>
+      <div><kbd>Strg</kbd> + <kbd>W</kbd></div><div>Aktuellen Tab schließen</div>
+      <div><kbd>Strg</kbd> + <kbd>\</kbd></div><div>Seitenleiste ein-/ausblenden</div>
+      <div><kbd>Strg</kbd> + <kbd>B</kbd> / <kbd>I</kbd> / <kbd>K</kbd></div><div>Fett / Kursiv / Link</div>
+      <div><kbd>Strg</kbd> + <kbd>E</kbd></div><div>Inline-Code</div>
+      <div><kbd>Strg</kbd> + <kbd>F</kbd> / <kbd>H</kbd></div><div>Suchen &amp; Ersetzen im Editor</div>
+      <div><kbd>Strg</kbd> + <kbd>Umschalt</kbd> + <kbd>F</kbd></div><div>Volltextsuche im Arbeitsordner</div>
+      <div><kbd>Strg</kbd> + <kbd>V</kbd> (Bild)</div><div>Screenshot direkt als Datei speichern &amp; einfügen</div>
+      <div><kbd>Alt</kbd> + <kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd></div><div>Editor / Split-Vorschau / Lesen</div>
+      <div><kbd>F11</kbd></div><div>Zen-Fokusmodus umschalten</div>
+    </div>
+    <form method="dialog" class="dialog-form">
+      <div class="dialog-actions">
+        <button type="submit" value="close" class="dialog-btn primary" autofocus>Schließen</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
