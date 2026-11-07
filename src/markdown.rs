@@ -126,20 +126,26 @@ fn resolve_asset_url(raw_url: &str, base_dir: Option<&Path>) -> String {
         return trimmed.to_string();
     }
 
-    // Handle file:// URLs or relative paths when base_dir is available
-    if let Some(stripped) = trimmed.strip_prefix("file:///") {
+    // Handle file:// or file:/// URLs
+    let stripped_file = trimmed
+        .strip_prefix("file:///")
+        .or_else(|| trimmed.strip_prefix("file://"));
+    if let Some(stripped) = stripped_file {
         let normalized = stripped.replace('/', "\\");
         let encoded = utf8_percent_encode(&normalized, NON_ALPHANUMERIC).to_string();
         return format!("/api/local-asset?path={encoded}");
     }
 
+    // Handle absolute paths (e.g. C:\... or C:/...) regardless of whether base_dir is present
+    let candidate = Path::new(trimmed);
+    if candidate.is_absolute() {
+        let path_str = candidate.to_string_lossy();
+        let encoded = utf8_percent_encode(&path_str, NON_ALPHANUMERIC).to_string();
+        return format!("/api/local-asset?path={encoded}");
+    }
+
     if let Some(dir) = base_dir {
-        let candidate = Path::new(trimmed);
-        let full = if candidate.is_absolute() {
-            candidate.to_path_buf()
-        } else {
-            dir.join(candidate)
-        };
+        let full = dir.join(candidate);
         let path_str = full.to_string_lossy();
         let encoded = utf8_percent_encode(&path_str, NON_ALPHANUMERIC).to_string();
         return format!("/api/local-asset?path={encoded}");
@@ -739,5 +745,13 @@ mod tests {
         assert!(res.html.contains("/api/local-asset?path="));
         assert_eq!(res.outline.len(), 1);
         assert_eq!(res.outline[0].slug, "titel");
+    }
+
+    #[test]
+    fn resolves_absolute_and_file_protocol_images_without_base_dir() {
+        let md = "![Absolut](C:/Bilder/foto.png)\n\n![FileProto](file:///C:/Bilder/foto2.png)\n\n![TwoSlashes](file://C:/Bilder/foto3.png)\n";
+        let res = render_markdown(md, None);
+        assert!(res.html.contains("/api/local-asset?path="));
+        assert_eq!(res.html.matches("/api/local-asset?path=").count(), 3);
     }
 }

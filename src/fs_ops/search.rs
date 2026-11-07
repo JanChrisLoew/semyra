@@ -122,17 +122,18 @@ fn search_dir_recursive(
 
         let mut file_matches = Vec::new();
         for (idx, raw_line) in content.lines().enumerate() {
-            let found_byte = if case_sensitive {
-                raw_line.find(needle)
+            let found_col = if case_sensitive {
+                raw_line
+                    .find(needle)
+                    .map(|byte_pos| raw_line[..byte_pos].chars().count() + 1)
             } else {
-                raw_line.to_lowercase().find(needle)
+                let h_lower = raw_line.to_lowercase();
+                h_lower
+                    .find(needle)
+                    .map(|byte_pos| h_lower[..byte_pos].chars().count() + 1)
             };
 
-            if let Some(byte_pos) = found_byte {
-                let col = raw_line
-                    .get(..byte_pos)
-                    .map(|s| s.chars().count() + 1)
-                    .unwrap_or(1);
+            if let Some(col) = found_col {
                 let trimmed_preview: String = raw_line.trim().chars().take(140).collect();
                 file_matches.push(SearchMatchItem {
                     line: idx + 1,

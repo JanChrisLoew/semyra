@@ -87,6 +87,11 @@ class MarkLiveApp {
   private statusToastEl = document.getElementById('status-toast')!;
   private dropOverlayEl = document.getElementById('drop-overlay')!;
   private externalBannerEl = document.getElementById('external-banner')!;
+  private tabContextMenuEl = document.getElementById('tab-context-menu') as HTMLElement & {
+    showPopover?: () => void;
+    hidePopover?: () => void;
+  };
+  private tabContextTargetId: string | null = null;
 
   public async init(): Promise<void> {
     const cmHost = document.getElementById('codemirror-host')!;
@@ -402,7 +407,9 @@ class MarkLiveApp {
   // ==========================================================================
 
   private restoreRecoveredDrafts(drafts: DraftEntry[]): void {
+    let restoredCount = 0;
     for (const draft of drafts) {
+      restoredCount++;
       if (draft.path) {
         const normLower = draft.path.toLowerCase();
         const existing = this.tabs.find((t) => t.path?.toLowerCase() === normLower);
@@ -412,6 +419,10 @@ class MarkLiveApp {
           existing.editorState = this.editor.createState(draft.content);
           if (existing.id === this.activeTabId) {
             this.editor.swapState(existing.editorState, 0);
+            void this.renderPreviewImmediate(
+              existing.currentContent,
+              existing.parentDir ?? this.explorer.rootPath,
+            );
           }
           continue;
         }
@@ -440,6 +451,13 @@ class MarkLiveApp {
     if (this.tabs.length > 0) {
       this.activateTab(this.tabs[this.tabs.length - 1].id);
       this.statusSaveBadge.textContent = 'Entwurf wiederhergestellt';
+      if (restoredCount > 0) {
+        this.showToast(
+          restoredCount === 1
+            ? '1 ungespeicherter Entwurf nach Systemstart wiederhergestellt'
+            : `${restoredCount} ungespeicherte Entwürfe nach Systemstart wiederhergestellt`,
+        );
+      }
     }
   }
 
@@ -599,6 +617,18 @@ class MarkLiveApp {
       this.openTabFromPayload(payload, persistPrefs);
     } catch (err) {
       console.error('Datei konnte nicht geöffnet werden:', err);
+      const fileName = baseNameOfPath(path);
+      this.showToast(`Datei konnte nicht geöffnet werden: ${fileName}`);
+      const prevLen = this.recentFiles.length;
+      this.recentFiles = this.recentFiles.filter(
+        (p) => p.toLowerCase() !== normLower,
+      );
+      if (this.recentFiles.length !== prevLen) {
+        if (!this.explorer.hasWorkspace) {
+          this.explorer.renderEmptyStateWithRecents(this.recentFolders, this.recentFiles);
+        }
+        this.schedulePrefsSave();
+      }
     }
   }
 
@@ -697,19 +727,19 @@ class MarkLiveApp {
     this.updateStatusBar();
   }
 
-  private async requestCloseTab(tabId: string): Promise<void> {
+  private async requestCloseTab(tabId: string): Promise<boolean> {
     const idx = this.tabs.findIndex((t) => t.id === tabId);
-    if (idx === -1) return;
+    if (idx === -1) return true;
     const tab = this.tabs[idx];
 
     if (tab.isDirty) {
       const choice = await this.promptUnsavedChanges(
         `Möchtest du die Änderungen in „${tab.name}“ speichern?`,
       );
-      if (choice === 'cancel') return;
+      if (choice === 'cancel') return false;
       if (choice === 'save') {
         const saved = await this.saveTab(tab);
-        if (!saved) return;
+        if (!saved) return false;
       }
     }
 
@@ -725,6 +755,25 @@ class MarkLiveApp {
     this.syncWindowMetadata();
     this.flushDraftSync();
     this.schedulePrefsSave();
+    return true;
+  }
+
+  private async closeOtherTabs(keepTabId: string): Promise<void> {
+    const toClose = this.tabs.filter((t) => t.id !== keepTabId);
+    for (const t of toClose) {
+      const ok = await this.requestCloseTab(t.id);
+      if (!ok) break;
+    }
+  }
+
+  private async closeTabsToRight(fromTabId: string): Promise<void> {
+    const idx = this.tabs.findIndex((t) => t.id === fromTabId);
+    if (idx === -1) return;
+    const toClose = this.tabs.slice(idx + 1);
+    for (const t of toClose) {
+      const ok = await this.requestCloseTab(t.id);
+      if (!ok) break;
+    }
   }
 
   private handleExplorerEntryRenamed(
@@ -835,7 +884,7 @@ class MarkLiveApp {
       );
     }, 35);
 
-    if (this.autoSaveEnabled && tab.path && tab.isDirty) {
+    if (this.autoSaveEnabled && tab.path && tab.isDirty && !tab.hasExternalConflict) {
       window.clearTimeout(this.autoSaveTimer);
       this.autoSaveTimer = window.setTimeout(() => {
         void this.saveTab(tab);
@@ -954,6 +1003,9 @@ class MarkLiveApp {
           void this.requestCloseTab(tab.id);
         }
       });
+      slot.addEventListener('contextmenu', (e) => {
+        this.openTabContextMenu(e, tab.id);
+      });
 
       const selectBtn = document.createElement('button');
       selectBtn.type = 'button';
@@ -994,6 +1046,35 @@ class MarkLiveApp {
     }
 
     syncRovingTabindex(this.tabBarEl, 'button[role="tab"]', activeTabBtn);
+  }
+
+  private openTabContextMenu(e: MouseEvent, tabId: string): void {
+    e.preventDefault();
+    this.tabContextTargetId = tabId;
+    const tab = this.tabs.find((t) => t.id === tabId);
+    if (!tab) return;
+
+    const revealBtn = document.getElementById('tab-ctx-reveal') as HTMLButtonElement;
+    const copyPathBtn = document.getElementById('tab-ctx-copy-path') as HTMLButtonElement;
+    if (revealBtn) revealBtn.disabled = !tab.path;
+    if (copyPathBtn) copyPathBtn.disabled = !tab.path;
+
+    this.tabContextMenuEl.style.left = `${e.clientX}px`;
+    this.tabContextMenuEl.style.top = `${e.clientY}px`;
+    this.tabContextMenuEl.showPopover?.();
+
+    requestAnimationFrame(() => {
+      const rect = this.tabContextMenuEl.getBoundingClientRect();
+      const clampedLeft = Math.max(6, Math.min(e.clientX, window.innerWidth - rect.width - 8));
+      const clampedTop = Math.max(6, Math.min(e.clientY, window.innerHeight - rect.height - 8));
+      this.tabContextMenuEl.style.left = `${clampedLeft}px`;
+      this.tabContextMenuEl.style.top = `${clampedTop}px`;
+
+      const firstItem = this.tabContextMenuEl.querySelector<HTMLButtonElement>(
+        '[focusgroup~="menu"] > button:not(:disabled)',
+      );
+      firstItem?.focus();
+    });
   }
 
   private updateStatusBar(): void {
@@ -1335,6 +1416,53 @@ class MarkLiveApp {
 
     const toggleZen = () => this.appEl.classList.toggle('is-zen');
     document.getElementById('btn-zen')!.addEventListener('click', toggleZen);
+
+    // Context menu actions for tab bar
+    this.tabContextMenuEl.addEventListener('click', async (e) => {
+      const actionBtn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-tab-ctx]');
+      if (!actionBtn) return;
+      const action = actionBtn.dataset.tabCtx;
+      const targetId = this.tabContextTargetId;
+      this.tabContextMenuEl.hidePopover?.();
+      if (!targetId) return;
+
+      const tab = this.tabs.find((t) => t.id === targetId);
+      if (!tab) return;
+
+      switch (action) {
+        case 'close':
+          await this.requestCloseTab(tab.id);
+          break;
+        case 'close-others':
+          await this.closeOtherTabs(tab.id);
+          break;
+        case 'close-to-right':
+          await this.closeTabsToRight(tab.id);
+          break;
+        case 'reveal':
+          if (tab.path) void backend.revealInExplorer(tab.path);
+          break;
+        case 'copy-path':
+          if (tab.path) {
+            await navigator.clipboard.writeText(tab.path).catch(() => {});
+            this.showToast('Dateipfad in Zwischenablage kopiert');
+          }
+          break;
+      }
+    });
+
+    // Native Ctrl + MouseWheel document text zoom
+    window.addEventListener(
+      'wheel',
+      (e) => {
+        if (e.ctrlKey) {
+          e.preventDefault();
+          const delta = e.deltaY < 0 ? 5 : -5;
+          this.setZoomPercent(this.zoomPercent + delta);
+        }
+      },
+      { passive: false },
+    );
 
     const formatBarEl = document.getElementById('format-bar')!;
     formatBarEl.addEventListener('pointerdown', (e) => {

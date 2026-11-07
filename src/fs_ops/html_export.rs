@@ -198,6 +198,10 @@ pub fn build_standalone_html_document(title: &str, rendered_body_html: &str) -> 
     a {{ color: var(--accent); text-decoration: none; }}
     a:hover {{ text-decoration: underline; }}
     hr {{ border: 0; border-top: 1px solid var(--border); margin: 2rem 0; }}
+    @media print {{
+      h1, h2, h3, h4, h5, h6 {{ break-after: avoid; }}
+      .frontmatter-card, .table-wrapper, .code-block-wrapper, .mermaid-wrapper, blockquote, tr {{ break-inside: avoid; }}
+    }}
   </style>
 </head>
 <body>

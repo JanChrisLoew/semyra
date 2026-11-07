@@ -26,4 +26,11 @@ describe('path-utils', () => {
       ),
     ).toBe('C:\\Workspace\\Docs\\Architektur Guide.md');
   });
+
+  it('handles UNC paths, mixed forward/backward slashes, and roots cleanly', () => {
+    expect(baseNameOfPath('\\\\Server\\Share\\Doc.md')).toBe('Doc.md');
+    expect(parentDirOfPath('\\\\Server\\Share\\Doc.md')).toBe('\\\\Server\\Share');
+    expect(baseNameOfPath('C:/Projekte/Test.md')).toBe('Test.md');
+    expect(parentDirOfPath('C:/Projekte/Test.md')).toBe('C:/Projekte');
+  });
 });

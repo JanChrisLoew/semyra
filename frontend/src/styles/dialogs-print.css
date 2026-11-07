@@ -310,6 +310,15 @@ kbd {
   .markdown-body thead {
     position: static !important;
   }
+  .markdown-body h1,
+  .markdown-body h2,
+  .markdown-body h3,
+  .markdown-body h4,
+  .markdown-body h5,
+  .markdown-body h6 {
+    break-after: avoid;
+  }
+  .frontmatter-card,
   .code-block-wrapper,
   .gfm-alert,
   .mermaid-wrapper,
