@@ -27,14 +27,20 @@ Dieses Dokument dient als fortlaufendes Protokoll über Entwicklungssessions, we
 - **Build-Automatisierung (`scripts/Build-Installer.ps1` & `Build-Release.ps1`)**:
   - Erstellung von `scripts/Build-Installer.ps1` mit automatischer Erkennung des Inno Setup Compilers (`ISCC.exe`).
   - Flag `-Installer` in `Build-Release.ps1` integriert.
-- **ARM64-Architekturprüfung (`aarch64-pc-windows-msvc`)**:
+- **ARM64-Architekturprüfung & nativer Release-Build (`aarch64-pc-windows-msvc`)**:
   - Rustup-Target `aarch64-pc-windows-msvc` hinzugefügt.
-  - `cargo check --target aarch64-pc-windows-msvc` erfolgreich: Alle 115 Rust-Crates kompilieren fehlerfrei für ARM64.
-  - Dokumentiert, dass für das finale Linken von nativer ARM64-Software auf der lokalen Maschine lediglich das MSVC-Zusatzpaket `Microsoft.VisualStudio.Component.VC.Tools.ARM64` im Visual Studio Installer benötigt wird (während x64-Semyra auf Windows 11 ARM dank Prism-Emulation bereits heute out-of-the-box läuft).
+  - MSVC ARM64-Toolchain (`Hostx64\arm64\link.exe`, `cl.exe`, CRT-Libs) durch Installation von `Microsoft.VisualStudio.Component.VC.Tools.ARM64` erfolgreich bereitgestellt.
+  - `cargo build --release --target aarch64-pc-windows-msvc` fehlerfrei ausgeführt: Natives Windows on ARM Binary `target\aarch64-pc-windows-msvc\release\Semyra.exe` (10,91 MB) kompiliert.
+  - PE-Header-Prüfung (`dumpbin /headers`) bestätigt: `AA64 machine (ARM64)`.
+  - `installer/Semyra.iss` auf Multi-Architektur (ISPP-Bedingung `/DArch=arm64` bzw. `x64`) erweitert.
+  - `scripts/Build-Installer.ps1 -Architecture all` baut automatisiert beide Setup-Installationsassistenten: `Semyra-Setup-x64.exe` (5,28 MB) und `Semyra-Setup-arm64.exe` (5,16 MB).
 
 ### 3. Testergebnisse & Build-Status
-- `scripts/Build-Installer.ps1`: `target\installer\Semyra-Setup-x64.exe` erfolgreich erzeugt (5,28 MB).
-- `cargo check --target aarch64-pc-windows-msvc`: 0 Fehler (115/115 Crates erfolgreich verifiziert).
+- `scripts/Build-Installer.ps1 -Architecture all`:
+  - `target\installer\Semyra-Setup-x64.exe` (5,28 MB) erfolgreich erzeugt.
+  - `target\installer\Semyra-Setup-arm64.exe` (5,16 MB) erfolgreich erzeugt.
+- `cargo build --release --target aarch64-pc-windows-msvc`: Erfolgreich (AA64 machine, 10,91 MB).
+- `cargo check --target aarch64-pc-windows-msvc`: 0 Fehler (115/115 Crates verifiziert).
 - `cargo test`: 12/12 Tests bestanden.
 
 ---

@@ -1,10 +1,28 @@
-; Inno Setup 6 Skript für Semyra (Windows 11 x64)
-; Kompilieren mit: iscc installer\Semyra.iss
+; Inno Setup 6 Skript für Semyra (Windows 11 x64 / ARM64)
+; Kompilieren mit:
+;   x64:   iscc /DArch=x64 installer\Semyra.iss
+;   arm64: iscc /DArch=arm64 installer\Semyra.iss
 
 #define MyAppName "Semyra"
 #define MyAppVersion "0.2.0"
 #define MyAppPublisher "Semyra"
 #define MyAppExeName "Semyra.exe"
+
+#ifndef Arch
+  #define Arch "x64"
+#endif
+
+#if Arch == "arm64"
+  #define MyArchAllowed "arm64"
+  #define MyArchInstallMode "arm64"
+  #define MySourcePath "..\target\aarch64-pc-windows-msvc\release\" + MyAppExeName
+  #define MyOutputBaseFilename "Semyra-Setup-arm64"
+#else
+  #define MyArchAllowed "x64compatible"
+  #define MyArchInstallMode "x64compatible"
+  #define MySourcePath "..\target\release\" + MyAppExeName
+  #define MyOutputBaseFilename "Semyra-Setup-x64"
+#endif
 
 [Setup]
 AppId={{8F6A41E9-72C4-4A18-9F53-0D9E8E43B210}
@@ -15,8 +33,8 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+ArchitecturesAllowed={#MyArchAllowed}
+ArchitecturesInstallIn64BitMode={#MyArchInstallMode}
 ChangesAssociations=yes
 SetupIconFile=..\assets\icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
@@ -24,7 +42,7 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 OutputDir=..\target\installer
-OutputBaseFilename=Semyra-Setup-x64
+OutputBaseFilename={#MyOutputBaseFilename}
 
 [Languages]
 Name: "german"; MessagesFile: "compiler:Languages\German.isl"
@@ -35,7 +53,7 @@ Name: "assocmd"; Description: "Markdown-Dateien (.md, .markdown) mit {#MyAppName
 Name: "dirmenu"; Description: """Mit {#MyAppName} öffnen"" im Windows Explorer Ordner-Kontextmenü anzeigen"; GroupDescription: "Windows Explorer:"
 
 [Files]
-Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MySourcePath}"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
