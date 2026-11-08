@@ -7,7 +7,13 @@
     3. Builds optimized production frontend bundle into frontend/dist (Vite)
     4. Runs Rust backend unit tests (cargo test)
     5. Compiles standalone Release executable target\release\Semyra.exe
+    6. (Optional mit -Installer) Kompiliert Inno Setup Installer target\installer\Semyra-Setup-x64.exe
 #>
+[CmdletBinding()]
+param(
+    [switch]$Installer
+)
+
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
@@ -51,6 +57,12 @@ try {
     $SizeMB = [Math]::Round($Item.Length / 1MB, 2)
     Write-Host ""
     Write-Host "Erfolgreich gebaut: $($Item.FullName) ($SizeMB MB)" -ForegroundColor Green
+
+    if ($Installer) {
+        Write-Host ""
+        Write-Host "==> [6/6] Inno-Setup Installer bauen (-Installer aktiviert)..." -ForegroundColor Cyan
+        & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "Build-Installer.ps1")
+    }
 }
 finally {
     Pop-Location

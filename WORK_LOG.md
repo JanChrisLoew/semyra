@@ -7,6 +7,38 @@ Dieses Dokument dient als fortlaufendes Protokoll über Entwicklungssessions, we
 
 ---
 
+## 2026-11-08 — Session 6: Installer-Architektur, Windows-11-Integration & ARM64-Fähigkeit
+
+### 1. Ziel & Scope
+- Analyse und Weiterentwicklung der Build- und Installer-Werkzeuge für produktiven Einsatz als echte Windows-Software.
+- Vollständige Windows 11 "Standard-Apps"-Registrierung (Capabilities & RegisteredApplications) für `.md`, `.markdown`, `.mdown`, `.mkd`, `.mdx` sowie Eintrag in "Installierte Apps" (Apps & Features).
+- Etablierung eines automatisierten Inno-Setup-Build-Skripts (`scripts/Build-Installer.ps1`) und Anbindung an `Build-Release.ps1 -Installer`.
+- Technische Prüfung der nativen ARM64-Kompilierung (`aarch64-pc-windows-msvc`).
+
+### 2. Durchgeführte Maßnahmen
+- **Inno Setup Script (`installer/Semyra.iss`) erweitert**:
+  - Vollständige `Capabilities` und `RegisteredApplications`-Hierarchie für Windows 11 Default Apps.
+  - Erweiterung der unterstützten Endungen: `.md`, `.markdown`, `.mdown`, `.mkd`, `.mdx` in `OpenWithProgids` und `Applications\Semyra.exe\SupportedTypes`.
+  - Erfolgreiche Kompilierung zu `target\installer\Semyra-Setup-x64.exe` (5,28 MB LZMA2-komprimierter Setup-Assistent).
+- **PowerShell-Installer (`installer/Install-Semyra.ps1` & `Uninstall-Semyra.ps1`) modernisiert**:
+  - Registriert Semyra benutzerbezogen (ohne UAC-Admin-Zwang) nach `%LOCALAPPDATA%\Programs\Semyra`.
+  - Fügt Semyra zu Windows 11 "Installierte Apps" hinzu (mit Version 0.2.0, Publisher, Icon, Größe und Deinstallationsbefehl).
+  - Trägt `HKCU:\Software\Semyra\Capabilities` und `HKCU:\Software\RegisteredApplications` ein, damit Semyra in den Windows-11-Einstellungen unter "Standard-Apps" wählbar ist.
+- **Build-Automatisierung (`scripts/Build-Installer.ps1` & `Build-Release.ps1`)**:
+  - Erstellung von `scripts/Build-Installer.ps1` mit automatischer Erkennung des Inno Setup Compilers (`ISCC.exe`).
+  - Flag `-Installer` in `Build-Release.ps1` integriert.
+- **ARM64-Architekturprüfung (`aarch64-pc-windows-msvc`)**:
+  - Rustup-Target `aarch64-pc-windows-msvc` hinzugefügt.
+  - `cargo check --target aarch64-pc-windows-msvc` erfolgreich: Alle 115 Rust-Crates kompilieren fehlerfrei für ARM64.
+  - Dokumentiert, dass für das finale Linken von nativer ARM64-Software auf der lokalen Maschine lediglich das MSVC-Zusatzpaket `Microsoft.VisualStudio.Component.VC.Tools.ARM64` im Visual Studio Installer benötigt wird (während x64-Semyra auf Windows 11 ARM dank Prism-Emulation bereits heute out-of-the-box läuft).
+
+### 3. Testergebnisse & Build-Status
+- `scripts/Build-Installer.ps1`: `target\installer\Semyra-Setup-x64.exe` erfolgreich erzeugt (5,28 MB).
+- `cargo check --target aarch64-pc-windows-msvc`: 0 Fehler (115/115 Crates erfolgreich verifiziert).
+- `cargo test`: 12/12 Tests bestanden.
+
+---
+
 ## 2026-11-08 — Session 5: Bereinigung des lokalen Build-Caches (`target/`) & Release-Verifikation
 
 ### 1. Ziel & Scope
