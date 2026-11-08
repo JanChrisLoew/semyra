@@ -7,6 +7,27 @@ Dieses Dokument dient als fortlaufendes Protokoll über Entwicklungssessions, we
 
 ---
 
+## 2026-11-08 — Session 4: GitHub README Transformation & Produkt-Showcase
+
+### 1. Ziel & Scope
+- Neugestaltung von [`README.md`](README.md) für den GitHub-Auftritt: Fokus auf eine hochwertige, produktzentrierte Vorstellung ("Markdown for the AI era"), bevor die technischen Spezifikationen und Entwicklungsanleitungen folgen.
+
+### 2. Durchgeführte Maßnahmen
+- **Hero-Bereich mit Badges**: Badges für Windows 11 x64, Rust 2021 Host, CodeMirror 6 / TypeScript, Standalone EXE (~10.8 MB), Zero Node.js/Electron Runtime und MIT-Lizenz.
+- **Produktvorstellung & Kernvorteile**:
+  - Klare Value-Proposition für Entwickler, Prompt-Designer und AI-Engineers.
+  - Strukturierte Feature-Karten für Desktop-Performance, Semyra Fluent Design (Midnight/Slate & White/Slate, Steel Blue, Amber Dirty Indicator), GFM & KaTeX/Mermaid-Unterstützung, smartes Editing, Workspace-Navigation und Standalone-Export.
+- **Tastatur-Kurzbefehle**: Übersichtliche Schnellreferenz für die wichtigsten Shortcuts.
+- **Installation & Setup**: Portable Ausführung, 1-Klick Explorer-Integration (`Install-Semyra.ps1`) und Inno-Setup Installer (`Semyra.iss`).
+- **Technische Spezifikationen & Architektur**: Mermaid-Architekturdiagramm (Rust Host -> IPC -> CodeMirror/DOM), Technologiematrix und Build-Anleitung.
+- **Projektstruktur & Querverweise**: Direkte Verlinkung zu `docs/PRODUCT_CONTEXT.md`, `AGENTS.md` und `WORK_LOG.md`.
+
+### 3. Testergebnisse & Build-Status
+- Markdown-Rendering & Mermaid-Syntax validiert.
+- `git grep -i "marklive"`: 0 Treffer im gesamten Repository.
+
+---
+
 ## 2026-11-08 — Session 3: Vollständiges Rebranding-Abschlussreview, Repository-Bereinigung & Product Context
 
 ### 1. Ziel & Scope
