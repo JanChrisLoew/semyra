@@ -7,6 +7,26 @@ Dieses Dokument dient als fortlaufendes Protokoll über Entwicklungssessions, we
 
 ---
 
+## 2026-11-08 — Session 5: Bereinigung des lokalen Build-Caches (`target/`) & Release-Verifikation
+
+### 1. Ziel & Scope
+- Vollständige Bereinigung veralteter, nicht getrackter Build-Artefakte aus früheren Kompiliervorgängen (unter dem alten Projektnamen MarkLive) aus dem lokalen `target/`-Verzeichnis.
+- Rebuild und End-to-End-Verifikation mit `scripts/Build-Release.ps1`.
+
+### 2. Durchgeführte Maßnahmen
+- **Cargo Cache Purge**: Ausführung von `cargo clean`, wodurch 6.924 veraltete Dateien (4,0 GiB) inklusive aller alten `MarkLive.*`-Binärdateien und Fingerprints rückstandslos entfernt wurden.
+- **Dateisystemprüfung**: Rekursiver Check über das gesamte Repository bestätigt: Außerhalb von `.git` und der historischen Dokumentation in `WORK_LOG.md` existieren keinerlei Dateien oder Verzeichnisse mehr mit `marklive` im Namen.
+- **End-to-End Release Build**: Saubere Neuerstellung von Frontend und nativem Windows 11 Host über `scripts/Build-Release.ps1`.
+
+### 3. Testergebnisse & Build-Status
+- `npm run typecheck` (`tsc --noEmit`): 0 Fehler.
+- `npm test` (Vitest): 17/17 Testdateien, 103/103 Tests bestanden (4,56s).
+- `npm run build` (Vite): Produktionsbundle in `frontend/dist` fehlerfrei generiert.
+- `cargo test`: 12/12 Rust-Unit-Tests bestanden (0,11s).
+- `cargo build --release`: Standalone-Binary `target/release/Semyra.exe` (10,85 MB) erfolgreich und sauber kompiliert.
+
+---
+
 ## 2026-11-08 — Session 4: GitHub README Transformation & Produkt-Showcase
 
 ### 1. Ziel & Scope
