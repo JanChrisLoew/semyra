@@ -1,3 +1,5 @@
+import { t } from './i18n';
+
 export interface FuzzyMatchResult {
   score: number;
   indices: number[];
@@ -247,8 +249,8 @@ export class CommandPaletteController {
       const empty = document.createElement('p');
       empty.className = 'muted-hint';
       empty.textContent = isCommandMode
-        ? 'Kein passender Befehl gefunden.'
-        : 'Keine passenden Dateien oder Befehle gefunden. Tipp: „>“ eingeben für alle Befehle.';
+        ? t('palette.noMatchingCommand')
+        : t('palette.noMatchingFiles');
       this.resultsEl.appendChild(empty);
       return;
     }

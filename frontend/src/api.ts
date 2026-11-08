@@ -72,6 +72,7 @@ export interface UiSessionPrefs {
   wordWrap: boolean;
   spellcheck: boolean;
   formatBarVisible?: boolean;
+  language?: 'de' | 'en';
   recentFiles: string[];
   recentFolders: string[];
   sessionFiles: string[];
@@ -161,17 +162,18 @@ export const backend = {
   revealInExplorer: (path: string) =>
     postJson<{ ok: boolean }>('reveal-in-explorer', { path }),
 
-  openFilesDialog: () =>
-    postJson<{ files: FilePayload[] }>('dialog/open-files'),
+  openFilesDialog: (lang?: string) =>
+    postJson<{ files: FilePayload[] }>('dialog/open-files', { lang }),
 
-  openFolderDialog: () =>
-    postJson<{ tree: FileTreeNode | null }>('dialog/open-folder'),
+  openFolderDialog: (lang?: string) =>
+    postJson<{ tree: FileTreeNode | null }>('dialog/open-folder', { lang }),
 
   saveFileDialog: (
     content: string,
     defaultName: string,
     defaultDir: string | null,
     lineEnding: string,
+    lang?: string,
   ) =>
     postJson<{
       saved: boolean;
@@ -183,6 +185,7 @@ export const backend = {
       defaultName,
       defaultDir,
       lineEnding,
+      lang,
     }),
 
   exportHtmlDialog: (
@@ -191,6 +194,7 @@ export const backend = {
     baseDir: string | null,
     defaultDir: string | null,
     renderedHtml?: string,
+    lang?: string,
   ) =>
     postJson<{ exported: boolean; path?: string }>('dialog/export-html', {
       title,
@@ -198,12 +202,14 @@ export const backend = {
       baseDir,
       defaultDir,
       renderedHtml,
+      lang,
     }),
 
-  pickPdfSavePath: (title: string, defaultDir: string | null) =>
+  pickPdfSavePath: (title: string, defaultDir: string | null, lang?: string) =>
     postJson<{ chosen: boolean; token?: number }>('dialog/pick-pdf-target', {
       title,
       defaultDir,
+      lang,
     }),
 
   executePdfExport: (token: number) =>
@@ -213,6 +219,7 @@ export const backend = {
     title?: string;
     hasUnsavedChanges?: boolean;
     theme?: 'light' | 'dark' | 'system';
+    fullscreen?: boolean;
   }) => postJson<{ ok: boolean }>('window/set-state', opts),
 
   forceCloseWindow: () => postJson<{ ok: boolean }>('window/force-close'),

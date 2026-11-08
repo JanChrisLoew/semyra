@@ -441,6 +441,14 @@ fn main() {
                         let _ = window_vibrancy::apply_mica(&window, dark_opt);
                     }
                 }
+                UserEvent::SetFullscreen(fs) => {
+                    let target = if fs {
+                        Some(tao::window::Fullscreen::Borderless(None))
+                    } else {
+                        None
+                    };
+                    window.set_fullscreen(target);
+                }
                 UserEvent::ForceCloseWindow => {
                     crate::drafts::clear_recovery_snapshot();
                     persist_current_window_state(

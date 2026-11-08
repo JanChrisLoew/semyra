@@ -1,4 +1,5 @@
 import { estimateTokens } from './token-utils';
+import { getLanguage, Language, t } from './i18n';
 
 export interface DetailedDocStats {
   charsTotal: number;
@@ -32,6 +33,7 @@ export function estimateSyllables(word: string): number {
 export function calculateDetailedStats(
   text: string,
   selection?: { chars: number; words: number },
+  lang: Language = getLanguage(),
 ): DetailedDocStats {
   const charsTotal = text.length;
   const charsNoSpaces = text.replace(/\s/g, '').length;
@@ -49,26 +51,31 @@ export function calculateDetailedStats(
   const wordsSelected = selection?.words ?? 0;
   const charsSelected = selection?.chars ?? 0;
 
+  const isEn = lang === 'en';
+  const minUnit = isEn ? 'min' : 'Min.';
+  const zeroMin = isEn ? '0 min' : '0 Min.';
+  const lessOneMin = isEn ? '< 1 min' : '< 1 Min.';
+
   // Reading time (~200 WPM)
   const readingTimeString =
     wordsTotal === 0
-      ? '0 Min.'
+      ? zeroMin
       : wordsTotal < 150
-        ? '< 1 Min.'
-        : `${Math.round(wordsTotal / 200)} Min.`;
+        ? lessOneMin
+        : `${Math.round(wordsTotal / 200)} ${minUnit}`;
 
   // Speaking time (~130 WPM)
   const speakingTimeString =
     wordsTotal === 0
-      ? '0 Min.'
+      ? zeroMin
       : wordsTotal < 90
-        ? '< 1 Min.'
-        : `${Math.round(wordsTotal / 130)} Min.`;
+        ? lessOneMin
+        : `${Math.round(wordsTotal / 130)} ${minUnit}`;
 
   // Flesch Reading Ease (Amstad formulation for German & English mixed technical text)
   // Score = 180 - (words / sentences) - (58.5 * (syllables / words))
   let fleschScore = 100;
-  let fleschGrade = 'Sehr leicht';
+  let fleschGrade = isEn ? 'Very Easy' : 'Sehr leicht';
 
   if (wordsTotal > 0) {
     const rawSentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 0);
@@ -82,15 +89,15 @@ export function calculateDetailedStats(
     fleschScore = Math.min(100, Math.max(0, Math.round(rawScore)));
 
     if (fleschScore >= 80) {
-      fleschGrade = 'Sehr leicht';
+      fleschGrade = t('docStats.gradeVeryEasy');
     } else if (fleschScore >= 65) {
-      fleschGrade = 'Leicht';
+      fleschGrade = t('docStats.gradeEasy');
     } else if (fleschScore >= 50) {
-      fleschGrade = 'Mittelschwer (Standard)';
+      fleschGrade = t('docStats.gradeModerate');
     } else if (fleschScore >= 35) {
-      fleschGrade = 'Anspruchsvoll';
+      fleschGrade = t('docStats.gradeDifficult');
     } else {
-      fleschGrade = 'Sehr anspruchsvoll (Fachtext)';
+      fleschGrade = t('docStats.gradeVeryDifficult');
     }
   } else {
     fleschScore = 100;

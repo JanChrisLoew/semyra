@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { setLanguage } from '../i18n';
 import {
   convertClipboardToMarkdownTable,
   formatMarkdownTableLines,
@@ -205,6 +206,15 @@ describe('markdown-table', () => {
     expect(linesRight[0]).toBe('| A   | B   | Spalte 3 |');
     expect(linesRight[1]).toBe('| --- | --- | -------- |');
     expect(linesRight[2]).toBe('| 1   | 2   |          |');
+
+    // In English, new column header is 'Column 3'
+    setLanguage('en', false);
+    const colRightEn = modifyMarkdownTable(doc, bPos, {
+      type: 'insert-col',
+      direction: 'right',
+    });
+    expect(colRightEn!.insert.split('\n')[0]).toBe('| A   | B   | Column 3 |');
+    setLanguage('de', false);
 
     // Delete column 'A'
     const aPos = doc.indexOf('A');

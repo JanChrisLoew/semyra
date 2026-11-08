@@ -1,17 +1,52 @@
 import { backend } from './api';
 
+export type ThemeChoice = 'system' | 'light' | 'dark';
+
+let currentThemeListener: (() => void) | null = null;
+
+export function getThemeChoice(): ThemeChoice {
+  try {
+    const stored = localStorage.getItem('color-scheme');
+    if (stored === 'light' || stored === 'dark') return stored;
+  } catch {}
+  return 'system';
+}
+
+export function setThemeChoice(choice: ThemeChoice): void {
+  const meta = document.querySelector('meta[name="color-scheme"]') as HTMLMetaElement | null;
+  try {
+    if (choice === 'system') {
+      localStorage.removeItem('color-scheme');
+      if (meta) meta.content = 'light dark';
+    } else {
+      localStorage.setItem('color-scheme', choice);
+      if (meta) meta.content = choice;
+    }
+  } catch {}
+
+  void backend.setWindowState({ theme: choice });
+  currentThemeListener?.();
+}
+
+export function toggleTheme(): void {
+  const current = getThemeChoice();
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const isDark = current === 'dark' ? true : current === 'light' ? false : media.matches;
+  setThemeChoice(isDark ? 'light' : 'dark');
+}
+
 /**
  * Synchronizes `<meta name="color-scheme">`, `localStorage`, OS media queries,
  * and the native Win32 titlebar/Mica backdrop (`backend.setWindowState`).
  */
 export function bindThemeSystem(onThemeChanged: () => void): void {
-  const meta = document.querySelector('meta[name="color-scheme"]') as HTMLMetaElement;
+  currentThemeListener = onThemeChanged;
+  const meta = document.querySelector('meta[name="color-scheme"]') as HTMLMetaElement | null;
   const media = window.matchMedia('(prefers-color-scheme: dark)');
 
   const syncNativeWindowTheme = (rerenderDiagrams = false) => {
-    const content = meta.content;
-    const theme = content === 'dark' ? 'dark' : content === 'light' ? 'light' : 'system';
-    void backend.setWindowState({ theme });
+    const choice = getThemeChoice();
+    void backend.setWindowState({ theme: choice });
     if (rerenderDiagrams) {
       onThemeChanged();
     }
@@ -25,43 +60,19 @@ export function bindThemeSystem(onThemeChanged: () => void): void {
 
   window.addEventListener('storage', (e) => {
     if (e.key === 'color-scheme') {
-      meta.content = e.newValue ?? 'light dark';
+      if (meta) meta.content = e.newValue ?? 'light dark';
       syncNativeWindowTheme(true);
     }
   });
 
-  const toggleBtn = document.getElementById('btn-theme-toggle')!;
-  toggleBtn.addEventListener('click', () => {
-    let stored: string | null = null;
-    try {
-      stored = localStorage.getItem('color-scheme');
-    } catch {}
+  const toggleBtn = document.getElementById('btn-theme-toggle');
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', () => {
+      toggleTheme();
+    });
 
-    const systemDark = media.matches;
-    const currentlyDark =
-      stored === 'dark' ? true : stored === 'light' ? false : systemDark;
-    const target = currentlyDark ? 'light' : 'dark';
-    const systemScheme = systemDark ? 'dark' : 'light';
-
-    if (target === systemScheme) {
-      try {
-        localStorage.removeItem('color-scheme');
-      } catch {}
-      meta.content = 'light dark';
-    } else {
-      try {
-        localStorage.setItem('color-scheme', target);
-      } catch {}
-      meta.content = target;
-    }
-    syncNativeWindowTheme(true);
-  });
-
-  toggleBtn.addEventListener('dblclick', () => {
-    try {
-      localStorage.removeItem('color-scheme');
-    } catch {}
-    meta.content = 'light dark';
-    syncNativeWindowTheme(true);
-  });
+    toggleBtn.addEventListener('dblclick', () => {
+      setThemeChoice('system');
+    });
+  }
 }

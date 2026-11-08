@@ -1,4 +1,5 @@
 import { backend, SearchFileResult } from './api';
+import { t } from './i18n';
 
 export interface WorkspaceSearchDeps {
   searchInputEl: HTMLInputElement;
@@ -44,7 +45,7 @@ export class WorkspaceSearchController {
       this.deps.resultsContainerEl.replaceChildren();
       const hint = document.createElement('p');
       hint.className = 'muted-hint';
-      hint.textContent = 'Bitte öffne zuerst einen Arbeitsordner (Strg+Umschalt+O).';
+      hint.textContent = t('search.openFolderPrompt');
       this.deps.resultsContainerEl.appendChild(hint);
       return;
     }
@@ -56,8 +57,7 @@ export class WorkspaceSearchController {
       this.deps.resultsContainerEl.replaceChildren();
       const hint = document.createElement('p');
       hint.className = 'muted-hint';
-      hint.textContent =
-        'Suchbegriff eingeben, um alle Markdown-Dateien im Ordner zu durchsuchen.';
+      hint.textContent = t('sidebar.searchHint');
       this.deps.resultsContainerEl.appendChild(hint);
       return;
     }
@@ -87,8 +87,7 @@ export class WorkspaceSearchController {
     this.deps.resultsContainerEl.replaceChildren();
     const hint = document.createElement('p');
     hint.className = 'muted-hint';
-    hint.textContent =
-      'Suchbegriff eingeben, um alle Markdown-Dateien im Ordner zu durchsuchen.';
+    hint.textContent = t('sidebar.searchHint');
     this.deps.resultsContainerEl.appendChild(hint);
     this.deps.searchInputEl.focus();
   }
@@ -132,26 +131,26 @@ export class WorkspaceSearchController {
     if (results.length === 0) {
       if (this.deps.statusBadgeEl) {
         this.deps.statusBadgeEl.textContent = '0';
-        this.deps.statusBadgeEl.title = 'Keine Treffer gefunden';
+        this.deps.statusBadgeEl.title = t('search.noMatches');
       }
       const hint = document.createElement('p');
       hint.className = 'muted-hint';
-      hint.textContent = 'Keine Treffer gefunden.';
+      hint.textContent = t('search.noMatches');
       this.deps.resultsContainerEl.appendChild(hint);
       return;
     }
 
     const totalHits = results.reduce((acc, f) => acc + f.matches.length, 0);
+    const fileLabel = results.length === 1 ? t('search.file') : t('search.files');
+    const summaryText = t('search.summary', { count: totalHits, files: results.length, fileLabel });
     if (this.deps.statusBadgeEl) {
       this.deps.statusBadgeEl.textContent = String(totalHits);
-      this.deps.statusBadgeEl.title = `${totalHits} Treffer in ${results.length} ${
-        results.length === 1 ? 'Datei' : 'Dateien'
-      }`;
+      this.deps.statusBadgeEl.title = summaryText;
     }
 
     const summary = document.createElement('div');
     summary.className = 'search-summary';
-    summary.textContent = `${totalHits} Treffer in ${results.length} ${results.length === 1 ? 'Datei' : 'Dateien'}`;
+    summary.textContent = summaryText;
     this.deps.resultsContainerEl.appendChild(summary);
 
     for (const fileRes of results) {
@@ -177,7 +176,7 @@ export class WorkspaceSearchController {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'search-match-btn';
-        btn.title = `Zeile ${match.line}, Spalte ${match.column}`;
+        btn.title = t('search.matchLocation', { line: match.line, col: match.column });
 
         const lineBadge = document.createElement('span');
         lineBadge.className = 'search-line-badge';

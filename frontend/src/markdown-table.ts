@@ -2,6 +2,7 @@
  * Pure GFM Markdown table parser, formatter, Tab/Shift+Tab cell navigator,
  * and HTML/TSV clipboard-to-Markdown table converter.
  */
+import { t } from './i18n';
 
 export type TableColumnAlign = 'left' | 'center' | 'right';
 
@@ -603,7 +604,9 @@ function buildMarkdownTableFromGrid(grid: string[][]): string | null {
   const normalized = grid.map((row) =>
     Array.from({ length: colCount }, (_, c) => sanitizeCellText(row[c] ?? '')),
   );
-  const header = normalized[0].map((h, i) => (h.length > 0 ? h : `Spalte ${i + 1}`));
+  const header = normalized[0].map((h, i) =>
+    h.length > 0 ? h : t('table.columnHeader', { num: i + 1 }),
+  );
   const sep = Array.from({ length: colCount }, () => '---');
   const body = normalized.slice(1);
 
@@ -776,7 +779,7 @@ export function modifyMarkdownTable(
         if (r === 1) {
           parsedRows[1].splice(targetCol, 0, '---');
         } else if (r === 0) {
-          parsedRows[0].splice(targetCol, 0, `Spalte ${targetCol + 1}`);
+          parsedRows[0].splice(targetCol, 0, t('table.columnHeader', { num: targetCol + 1 }));
         } else {
           parsedRows[r].splice(targetCol, 0, '');
         }

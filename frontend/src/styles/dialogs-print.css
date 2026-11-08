@@ -299,6 +299,294 @@ kbd {
   height: auto;
 }
 
+/* ==========================================================================
+   Application Settings Dialog (Fluent Windows 11 Design)
+   ========================================================================== */
+
+.settings-dialog:modal,
+dialog.settings-dialog {
+  width: min(680px, 92vw);
+  max-width: 680px;
+  max-height: 85vh;
+  padding: 0 !important;
+  overflow: hidden;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+}
+
+.settings-dialog-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: 85vh;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.settings-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  border-top-left-radius: inherit;
+  border-top-right-radius: inherit;
+}
+
+.settings-dialog-header .modal-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-secondary);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.settings-dialog-header .modal-close-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+}
+
+.settings-dialog-header .modal-close-btn:active {
+  background: var(--bg-active);
+}
+
+.settings-dialog-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-header-icon {
+  width: 20px;
+  height: 20px;
+  color: var(--accent);
+}
+
+.settings-dialog-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.settings-dialog-content {
+  flex: 1;
+  padding: 18px 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-group-title {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-group-title svg {
+  width: 14px;
+  height: 14px;
+  color: var(--fg-muted);
+}
+
+.settings-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 14px;
+  gap: 16px;
+}
+
+.settings-row-divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 0 14px;
+}
+
+.settings-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.settings-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg-primary);
+  cursor: pointer;
+}
+
+.settings-sub {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  line-height: 1.35;
+}
+
+.settings-control {
+  flex-shrink: 0;
+}
+
+/* Fluent Switch */
+.fluent-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 20px;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.fluent-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.fluent-switch-slider {
+  position: absolute;
+  inset: 0;
+  background-color: var(--bg-subtle);
+  border: 1px solid var(--border-strong);
+  border-radius: 20px;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.fluent-switch-slider::before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 2px;
+  top: 2px;
+  background-color: var(--fg-secondary);
+  border-radius: 50%;
+  transition: transform 150ms ease, background-color 150ms ease;
+}
+
+.fluent-switch input:checked + .fluent-switch-slider {
+  background-color: var(--accent);
+  border-color: var(--accent);
+}
+
+.fluent-switch input:checked + .fluent-switch-slider::before {
+  transform: translateX(20px);
+  background-color: var(--accent-fg);
+}
+
+.fluent-switch input:focus-visible + .fluent-switch-slider {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Segmented buttons in settings */
+.settings-segmented {
+  display: inline-flex;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  gap: 2px;
+}
+
+.settings-seg-btn {
+  border: 0;
+  background: transparent;
+  color: var(--fg-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: calc(var(--radius-sm) - 2px);
+  cursor: pointer;
+  transition: background-color 100ms ease, color 100ms ease;
+}
+
+.settings-seg-btn:hover {
+  color: var(--fg-primary);
+}
+
+.settings-seg-btn.is-active {
+  background: var(--bg-elevated);
+  color: var(--fg-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+/* Action buttons in settings */
+.settings-action-btn {
+  border: 1px solid var(--border-strong);
+  background: var(--bg-subtle);
+  color: var(--fg-primary);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 100ms ease;
+}
+
+.settings-action-btn:hover {
+  background: var(--bg-hover);
+}
+
+.settings-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  border-bottom-left-radius: inherit;
+  border-bottom-right-radius: inherit;
+}
+
+.settings-primary-btn {
+  height: 32px;
+  padding: 0 18px;
+  border-radius: var(--radius-sm);
+  border: 0;
+  background: var(--accent);
+  color: var(--accent-fg);
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 13px;
+  transition: filter 120ms ease;
+}
+
+.settings-primary-btn:hover {
+  filter: brightness(1.08);
+}
+
 /* Clean Print / PDF Output (independent of active Light/Dark app theme or view mode) */
 @media print {
   :root {
@@ -334,6 +622,7 @@ kbd {
   .sidebar,
   .editor-pane,
   .split-resizer,
+  .sidebar-resizer,
   .status-bar,
   .status-toast,
   .drop-overlay,

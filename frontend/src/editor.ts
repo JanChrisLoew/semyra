@@ -257,9 +257,12 @@ export class MarkdownEditorController {
   private wordWrapCompartment = new Compartment();
   private spellcheckCompartment = new Compartment();
   private languageCompartment = new Compartment();
+  private i18nCompartment = new Compartment();
+  private placeholderCompartment = new Compartment();
   private currentLanguageFile = '';
   private wordWrapEnabled = true;
   private spellcheckEnabled = false;
+  private appLanguage: 'de' | 'en' = 'de';
   private sharedExtensions: Extension;
 
   constructor(host: HTMLElement, initialContent: string, callbacks: EditorCallbacks) {
@@ -279,7 +282,7 @@ export class MarkdownEditorController {
   private spellcheckExtension(enabled: boolean): Extension {
     return EditorView.contentAttributes.of({
       spellcheck: enabled ? 'true' : 'false',
-      lang: 'de',
+      lang: this.appLanguage,
     });
   }
 
@@ -395,7 +398,9 @@ export class MarkdownEditorController {
 
   private buildExtensions(): Extension {
     return [
-      EditorState.phrases.of(germanCodeMirrorPhrases),
+      this.i18nCompartment.of(
+        EditorState.phrases.of(this.appLanguage === 'de' ? germanCodeMirrorPhrases : {}),
+      ),
       lineNumbers(),
       foldGutter({
         openText: '▾',
@@ -411,7 +416,13 @@ export class MarkdownEditorController {
       closeBrackets(),
       search({ top: true }),
       highlightSelectionMatches(),
-      placeholder('Schreibe hier dein Markdown…'),
+      this.placeholderCompartment.of(
+        placeholder(
+          this.appLanguage === 'de'
+            ? 'Schreibe hier dein Markdown…'
+            : 'Write your Markdown here…',
+        ),
+      ),
       this.languageCompartment.of(
         markdown({
           base: markdownLanguage,
@@ -554,6 +565,10 @@ export class MarkdownEditorController {
           borderLeftColor: 'var(--accent)',
         },
       }),
+      EditorView.contentAttributes.of({
+        'aria-label': 'Markdown-Editor',
+        role: 'textbox',
+      }),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           this.callbacks.onDocChanged(update.state.doc.toString());
@@ -687,6 +702,34 @@ export class MarkdownEditorController {
 
   public isSpellcheckEnabled(): boolean {
     return this.spellcheckEnabled;
+  }
+
+  public setAppLanguage(lang: 'de' | 'en'): void {
+    if (this.appLanguage === lang) return;
+    this.appLanguage = lang;
+    this.view.dispatch({
+      effects: [
+        this.i18nCompartment.reconfigure(
+          EditorState.phrases.of(lang === 'de' ? germanCodeMirrorPhrases : {}),
+        ),
+        this.placeholderCompartment.reconfigure(
+          placeholder(
+            lang === 'de'
+              ? 'Schreibe hier dein Markdown…'
+              : 'Write your Markdown here…',
+          ),
+        ),
+        this.spellcheckCompartment.reconfigure(this.spellcheckExtension(this.spellcheckEnabled)),
+      ],
+    });
+  }
+
+  public getAppLanguage(): 'de' | 'en' {
+    return this.appLanguage;
+  }
+
+  public focus(): void {
+    this.view.focus();
   }
 
   public swapState(state: EditorState, scrollTop = 0): void {

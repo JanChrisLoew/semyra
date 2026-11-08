@@ -329,7 +329,7 @@ pub fn render_markdown(markdown: &str, base_dir: Option<&Path>) -> RenderResult 
                         escape_html(&mut html, lang_label);
                         html.push_str("\"><div class=\"code-block-header\"><span class=\"code-lang-badge\">");
                         escape_html(&mut html, lang_label);
-                        html.push_str("</span><button type=\"button\" class=\"copy-code-btn\" aria-label=\"Code kopieren\">Kopieren</button></div><pre tabindex=\"0\"><code class=\"hl-code\">");
+                        html.push_str("</span><button type=\"button\" class=\"copy-code-btn\" data-i18n=\"preview.copy\" aria-label=\"Code kopieren\" data-i18n-aria=\"preview.copyAria\">Kopieren</button></div><pre tabindex=\"0\"><code class=\"hl-code\">");
                         html.push_str(&highlighted);
                         html.push_str("</code></pre></div>\n");
                     }

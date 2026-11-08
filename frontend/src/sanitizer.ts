@@ -1,5 +1,6 @@
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
+import { getLanguage } from './i18n';
 
 const SAFE_ELEMENTS = [
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
@@ -17,6 +18,7 @@ const SAFE_ATTRIBUTES = [
   'type', 'checked', 'disabled', 'start', 'scope', 'colspan', 'rowspan', 'open',
   'tabindex', 'role', 'aria-label', 'aria-labelledby',
   'data-line', 'data-task-line', 'data-math', 'data-mermaid', 'data-lang',
+  'data-i18n', 'data-i18n-title', 'data-i18n-aria',
 ];
 
 let domPurifyPromise: Promise<{
@@ -192,7 +194,12 @@ export async function renderMermaidLightInClone(root: HTMLElement): Promise<void
 }
 
 function wrapMermaidHtml(svg: string): string {
-  return `<div class="mermaid-actions"><button type="button" class="mermaid-action-btn copy-mermaid-btn" title="Diagramm als SVG kopieren" aria-label="SVG kopieren">SVG kopieren</button><button type="button" class="mermaid-action-btn zoom-mermaid-btn" title="Diagramm in Großansicht öffnen" aria-label="Vergrößern">Vergrößern</button></div>${svg}`;
+  const isEn = getLanguage() === 'en';
+  const copyTitle = isEn ? 'Copy diagram as SVG' : 'Diagramm als SVG kopieren';
+  const copyLabel = isEn ? 'Copy SVG' : 'SVG kopieren';
+  const zoomTitle = isEn ? 'Open diagram in full view' : 'Diagramm in Großansicht öffnen';
+  const zoomLabel = isEn ? 'Zoom' : 'Vergrößern';
+  return `<div class="mermaid-actions"><button type="button" class="mermaid-action-btn copy-mermaid-btn" title="${copyTitle}" aria-label="${copyLabel}">${copyLabel}</button><button type="button" class="mermaid-action-btn zoom-mermaid-btn" title="${zoomTitle}" aria-label="${zoomLabel}">${zoomLabel}</button></div>${svg}`;
 }
 
 async function renderMermaidBlocksCached(

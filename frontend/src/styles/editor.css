@@ -8,13 +8,15 @@
   min-width: 0;
   min-height: 0;
   background: var(--bg-surface);
+  container-name: split-view;
+  container-type: inline-size;
 }
 
 .editor-pane {
   position: relative;
-  width: var(--split-ratio);
+  flex: 0 1 var(--split-ratio);
   min-width: 220px;
-  height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -95,9 +97,11 @@
 }
 
 .format-expand-btn {
-  position: absolute;
-  top: 8px;
-  right: 14px;
+  /* In flow (not floating) so it never covers the first editor lines */
+  position: relative;
+  align-self: flex-end;
+  flex-shrink: 0;
+  margin: 4px 10px 2px 0;
   z-index: 10;
   display: inline-flex;
   align-items: center;
@@ -133,11 +137,24 @@
 }
 
 .split-resizer {
+  position: relative;
   width: 5px;
   cursor: col-resize;
   background: var(--border-subtle);
   flex-shrink: 0;
+  touch-action: none;
   transition: background-color 120ms ease;
+}
+
+/* Enlarged invisible hit zone around the thin splitter */
+.split-resizer::before {
+  content: '';
+  position: absolute;
+  inset: 0 -4px;
+}
+
+.split-container[data-orientation="horizontal"] .split-resizer::before {
+  inset: -4px 0;
 }
 
 .split-resizer:hover,
@@ -146,11 +163,16 @@
   background: var(--accent);
 }
 
+.split-resizer:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .preview-pane {
   position: relative;
-  flex: 1;
+  flex: 1 1 0;
   min-width: 220px;
-  height: 100%;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 28px 38px 64px 38px;
@@ -223,24 +245,52 @@
 }
 
 .split-container[data-orientation="horizontal"] .editor-pane {
-  width: 100%;
-  height: var(--split-ratio);
+  flex: 0 1 var(--split-ratio);
+  width: auto;
   min-width: 0;
   min-height: 120px;
 }
 
 .split-container[data-orientation="horizontal"] .split-resizer {
-  width: 100%;
+  width: auto;
   height: 5px;
   cursor: row-resize;
 }
 
 .split-container[data-orientation="horizontal"] .preview-pane {
-  width: 100%;
-  height: 100%;
+  flex: 1 1 0;
   min-width: 0;
   min-height: 120px;
   padding: 20px 32px 50px 32px;
+}
+
+/* Responsive auto-stacking when split container width is constrained (< 680px) in vertical split */
+@container split-view (max-width: 680px) {
+  .split-container:not([data-orientation="horizontal"]) {
+    flex-direction: column;
+  }
+
+  .split-container:not([data-orientation="horizontal"]) .editor-pane {
+    width: auto;
+    min-width: 0;
+    min-height: 120px;
+  }
+
+  .split-container:not([data-orientation="horizontal"]) .split-resizer {
+    width: auto;
+    height: 5px;
+    cursor: row-resize;
+  }
+
+  .split-container:not([data-orientation="horizontal"]) .split-resizer::before {
+    inset: -4px 0;
+  }
+
+  .split-container:not([data-orientation="horizontal"]) .preview-pane {
+    min-width: 0;
+    min-height: 120px;
+    padding: 20px 24px 48px 24px;
+  }
 }
 
 /* View Modes */
@@ -258,12 +308,19 @@
   pointer-events: none;
 }
 .app-shell[data-view="editor"] .editor-pane {
+  flex: 1 1 auto;
   width: 100%;
-  max-width: 920px;
-  margin: 0 auto;
+  min-width: 0;
+  max-width: none;
 }
 
-/* Full Reading View Mode (Lesen) - Centered Document Sheet */
+/* Optional centered text column in editor-only view (Alt+Umschalt+B); gutter and scrollbar stay at the edges */
+.app-shell[data-view="editor"][data-editor-width="centered"] .codemirror-host .cm-content {
+  max-width: 100ch;
+  margin-inline: auto;
+}
+
+/* Full Reading View Mode (Lesen) */
 .app-shell[data-view="preview"] .editor-pane,
 .app-shell[data-view="preview"] .split-resizer,
 .app-shell[data-view="preview"] .format-bar {
@@ -271,25 +328,39 @@
 }
 .app-shell[data-view="preview"] .preview-pane {
   width: 100%;
+  background: var(--bg-surface);
+  padding: 28px clamp(20px, 4vw, 56px) 64px;
+}
+.app-shell[data-view="preview"] .markdown-body {
+  max-width: none;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+}
+
+/* Optional centered reading sheet when "Zentrierte Textspalte" is enabled */
+.app-shell[data-view="preview"][data-editor-width="centered"] .preview-pane {
   background: var(--bg-chrome);
   padding: 36px 24px 96px 24px;
 }
-.app-shell[data-view="preview"] .markdown-body {
-  max-width: 860px;
+.app-shell[data-view="preview"][data-editor-width="centered"] .markdown-body {
+  max-width: 880px;
   margin: 0 auto;
   min-height: calc(100vh - 170px);
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  padding: 48px 56px 64px 56px;
+  padding: clamp(28px, 4vw, 56px) clamp(24px, 5vw, 72px) 64px;
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
 }
 
 @media (max-width: 768px) {
-  .app-shell[data-view="preview"] .preview-pane {
+  .app-shell[data-view="preview"][data-editor-width="centered"] .preview-pane {
     padding: 12px 8px 60px 8px;
   }
-  .app-shell[data-view="preview"] .markdown-body {
+  .app-shell[data-view="preview"][data-editor-width="centered"] .markdown-body {
     padding: 24px 20px 40px 20px;
     border-radius: 0;
     border: none;
@@ -300,11 +371,10 @@
 /* Split-View Mode: flows seamlessly in right half */
 .app-shell[data-view="split"] .preview-pane {
   background: var(--bg-surface);
-  padding: 28px 36px 64px 36px;
+  padding: 28px clamp(20px, 3vw, 48px) 64px;
 }
 .app-shell[data-view="split"] .markdown-body {
-  max-width: 860px;
-  margin: 0 auto;
+  max-width: none;
   background: transparent;
   border: none;
   border-radius: 0;
@@ -312,14 +382,11 @@
   padding: 0;
 }
 
-/* Split Orientation context sensitivity: only visible in split mode */
-.app-shell:not([data-view="split"]) #btn-toggle-split-orientation {
-  display: none !important;
-}
 
 /* Zen Mode: Pure distraction-free writing canvas with smooth mouse-reveal top bar */
 .app-shell.is-zen .sidebar,
 .app-shell.is-zen .status-bar,
+.app-shell.is-zen .tabs-bar-row,
 .app-shell.is-zen .editor-format-bar {
   display: none !important;
 }
@@ -332,25 +399,92 @@
   z-index: 100;
   transform: translateY(-100%);
   opacity: 0;
-  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1), opacity 180ms ease;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
-  background: var(--bg-sidebar);
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1), opacity 200ms ease;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
-/* Invisible hover trigger strip at the very top of the window */
+/* Invisible hover trigger strip at the very top of the window (20px active area) */
 .app-shell.is-zen .top-chrome::after {
   content: '';
   position: absolute;
-  bottom: -12px;
+  bottom: -20px;
   left: 0;
   right: 0;
-  height: 14px;
+  height: 22px;
 }
 
 .app-shell.is-zen .top-chrome:hover,
-.app-shell.is-zen .top-chrome:focus-within {
+.app-shell.is-zen .top-chrome:has(:popover-open) {
   transform: translateY(0);
   opacity: 1;
+}
+
+/* Exit Zen Button (visible exclusively during Zen mode) */
+.exit-zen-btn {
+  display: none !important;
+}
+
+.app-shell.is-zen .exit-zen-btn {
+  display: inline-flex !important;
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: var(--bg-active);
+  font-weight: 500;
+}
+
+/* Zen Mode: Typography & Workspace */
+.app-shell.is-zen .workspace-area {
+  height: 100vh;
+}
+
+.app-shell.is-zen .editor-pane {
+  background: var(--bg-surface);
+}
+
+.app-shell.is-zen .codemirror-host .cm-scroller {
+  padding: 0;
+}
+
+.app-shell.is-zen .codemirror-host .cm-gutters {
+  opacity: 0.35;
+  border-right-color: transparent;
+  transition: opacity 160ms ease;
+}
+
+.app-shell.is-zen .codemirror-host .cm-gutters:hover {
+  opacity: 1;
+}
+
+/* Zen Mode: Full width by default without fixed cap */
+.app-shell.is-zen .codemirror-host .cm-content {
+  max-width: none;
+  margin-inline: 0;
+  padding: 36px 28px 240px;
+  font-size: calc(15px * var(--doc-zoom));
+  line-height: 1.8;
+}
+
+/* Centered writing column in Zen mode ONLY when "Zentrierte Textspalte" is enabled */
+.app-shell.is-zen[data-editor-width="centered"] .codemirror-host .cm-content {
+  max-width: 84ch;
+  margin-inline: auto;
+  padding: 48px 28px 240px;
+}
+
+.app-shell.is-zen[data-view="preview"] .preview-pane {
+  padding: 36px clamp(20px, 4vw, 56px) 180px;
+}
+
+.app-shell.is-zen[data-view="preview"] .markdown-body {
+  max-width: none;
+  margin-inline: 0;
+}
+
+.app-shell.is-zen[data-view="preview"][data-editor-width="centered"] .markdown-body {
+  max-width: 84ch;
+  margin-inline: auto;
 }
 
 /* CodeMirror 6 Host Styling */

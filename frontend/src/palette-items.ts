@@ -1,6 +1,7 @@
 import { WorkspaceFileEntry } from './api';
 import { PaletteItem } from './palette';
 import { baseNameOfPath } from './path-utils';
+import { getLanguage } from './i18n';
 
 export interface PaletteTabSummary {
   id: string;
@@ -65,14 +66,18 @@ export interface PaletteCommandContext {
   onInsertTableColumnRight?: () => void;
   onDeleteTableColumn?: () => void;
   onToggleSplitOrientation?: () => void;
+  onToggleCenteredEditor?: () => void;
+  centeredEditorActive?: boolean;
   onShowDocStats?: () => void;
   onToggleFormatBar?: () => void;
   onScrollPreviewTop?: () => void;
   formatBarVisible?: boolean;
   splitOrientation?: 'vertical' | 'horizontal';
+  onOpenSettings?: () => void;
 }
 
 export async function buildPaletteFileItems(ctx: PaletteFileContext): Promise<PaletteItem[]> {
+  const isEn = getLanguage() === 'en';
   const items: PaletteItem[] = [];
   const seenPaths = new Set<string>();
 
@@ -84,8 +89,8 @@ export async function buildPaletteFileItems(ctx: PaletteFileContext): Promise<Pa
       id: `tab:${tab.id}`,
       kind: 'tab',
       label: tab.name,
-      subtitle: tab.path ?? 'Ungespeicherter Tab',
-      badge: tab.id === ctx.activeTabId ? 'Aktiv' : 'Geöffnet',
+      subtitle: tab.path ?? (isEn ? 'Unsaved Tab' : 'Ungespeicherter Tab'),
+      badge: tab.id === ctx.activeTabId ? (isEn ? 'Active' : 'Aktiv') : (isEn ? 'Open' : 'Geöffnet'),
       run: () => ctx.onActivateTab(tab.id),
     });
   }
@@ -101,7 +106,7 @@ export async function buildPaletteFileItems(ctx: PaletteFileContext): Promise<Pa
         kind: 'file',
         label: f.name,
         subtitle: f.relPath,
-        badge: 'Arbeitsordner',
+        badge: isEn ? 'Workspace' : 'Arbeitsordner',
         run: () => ctx.onOpenFile(f.path),
       });
     }
@@ -116,7 +121,7 @@ export async function buildPaletteFileItems(ctx: PaletteFileContext): Promise<Pa
       kind: 'recent',
       label: baseNameOfPath(recentPath),
       subtitle: recentPath,
-      badge: 'Zuletzt geöffnet',
+      badge: isEn ? 'Recent' : 'Zuletzt geöffnet',
       run: () => ctx.onOpenFile(recentPath),
     });
   }
@@ -128,7 +133,7 @@ export async function buildPaletteFileItems(ctx: PaletteFileContext): Promise<Pa
       kind: 'folder',
       label: baseNameOfPath(folderPath),
       subtitle: folderPath,
-      badge: 'Ordnerverlauf',
+      badge: isEn ? 'Folder History' : 'Ordnerverlauf',
       run: () => ctx.onOpenFolder(folderPath),
     });
   }
@@ -137,26 +142,27 @@ export async function buildPaletteFileItems(ctx: PaletteFileContext): Promise<Pa
 }
 
 export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteItem[] {
+  const isEn = getLanguage() === 'en';
   return [
     {
       id: 'cmd:new-tab',
       kind: 'command',
-      label: 'Datei: Neues Markdown-Dokument',
-      shortcut: 'Strg+N',
+      label: isEn ? 'File: New Markdown Document' : 'Datei: Neues Markdown-Dokument',
+      shortcut: isEn ? 'Ctrl+N' : 'Strg+N',
       run: ctx.onNewTab,
     },
     {
       id: 'cmd:open-file',
       kind: 'command',
-      label: 'Datei: Markdown-Datei öffnen…',
-      shortcut: 'Strg+O',
+      label: isEn ? 'File: Open Markdown File…' : 'Datei: Markdown-Datei öffnen…',
+      shortcut: isEn ? 'Ctrl+O' : 'Strg+O',
       run: ctx.onOpenFileDialog,
     },
     {
       id: 'cmd:open-folder',
       kind: 'command',
-      label: 'Arbeitsbereich: Ordner öffnen…',
-      shortcut: 'Strg+Umschalt+O',
+      label: isEn ? 'Workspace: Open Folder…' : 'Arbeitsbereich: Ordner öffnen…',
+      shortcut: isEn ? 'Ctrl+Shift+O' : 'Strg+Umschalt+O',
       run: ctx.onOpenFolderDialog,
     },
     ...(ctx.onReopenTab
@@ -164,8 +170,8 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           {
             id: 'cmd:reopen-tab',
             kind: 'command' as const,
-            label: 'Tab: Zuletzt geschlossenen Tab wiederherstellen',
-            shortcut: 'Strg+Umschalt+T',
+            label: isEn ? 'Tab: Reopen Closed Tab' : 'Tab: Zuletzt geschlossenen Tab wiederherstellen',
+            shortcut: isEn ? 'Ctrl+Shift+T' : 'Strg+Umschalt+T',
             run: ctx.onReopenTab,
           },
         ]
@@ -175,8 +181,8 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           {
             id: 'cmd:next-tab',
             kind: 'command' as const,
-            label: 'Tab: Zum nächsten Tab wechseln',
-            shortcut: 'Strg+BildAb',
+            label: isEn ? 'Tab: Switch to Next Tab' : 'Tab: Zum nächsten Tab wechseln',
+            shortcut: isEn ? 'Ctrl+PageDown' : 'Strg+BildAb',
             run: ctx.onNextTab,
           },
         ]
@@ -186,8 +192,8 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           {
             id: 'cmd:prev-tab',
             kind: 'command' as const,
-            label: 'Tab: Zum vorherigen Tab wechseln',
-            shortcut: 'Strg+BildAuf',
+            label: isEn ? 'Tab: Switch to Previous Tab' : 'Tab: Zum vorherigen Tab wechseln',
+            shortcut: isEn ? 'Ctrl+PageUp' : 'Strg+BildAuf',
             run: ctx.onPrevTab,
           },
         ]
@@ -195,15 +201,15 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
     {
       id: 'cmd:save',
       kind: 'command',
-      label: 'Datei: Speichern',
-      shortcut: 'Strg+S',
+      label: isEn ? 'File: Save' : 'Datei: Speichern',
+      shortcut: isEn ? 'Ctrl+S' : 'Strg+S',
       run: ctx.onSave,
     },
     {
       id: 'cmd:save-as',
       kind: 'command',
-      label: 'Datei: Speichern unter…',
-      shortcut: 'Strg+Umschalt+S',
+      label: isEn ? 'File: Save As…' : 'Datei: Speichern unter…',
+      shortcut: isEn ? 'Ctrl+Shift+S' : 'Strg+Umschalt+S',
       run: ctx.onSaveAs,
     },
     ...(ctx.onCopyMarkdown
@@ -211,8 +217,8 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           {
             id: 'cmd:copy-markdown',
             kind: 'command' as const,
-            label: 'Zwischenablage: Markdown-Quelltext kopieren',
-            shortcut: 'Strg+Umschalt+C',
+            label: isEn ? 'Clipboard: Copy Markdown Source' : 'Zwischenablage: Markdown-Quelltext kopieren',
+            shortcut: isEn ? 'Ctrl+Shift+C' : 'Strg+Umschalt+C',
             run: ctx.onCopyMarkdown,
           },
         ]
@@ -222,7 +228,8 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           {
             id: 'cmd:copy-ai-context',
             kind: 'command' as const,
-            label: 'Zwischenablage: Als KI-Kontext kopieren (mit Dateinamen-Block)',
+            label: isEn ? 'Clipboard: Copy for AI Context (with File Header)' : 'Zwischenablage: Als KI-Kontext kopieren (mit Dateinamen-Block)',
+            shortcut: isEn ? 'Ctrl+Shift+A' : 'Strg+Umschalt+A',
             run: ctx.onCopyAiContext,
           },
         ]
@@ -230,35 +237,36 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
     {
       id: 'cmd:copy-rich',
       kind: 'command',
-      label: 'Zwischenablage: Als formatierten Text kopieren (Word, Teams, Outlook)',
-      shortcut: 'Strg+Umschalt+K',
+      label: isEn ? 'Clipboard: Copy Formatted Text (Word, Teams, Outlook)' : 'Zwischenablage: Als formatierten Text kopieren (Word, Teams, Outlook)',
+      shortcut: isEn ? 'Ctrl+Shift+K' : 'Strg+Umschalt+K',
       run: ctx.onCopyRichText,
     },
     {
       id: 'cmd:export-html',
       kind: 'command',
-      label: 'Export: Als eigenständige 1-Datei-HTML exportieren…',
+      label: isEn ? 'Export: Standalone 1-File HTML…' : 'Export: Als eigenständige 1-Datei-HTML exportieren…',
+      shortcut: isEn ? 'Ctrl+Shift+H' : 'Strg+Umschalt+H',
       run: ctx.onExportHtml,
     },
     {
       id: 'cmd:export-pdf',
       kind: 'command',
-      label: 'Export: Direkt als PDF-Datei exportieren…',
-      shortcut: 'Strg+Umschalt+D',
+      label: isEn ? 'Export: Directly Export as PDF Document…' : 'Export: Direkt als PDF-Datei exportieren…',
+      shortcut: isEn ? 'Ctrl+Shift+D' : 'Strg+Umschalt+D',
       run: ctx.onExportPdf,
     },
     {
       id: 'cmd:print',
       kind: 'command',
-      label: 'Export: Drucken…',
-      shortcut: 'Strg+P',
+      label: isEn ? 'Export: Print…' : 'Export: Drucken…',
+      shortcut: isEn ? 'Ctrl+P' : 'Strg+P',
       run: ctx.onPrint,
     },
     {
       id: 'cmd:align-table',
       kind: 'command',
-      label: 'Tabelle: Markdown-Tabelle ausrichten',
-      shortcut: 'Alt+Umschalt+F',
+      label: isEn ? 'Table: Format & Align Markdown Table' : 'Tabelle: Markdown-Tabelle ausrichten',
+      shortcut: isEn ? 'Alt+Shift+F' : 'Alt+Umschalt+F',
       run: ctx.onAlignTable,
     },
     ...(ctx.onInsertTableRowAbove
@@ -266,7 +274,7 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           {
             id: 'cmd:table-row-above',
             kind: 'command' as const,
-            label: 'Tabelle: Zeile oberhalb einfügen',
+            label: isEn ? 'Table: Insert Row Above' : 'Tabelle: Zeile oberhalb einfügen',
             run: ctx.onInsertTableRowAbove,
           },
         ]
@@ -276,7 +284,7 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           {
             id: 'cmd:table-row-below',
             kind: 'command' as const,
-            label: 'Tabelle: Zeile unterhalb einfügen',
+            label: isEn ? 'Table: Insert Row Below' : 'Tabelle: Zeile unterhalb einfügen',
             run: ctx.onInsertTableRowBelow,
           },
         ]
@@ -286,7 +294,7 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           {
             id: 'cmd:table-delete-row',
             kind: 'command' as const,
-            label: 'Tabelle: Aktuelle Zeile löschen',
+            label: isEn ? 'Table: Delete Current Row' : 'Tabelle: Aktuelle Zeile löschen',
             run: ctx.onDeleteTableRow,
           },
         ]
@@ -296,7 +304,7 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           {
             id: 'cmd:table-col-left',
             kind: 'command' as const,
-            label: 'Tabelle: Spalte links einfügen',
+            label: isEn ? 'Table: Insert Column Left' : 'Tabelle: Spalte links einfügen',
             run: ctx.onInsertTableColumnLeft,
           },
         ]
@@ -306,7 +314,7 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           {
             id: 'cmd:table-col-right',
             kind: 'command' as const,
-            label: 'Tabelle: Spalte rechts einfügen',
+            label: isEn ? 'Table: Insert Column Right' : 'Tabelle: Spalte rechts einfügen',
             run: ctx.onInsertTableColumnRight,
           },
         ]
@@ -316,7 +324,7 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           {
             id: 'cmd:table-delete-col',
             kind: 'command' as const,
-            label: 'Tabelle: Aktuelle Spalte löschen',
+            label: isEn ? 'Table: Delete Current Column' : 'Tabelle: Aktuelle Spalte löschen',
             run: ctx.onDeleteTableColumn,
           },
         ]
@@ -326,7 +334,7 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           {
             id: 'cmd:toggle-task',
             kind: 'command' as const,
-            label: 'Editor: Aufgabe der Zeile an-/abhaken',
+            label: isEn ? 'Editor: Toggle Task Checkbox' : 'Editor: Aufgabe der Zeile an-/abhaken',
             shortcut: 'Alt+C',
             run: ctx.onToggleTask,
           },
@@ -335,21 +343,21 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
     {
       id: 'cmd:view-split',
       kind: 'command',
-      label: 'Ansicht: Split-Vorschau (Editor & Live-Vorschau)',
+      label: isEn ? 'View: Split View (Editor & Live Preview)' : 'Ansicht: Split-Vorschau (Editor & Live-Vorschau)',
       shortcut: 'Alt+2',
       run: () => ctx.onSetViewMode('split'),
     },
     {
       id: 'cmd:view-editor',
       kind: 'command',
-      label: 'Ansicht: Nur Editor',
+      label: isEn ? 'View: Editor Only' : 'Ansicht: Nur Editor',
       shortcut: 'Alt+1',
       run: () => ctx.onSetViewMode('editor'),
     },
     {
       id: 'cmd:view-preview',
       kind: 'command',
-      label: 'Ansicht: Nur Lese-Vorschau',
+      label: isEn ? 'View: Preview Only' : 'Ansicht: Nur Lese-Vorschau',
       shortcut: 'Alt+3',
       run: () => ctx.onSetViewMode('preview'),
     },
@@ -358,11 +366,27 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           {
             id: 'cmd:toggle-split-orientation',
             kind: 'command' as const,
-            label: `Ansicht: Geteilte Ansicht drehen (${
-              ctx.splitOrientation === 'horizontal' ? 'Zu vertikaler Teilung' : 'Zu horizontaler Teilung'
-            })`,
-            shortcut: 'Alt+Umschalt+S',
+            label: isEn
+              ? `View: Rotate Split View (${ctx.splitOrientation === 'horizontal' ? 'To Vertical' : 'To Horizontal'})`
+              : `Ansicht: Geteilte Ansicht drehen (${ctx.splitOrientation === 'horizontal' ? 'Zu vertikaler Teilung' : 'Zu horizontaler Teilung'})`,
+            shortcut: isEn ? 'Alt+Shift+S' : 'Alt+Umschalt+S',
             run: () => ctx.onToggleSplitOrientation?.(),
+          },
+        ]
+      : []),
+    ...(ctx.onToggleCenteredEditor
+      ? [
+          {
+            id: 'cmd:toggle-centered-editor',
+            kind: 'command' as const,
+            label: isEn
+              ? `Editor: ${ctx.centeredEditorActive ? 'Use Full Width' : 'Centered Text Column'}`
+              : `Editor: ${ctx.centeredEditorActive ? 'Volle Breite nutzen' : 'Zentrierte Textspalte'}`,
+            badge: isEn
+              ? (ctx.centeredEditorActive ? 'Centered' : 'Full Width')
+              : (ctx.centeredEditorActive ? 'Zentriert' : 'Volle Breite'),
+            shortcut: isEn ? 'Alt+Shift+B' : 'Alt+Umschalt+B',
+            run: () => ctx.onToggleCenteredEditor?.(),
           },
         ]
       : []),
@@ -371,7 +395,7 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           {
             id: 'cmd:show-doc-stats',
             kind: 'command' as const,
-            label: 'Dokument: Detaillierte Statistiken & Lesbarkeit anzeigen',
+            label: isEn ? 'Document: Show Statistics & Readability' : 'Dokument: Detaillierte Statistiken & Lesbarkeit anzeigen',
             run: () => ctx.onShowDocStats?.(),
           },
         ]
@@ -381,8 +405,10 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           {
             id: 'cmd:toggle-format-bar',
             kind: 'command' as const,
-            label: `Ansicht: Formatierungsleiste ${ctx.formatBarVisible === false ? 'einblenden' : 'ausblenden'}`,
-            shortcut: 'Alt+Umschalt+R',
+            label: isEn
+              ? `View: Formatting Bar ${ctx.formatBarVisible === false ? 'Show' : 'Hide'}`
+              : `Ansicht: Formatierungsleiste ${ctx.formatBarVisible === false ? 'einblenden' : 'ausblenden'}`,
+            shortcut: isEn ? 'Alt+Shift+R' : 'Alt+Umschalt+R',
             run: () => ctx.onToggleFormatBar?.(),
           },
         ]
@@ -392,7 +418,7 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           {
             id: 'cmd:scroll-preview-top',
             kind: 'command' as const,
-            label: 'Vorschau: Zum Seitenanfang scrollen',
+            label: isEn ? 'Preview: Scroll to Top' : 'Vorschau: Zum Seitenanfang scrollen',
             run: () => ctx.onScrollPreviewTop?.(),
           },
         ]
@@ -400,58 +426,70 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
     {
       id: 'cmd:toggle-wrap',
       kind: 'command',
-      label: `Editor: Zeilenumbruch ${ctx.wordWrapActive ? 'deaktivieren' : 'aktivieren'}`,
-      badge: ctx.wordWrapActive ? 'Aktiv' : 'Aus',
+      label: isEn
+        ? `Editor: Word Wrap ${ctx.wordWrapActive ? 'Disable' : 'Enable'}`
+        : `Editor: Zeilenumbruch ${ctx.wordWrapActive ? 'deaktivieren' : 'aktivieren'}`,
+      badge: ctx.wordWrapActive ? (isEn ? 'Active' : 'Aktiv') : (isEn ? 'Off' : 'Aus'),
       shortcut: 'Alt+Z',
       run: ctx.onToggleWordWrap,
     },
     {
       id: 'cmd:toggle-spellcheck',
       kind: 'command',
-      label: `Editor: Rechtschreibprüfung ${ctx.spellcheckActive ? 'deaktivieren' : 'aktivieren'}`,
-      badge: ctx.spellcheckActive ? 'Aktiv' : 'Aus',
+      label: isEn
+        ? `Editor: Spellcheck ${ctx.spellcheckActive ? 'Disable' : 'Enable'}`
+        : `Editor: Rechtschreibprüfung ${ctx.spellcheckActive ? 'deaktivieren' : 'aktivieren'}`,
+      badge: ctx.spellcheckActive ? (isEn ? 'Active' : 'Aktiv') : (isEn ? 'Off' : 'Aus'),
       run: ctx.onToggleSpellcheck,
     },
     {
       id: 'cmd:toggle-sync-scroll',
       kind: 'command',
-      label: `Vorschau: Synchronisiertes Scrollen ${ctx.syncScrollActive ? 'ausschalten' : 'einschalten'}`,
-      badge: ctx.syncScrollActive ? 'Aktiv' : 'Aus',
+      label: isEn
+        ? `Preview: Sync Scroll ${ctx.syncScrollActive ? 'Disable' : 'Enable'}`
+        : `Vorschau: Synchronisiertes Scrollen ${ctx.syncScrollActive ? 'ausschalten' : 'einschalten'}`,
+      badge: ctx.syncScrollActive ? (isEn ? 'Active' : 'Aktiv') : (isEn ? 'Off' : 'Aus'),
+      shortcut: isEn ? 'Alt+Shift+Y' : 'Alt+Umschalt+Y',
       run: ctx.onToggleSyncScroll,
     },
     {
       id: 'cmd:toggle-autosave',
       kind: 'command',
-      label: `Datei: Auto-Save ${ctx.autoSaveActive ? 'ausschalten' : 'einschalten'}`,
-      badge: ctx.autoSaveActive ? 'Aktiv' : 'Aus',
+      label: isEn
+        ? `File: Auto-Save ${ctx.autoSaveActive ? 'Disable' : 'Enable'}`
+        : `Datei: Auto-Save ${ctx.autoSaveActive ? 'ausschalten' : 'einschalten'}`,
+      badge: ctx.autoSaveActive ? (isEn ? 'Active' : 'Aktiv') : (isEn ? 'Off' : 'Aus'),
+      shortcut: isEn ? 'Alt+Shift+A' : 'Alt+Umschalt+A',
       run: ctx.onToggleAutoSave,
     },
     {
       id: 'cmd:toggle-eol',
       kind: 'command',
-      label: `Dokument: Zeilenenden auf ${ctx.currentLineEnding === 'CRLF' ? 'LF (Unix)' : 'CRLF (Windows)'} umstellen`,
+      label: isEn
+        ? `Document: Switch Line Endings to ${ctx.currentLineEnding === 'CRLF' ? 'LF (Unix)' : 'CRLF (Windows)'}`
+        : `Dokument: Zeilenenden auf ${ctx.currentLineEnding === 'CRLF' ? 'LF (Unix)' : 'CRLF (Windows)'} umstellen`,
       badge: ctx.currentLineEnding,
       run: ctx.onToggleLineEnding,
     },
     {
       id: 'cmd:zoom-in',
       kind: 'command',
-      label: 'Ansicht: Dokument vergrößern (Zoom +)',
-      shortcut: 'Strg++',
+      label: isEn ? 'View: Zoom In (+)' : 'Ansicht: Dokument vergrößern (Zoom +)',
+      shortcut: isEn ? 'Ctrl++' : 'Strg++',
       run: () => ctx.onZoomDelta(10),
     },
     {
       id: 'cmd:zoom-out',
       kind: 'command',
-      label: 'Ansicht: Dokument verkleinern (Zoom -)',
-      shortcut: 'Strg+-',
+      label: isEn ? 'View: Zoom Out (-)' : 'Ansicht: Dokument verkleinern (Zoom -)',
+      shortcut: isEn ? 'Ctrl+-' : 'Strg+-',
       run: () => ctx.onZoomDelta(-10),
     },
     {
       id: 'cmd:zoom-reset',
       kind: 'command',
-      label: 'Ansicht: Dokument-Zoom auf 100 % zurücksetzen',
-      shortcut: 'Strg+0',
+      label: isEn ? 'View: Reset Zoom (100%)' : 'Ansicht: Dokument-Zoom auf 100 % zurücksetzen',
+      shortcut: isEn ? 'Ctrl+0' : 'Strg+0',
       run: ctx.onZoomReset,
     },
     ...(ctx.onOpenEditorSearch
@@ -459,8 +497,8 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           {
             id: 'cmd:editor-search',
             kind: 'command' as const,
-            label: 'Suche: Im Dokument suchen',
-            shortcut: 'Strg+F',
+            label: isEn ? 'Search: Find in Document' : 'Suche: Im Dokument suchen',
+            shortcut: isEn ? 'Ctrl+F' : 'Strg+F',
             run: ctx.onOpenEditorSearch,
           },
         ]
@@ -470,8 +508,8 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           {
             id: 'cmd:editor-replace',
             kind: 'command' as const,
-            label: 'Suche: Suchen & Ersetzen im Dokument öffnen',
-            shortcut: 'Strg+H',
+            label: isEn ? 'Search: Find & Replace in Document' : 'Suche: Suchen & Ersetzen im Dokument öffnen',
+            shortcut: isEn ? 'Ctrl+H' : 'Strg+H',
             run: ctx.onOpenEditorReplace,
           },
         ]
@@ -479,39 +517,51 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
     {
       id: 'cmd:search-workspace',
       kind: 'command',
-      label: 'Suche: Volltextsuche im Arbeitsordner öffnen',
-      shortcut: 'Strg+Umschalt+F',
+      label: isEn ? 'Search: Full-Text Workspace Search' : 'Suche: Volltextsuche im Arbeitsordner öffnen',
+      shortcut: isEn ? 'Ctrl+Shift+F' : 'Strg+Umschalt+F',
       run: ctx.onOpenSearchPanel,
     },
     {
       id: 'cmd:outline',
       kind: 'command',
-      label: 'Navigation: Dokument-Gliederung (Inhaltsverzeichnis) anzeigen',
+      label: isEn ? 'Navigation: Show Document Outline' : 'Navigation: Dokument-Gliederung (Inhaltsverzeichnis) anzeigen',
       run: ctx.onOpenOutlinePanel,
     },
     {
       id: 'cmd:zen',
       kind: 'command',
-      label: 'Ansicht: Zen-Fokusmodus umschalten',
+      label: isEn ? 'View: Toggle Zen Focus Mode' : 'Ansicht: Zen-Fokusmodus umschalten',
       shortcut: 'F11',
       run: ctx.onToggleZen,
     },
     {
       id: 'cmd:theme',
       kind: 'command',
-      label: 'Darstellung: Hell-/Dunkel-Design umschalten',
+      label: isEn ? 'Appearance: Toggle Light/Dark Theme' : 'Darstellung: Hell-/Dunkel-Design umschalten',
+      shortcut: isEn ? 'Alt+Shift+T' : 'Alt+Umschalt+T',
       run: ctx.onToggleTheme,
     },
+    ...(ctx.onOpenSettings
+      ? [
+          {
+            id: 'cmd:settings',
+            kind: 'command' as const,
+            label: isEn ? 'Settings: Open MarkLive Settings…' : 'Einstellungen: MarkLive-Optionen & Einstellungen öffnen…',
+            shortcut: isEn ? 'Ctrl+,' : 'Strg+,',
+            run: ctx.onOpenSettings,
+          },
+        ]
+      : []),
     {
       id: 'cmd:reveal',
       kind: 'command',
-      label: 'Windows: Aktuelle Datei im Explorer anzeigen',
+      label: isEn ? 'Windows: Reveal Active File in Explorer' : 'Windows: Aktuelle Datei im Explorer anzeigen',
       run: ctx.onRevealInExplorer,
     },
     {
       id: 'cmd:shortcuts',
       kind: 'command',
-      label: 'Hilfe: Tastenkürzel-Übersicht anzeigen',
+      label: isEn ? 'Help: Show Keyboard Shortcuts' : 'Hilfe: Tastenkürzel-Übersicht anzeigen',
       shortcut: 'F1',
       run: ctx.onShowShortcuts,
     },

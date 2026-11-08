@@ -5,6 +5,9 @@
 # Frontend Abhängigkeiten & Build-Bundle
 /frontend/node_modules/
 /frontend/dist/
+/frontend/e2e-report.json
+/frontend/test-results/
+/frontend/playwright-report/
 npm-debug.log*
 
 # Lokale Umgebungs- & temporäre Dateien

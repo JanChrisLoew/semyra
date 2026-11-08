@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { setLanguage } from '../i18n';
 import { buildPaletteCommandItems, buildPaletteFileItems } from '../palette-items';
 
 describe('palette-items', () => {
@@ -100,6 +101,18 @@ describe('palette-items', () => {
     const eolCmd = cmds.find((c) => c.id === 'cmd:toggle-eol')!;
     expect(eolCmd.label).toContain('CRLF (Windows)');
     expect(eolCmd.badge).toBe('LF');
+
+    const syncScrollCmd = cmds.find((c) => c.id === 'cmd:toggle-sync-scroll');
+    expect(syncScrollCmd?.shortcut).toBe('Alt+Umschalt+Y');
+
+    const autoSaveCmd = cmds.find((c) => c.id === 'cmd:toggle-autosave');
+    expect(autoSaveCmd?.shortcut).toBe('Alt+Umschalt+A');
+
+    const themeCmd = cmds.find((c) => c.id === 'cmd:theme');
+    expect(themeCmd?.shortcut).toBe('Alt+Umschalt+T');
+
+    const exportHtmlCmd = cmds.find((c) => c.id === 'cmd:export-html');
+    expect(exportHtmlCmd?.shortcut).toBe('Strg+Umschalt+H');
   });
 
   it('provides tab navigation, markdown copy, and AI context commands when optional callbacks are supplied', () => {
@@ -166,6 +179,7 @@ describe('palette-items', () => {
     const copyAiCmd = cmds.find((c) => c.id === 'cmd:copy-ai-context');
     expect(copyAiCmd).toBeDefined();
     expect(copyAiCmd?.label).toContain('KI-Kontext');
+    expect(copyAiCmd?.shortcut).toBe('Strg+Umschalt+A');
     copyAiCmd?.run();
     expect(onCopyAi).toHaveBeenCalledTimes(1);
 
@@ -213,5 +227,55 @@ describe('palette-items', () => {
     const statsCmd = cmds.find((c) => c.id === 'cmd:show-doc-stats');
     expect(statsCmd).toBeDefined();
     expect(statsCmd?.label).toContain('Detaillierte Statistiken');
+  });
+
+  it('localizes command labels, badges, and shortcuts in English', () => {
+    setLanguage('en', false);
+    const noop = () => {};
+    const cmds = buildPaletteCommandItems({
+      onNewTab: noop,
+      onOpenFileDialog: noop,
+      onOpenFolderDialog: noop,
+      onSave: noop,
+      onSaveAs: noop,
+      onCopyRichText: noop,
+      onExportHtml: noop,
+      onExportPdf: noop,
+      onPrint: noop,
+      onAlignTable: noop,
+      onSetViewMode: noop,
+      wordWrapActive: true,
+      onToggleWordWrap: noop,
+      spellcheckActive: false,
+      onToggleSpellcheck: noop,
+      syncScrollActive: true,
+      onToggleSyncScroll: noop,
+      autoSaveActive: false,
+      onToggleAutoSave: noop,
+      currentLineEnding: 'CRLF',
+      onToggleLineEnding: noop,
+      onZoomDelta: noop,
+      onZoomReset: noop,
+      onOpenSearchPanel: noop,
+      onOpenOutlinePanel: noop,
+      onToggleZen: noop,
+      onToggleTheme: noop,
+      onRevealInExplorer: noop,
+      onShowShortcuts: noop,
+    });
+
+    const syncScrollCmd = cmds.find((c) => c.id === 'cmd:toggle-sync-scroll')!;
+    expect(syncScrollCmd.shortcut).toBe('Alt+Shift+Y');
+    expect(syncScrollCmd.badge).toBe('Active');
+
+    const autoSaveCmd = cmds.find((c) => c.id === 'cmd:toggle-autosave')!;
+    expect(autoSaveCmd.shortcut).toBe('Alt+Shift+A');
+    expect(autoSaveCmd.badge).toBe('Off');
+
+    const saveCmd = cmds.find((c) => c.id === 'cmd:save')!;
+    expect(saveCmd.shortcut).toBe('Ctrl+S');
+    expect(saveCmd.label).toBe('File: Save');
+
+    setLanguage('de', false);
   });
 });

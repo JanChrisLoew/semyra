@@ -18,6 +18,10 @@ fn default_zoom_percent() -> u16 {
     100
 }
 
+fn default_language() -> String {
+    "de".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UiSessionPrefs {
@@ -37,6 +41,8 @@ pub struct UiSessionPrefs {
     pub spellcheck: bool,
     #[serde(default = "default_true")]
     pub format_bar_visible: bool,
+    #[serde(default = "default_language")]
+    pub language: String,
     #[serde(default)]
     pub recent_files: Vec<String>,
     #[serde(default)]
@@ -58,6 +64,7 @@ impl Default for UiSessionPrefs {
             word_wrap: true,
             spellcheck: false,
             format_bar_visible: true,
+            language: default_language(),
             recent_files: Vec::new(),
             recent_folders: Vec::new(),
             session_files: Vec::new(),

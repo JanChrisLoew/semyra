@@ -1,4 +1,5 @@
 import { backend, FilePayload, FileTreeNode, WorkspaceFileEntry } from './api';
+import { t } from './i18n';
 import {
   baseNameOfPath,
   getFileExtension,
@@ -132,7 +133,7 @@ export class SidebarExplorerController {
     if (children.length === 0) {
       const p = document.createElement('p');
       p.className = 'muted-hint';
-      p.textContent = 'Keine Markdown-Dateien in diesem Ordner.';
+      p.textContent = t('sidebar.emptyFolder');
       this.deps.fileTreeEl.appendChild(p);
       return;
     }
@@ -174,12 +175,12 @@ export class SidebarExplorerController {
     wrap.className = 'empty-sidebar-state';
 
     const p = document.createElement('p');
-    p.textContent = 'Öffne einen Ordner oder ziehe Dateien per Drag & Drop in das Fenster.';
+    p.textContent = t('sidebar.noFolderSub');
 
     const openBtn = document.createElement('button');
     openBtn.type = 'button';
     openBtn.className = 'secondary-action-btn';
-    openBtn.textContent = 'Ordner auswählen…';
+    openBtn.textContent = t('sidebar.openFolderBtn');
     openBtn.addEventListener('click', () => {
       void this.deps.onTriggerOpenFolderDialog();
     });
@@ -191,7 +192,7 @@ export class SidebarExplorerController {
       sec.className = 'recent-section';
       const h = document.createElement('h3');
       h.className = 'recent-heading';
-      h.textContent = 'Zuletzt geöffnete Ordner';
+      h.textContent = t('sidebar.recentFolders');
       sec.appendChild(h);
 
       for (const folderPath of recentFolders.slice(0, 5)) {
@@ -219,8 +220,11 @@ export class SidebarExplorerController {
         const removeBtn = document.createElement('button');
         removeBtn.type = 'button';
         removeBtn.className = 'recent-remove-btn';
-        removeBtn.title = 'Aus Verlauf entfernen';
-        removeBtn.setAttribute('aria-label', `Ordner ${baseNameOfPath(folderPath)} aus Verlauf entfernen`);
+        removeBtn.title = t('sidebar.removeRecent');
+        removeBtn.setAttribute(
+          'aria-label',
+          t('sidebar.removeFolderFromRecentTitle', { folder: baseNameOfPath(folderPath) }),
+        );
         removeBtn.textContent = '×';
         removeBtn.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -238,7 +242,7 @@ export class SidebarExplorerController {
       sec.className = 'recent-section';
       const h = document.createElement('h3');
       h.className = 'recent-heading';
-      h.textContent = 'Zuletzt geöffnete Dateien';
+      h.textContent = t('sidebar.recentFiles');
       sec.appendChild(h);
 
       for (const filePath of recentFiles.slice(0, 6)) {
@@ -266,8 +270,11 @@ export class SidebarExplorerController {
         const removeBtn = document.createElement('button');
         removeBtn.type = 'button';
         removeBtn.className = 'recent-remove-btn';
-        removeBtn.title = 'Aus Verlauf entfernen';
-        removeBtn.setAttribute('aria-label', `Datei ${baseNameOfPath(filePath)} aus Verlauf entfernen`);
+        removeBtn.title = t('sidebar.removeRecent');
+        removeBtn.setAttribute(
+          'aria-label',
+          t('sidebar.removeFileFromRecentTitle', { file: baseNameOfPath(filePath) }),
+        );
         removeBtn.textContent = '×';
         removeBtn.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -554,20 +561,20 @@ export class SidebarExplorerController {
     errorEl.classList.remove('is-visible');
 
     if (mode === 'new-file') {
-      titleEl.textContent = 'Neue Markdown-Datei erstellen';
-      labelEl.textContent = 'Dateiname';
-      inputEl.placeholder = 'z. B. Notizen.md';
-      submitBtn.textContent = 'Erstellen';
+      titleEl.textContent = t('newFileDialog.title');
+      labelEl.textContent = t('newFileDialog.label');
+      inputEl.placeholder = t('newFileDialog.placeholder');
+      submitBtn.textContent = t('newFileDialog.create');
     } else if (mode === 'new-folder') {
-      titleEl.textContent = 'Neuen Unterordner erstellen';
-      labelEl.textContent = 'Ordnername';
-      inputEl.placeholder = 'z. B. Kapitel-1';
-      submitBtn.textContent = 'Erstellen';
+      titleEl.textContent = t('newFolderDialog.title');
+      labelEl.textContent = t('newFolderDialog.label');
+      inputEl.placeholder = 'Chapter-1';
+      submitBtn.textContent = t('newFolderDialog.create');
     } else {
-      titleEl.textContent = 'Element umbenennen';
-      labelEl.textContent = 'Neuer Name';
+      titleEl.textContent = t('renameDialog.title');
+      labelEl.textContent = t('renameDialog.label');
       inputEl.placeholder = '';
-      submitBtn.textContent = 'Umbenennen';
+      submitBtn.textContent = t('renameDialog.submit');
     }
 
     inputEl.value = initialValue;
@@ -587,7 +594,7 @@ export class SidebarExplorerController {
   private async confirmMoveToRecycleBin(target: ContextMenuTarget): Promise<void> {
     const dialog = document.getElementById('delete-dialog') as HTMLDialogElement;
     const desc = document.getElementById('delete-dialog-desc')!;
-    desc.textContent = `Möchtest du „${target.name}“ wirklich in den Windows-Papierkorb verschieben?`;
+    desc.textContent = t('trashDialog.confirmItem', { name: target.name });
 
     const confirmed = await new Promise<boolean>((resolve) => {
       const onClose = () => {

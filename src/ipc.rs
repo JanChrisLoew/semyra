@@ -94,6 +94,12 @@ struct SaveDraftsReq {
     entries: Vec<DraftEntry>,
 }
 
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct DialogLangReq {
+    lang: Option<String>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SaveDialogReq {
@@ -101,6 +107,7 @@ struct SaveDialogReq {
     default_dir: Option<String>,
     content: String,
     line_ending: Option<String>,
+    lang: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -111,6 +118,7 @@ struct ExportHtmlReq {
     rendered_html: Option<String>,
     base_dir: Option<String>,
     default_dir: Option<String>,
+    lang: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -118,6 +126,7 @@ struct ExportHtmlReq {
 struct PickPdfTargetReq {
     title: String,
     default_dir: Option<String>,
+    lang: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -132,6 +141,7 @@ struct WindowStateReq {
     title: Option<String>,
     has_unsaved_changes: Option<bool>,
     theme: Option<String>,
+    fullscreen: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -571,6 +581,9 @@ fn handle_api_route(
                 };
                 let _ = state.proxy.send_event(UserEvent::SetWindowTheme(theme));
             }
+            if let Some(fullscreen) = req.fullscreen {
+                let _ = state.proxy.send_event(UserEvent::SetFullscreen(fullscreen));
+            }
             responder.respond(ok_json(&serde_json::json!({ "ok": true })));
         }
 
@@ -597,7 +610,11 @@ fn handle_api_route(
         }
 
         "dialog/open-files" => {
+            let req_lang = serde_json::from_slice::<DialogLangReq>(&body)
+                .ok()
+                .and_then(|r| r.lang);
             std::thread::spawn(move || {
+                let is_en = req_lang.as_deref().unwrap_or(&state.get_language()) == "en";
                 let start_dir = state
                     .inner
                     .lock()
@@ -605,20 +622,41 @@ fn handle_api_route(
                     .and_then(|g| g.workspace_folder.clone())
                     .or_else(dirs::document_dir);
 
+                let title = if is_en {
+                    "Open Markdown or Text File"
+                } else {
+                    "Dokument oder Textdatei öffnen"
+                };
+                let supported_filter = if is_en {
+                    "Supported Text Files"
+                } else {
+                    "Unterstützte Textdateien"
+                };
+                let md_filter = if is_en {
+                    "Markdown Files (*.md)"
+                } else {
+                    "Markdown-Dateien (*.md)"
+                };
+                let all_filter = if is_en {
+                    "All Files (*.*)"
+                } else {
+                    "Alle Dateien (*.*)"
+                };
+
                 let mut dlg = rfd::FileDialog::new()
-                    .set_title("Dokument oder Textdatei öffnen")
+                    .set_title(title)
                     .add_filter(
-                        "Unterstützte Textdateien",
+                        supported_filter,
                         &[
                             "md", "markdown", "mdown", "mkd", "mdx", "txt", "json", "yaml",
                             "yml", "toml", "ini", "env", "csv", "tsv", "log",
                         ],
                     )
                     .add_filter(
-                        "Markdown-Dateien (*.md)",
+                        md_filter,
                         &["md", "markdown", "mdown", "mkd", "mdx"],
                     )
-                    .add_filter("Alle Dateien (*.*)", &["*"]);
+                    .add_filter(all_filter, &["*"]);
 
                 if let Some(dir) = start_dir {
                     dlg = dlg.set_directory(dir);
@@ -637,7 +675,11 @@ fn handle_api_route(
         }
 
         "dialog/open-folder" => {
+            let req_lang = serde_json::from_slice::<DialogLangReq>(&body)
+                .ok()
+                .and_then(|r| r.lang);
             std::thread::spawn(move || {
+                let is_en = req_lang.as_deref().unwrap_or(&state.get_language()) == "en";
                 let start_dir = state
                     .inner
                     .lock()
@@ -645,7 +687,12 @@ fn handle_api_route(
                     .and_then(|g| g.workspace_folder.clone())
                     .or_else(dirs::document_dir);
 
-                let mut dlg = rfd::FileDialog::new().set_title("Arbeitsordner öffnen");
+                let title = if is_en {
+                    "Open Workspace Folder"
+                } else {
+                    "Arbeitsordner öffnen"
+                };
+                let mut dlg = rfd::FileDialog::new().set_title(title);
                 if let Some(dir) = start_dir {
                     dlg = dlg.set_directory(dir);
                 }
@@ -670,6 +717,7 @@ fn handle_api_route(
                 return;
             };
             std::thread::spawn(move || {
+                let is_en = req.lang.as_deref().unwrap_or(&state.get_language()) == "en";
                 let start_dir = req
                     .default_dir
                     .as_ref()
@@ -683,15 +731,32 @@ fn handle_api_route(
                     })
                     .or_else(dirs::document_dir);
 
+                let default_fallback = if is_en { "Untitled.md" } else { "Unbenannt.md" };
                 let file_name = req
                     .default_name
-                    .unwrap_or_else(|| "Unbenannt.md".to_string());
+                    .unwrap_or_else(|| default_fallback.to_string());
+
+                let title = if is_en {
+                    "Save Markdown File As"
+                } else {
+                    "Markdown-Datei speichern unter"
+                };
+                let md_filter = if is_en {
+                    "Markdown Files (*.md)"
+                } else {
+                    "Markdown-Datei (*.md)"
+                };
+                let txt_filter = if is_en {
+                    "Text Files (*.txt)"
+                } else {
+                    "Textdatei (*.txt)"
+                };
 
                 let mut dlg = rfd::FileDialog::new()
-                    .set_title("Markdown-Datei speichern unter")
+                    .set_title(title)
                     .set_file_name(&file_name)
-                    .add_filter("Markdown-Datei (*.md)", &["md", "markdown"])
-                    .add_filter("Textdatei (*.txt)", &["txt"]);
+                    .add_filter(md_filter, &["md", "markdown"])
+                    .add_filter(txt_filter, &["txt"]);
 
                 if let Some(dir) = start_dir {
                     dlg = dlg.set_directory(dir);
@@ -712,7 +777,7 @@ fn handle_api_route(
                             let name = norm
                                 .file_name()
                                 .and_then(|n| n.to_str())
-                                .unwrap_or("Unbenannt.md")
+                                .unwrap_or(default_fallback)
                                 .to_string();
                             let parent_dir = norm
                                 .parent()
@@ -740,10 +805,12 @@ fn handle_api_route(
                 return;
             };
             std::thread::spawn(move || {
+                let is_en = req.lang.as_deref().unwrap_or(&state.get_language()) == "en";
+                let default_stem = if is_en { "Document" } else { "Dokument" };
                 let stem = Path::new(&req.title)
                     .file_stem()
                     .and_then(|s| s.to_str())
-                    .unwrap_or("Dokument");
+                    .unwrap_or(default_stem);
                 let html_name = format!("{stem}.html");
                 let start_dir = req
                     .default_dir
@@ -758,10 +825,13 @@ fn handle_api_route(
                     })
                     .or_else(dirs::document_dir);
 
+                let title = if is_en { "Export as HTML" } else { "Als HTML exportieren" };
+                let filter = if is_en { "HTML Document (*.html)" } else { "HTML-Dokument (*.html)" };
+
                 let mut dlg = rfd::FileDialog::new()
-                    .set_title("Als HTML exportieren")
+                    .set_title(title)
                     .set_file_name(&html_name)
-                    .add_filter("HTML-Dokument (*.html)", &["html"]);
+                    .add_filter(filter, &["html"]);
 
                 if let Some(dir) = start_dir {
                     dlg = dlg.set_directory(dir);
@@ -804,10 +874,12 @@ fn handle_api_route(
                 return;
             };
             std::thread::spawn(move || {
+                let is_en = req.lang.as_deref().unwrap_or(&state.get_language()) == "en";
+                let default_stem = if is_en { "Document" } else { "Dokument" };
                 let stem = Path::new(&req.title)
                     .file_stem()
                     .and_then(|s| s.to_str())
-                    .unwrap_or("Dokument");
+                    .unwrap_or(default_stem);
                 let pdf_name = format!("{stem}.pdf");
                 let start_dir = req
                     .default_dir
@@ -822,10 +894,13 @@ fn handle_api_route(
                     })
                     .or_else(dirs::document_dir);
 
+                let title = if is_en { "Export as PDF" } else { "Als PDF exportieren" };
+                let filter = if is_en { "PDF Document (*.pdf)" } else { "PDF-Dokument (*.pdf)" };
+
                 let mut dlg = rfd::FileDialog::new()
-                    .set_title("Als PDF exportieren")
+                    .set_title(title)
                     .set_file_name(&pdf_name)
-                    .add_filter("PDF-Dokument (*.pdf)", &["pdf"]);
+                    .add_filter(filter, &["pdf"]);
 
                 if let Some(dir) = start_dir {
                     dlg = dlg.set_directory(dir);

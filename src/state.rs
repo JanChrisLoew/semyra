@@ -13,6 +13,7 @@ use tao::event_loop::EventLoopProxy;
 pub enum UserEvent {
     SetWindowTitle(String),
     SetWindowTheme(Option<tao::window::Theme>),
+    SetFullscreen(bool),
     ForceCloseWindow,
     FsChanged { paths: Vec<String> },
     FrontendEvent { name: String, payload_json: String },
@@ -227,5 +228,13 @@ impl AppState {
             .allowed_roots
             .iter()
             .any(|root| norm.starts_with(root))
+    }
+
+    pub fn get_language(&self) -> String {
+        self.inner
+            .lock()
+            .ok()
+            .map(|g| g.ui_prefs.language.clone())
+            .unwrap_or_else(|| "de".to_string())
     }
 }

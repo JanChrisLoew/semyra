@@ -1,0 +1,1115 @@
+/**
+ * Lightweight, zero-dependency internationalization (i18n) module for MarkLive.
+ * Supports reactive in-place language switching between German ('de') and English ('en').
+ */
+
+export type Language = 'de' | 'en';
+
+export interface TranslationParams {
+  [key: string]: string | number;
+}
+
+const de: Record<string, string> = {
+  // Top Primary Bar & Navigation
+  'nav.files': 'Dateien',
+  'nav.filesAria': 'Seitenleiste: Dateien und Ordner anzeigen',
+  'nav.search': 'Suche',
+  'nav.searchAria': 'Seitenleiste: Projektweite Suche anzeigen',
+  'nav.outline': 'Gliederung',
+  'nav.outlineAria': 'Seitenleiste: Dokument-Gliederung anzeigen',
+  'nav.toggleSidebarTitle': 'Seitenleiste ein-/ausblenden (Strg+J)',
+  'nav.toggleSidebarAria': 'Seitenleiste ein-/ausblenden',
+  'nav.viewModeGroupAria': 'Ansichtsmodus',
+  'sidebar.asideAria': 'Projekt- und Dokumentnavigation',
+  'sidebar.tabsAria': 'Seitenleisten-Ansichten',
+  'editor.paneAria': 'Markdown-Editor',
+  'preview.paneAria': 'Live-Markdown-Vorschau',
+  'treeCtx.groupAria': 'Datei- und Ordneraktionen',
+  'tabCtx.groupAria': 'Tab-Aktionen',
+  'tableCtx.groupAria': 'Tabellen-Aktionen',
+  'share.groupAria': 'Teilen- und Exportmenü',
+  'view.groupAria': 'Ansichts- und Editor-Optionen',
+  'settings.themeAria': 'Farbschema auswählen',
+  'settings.eolAria': 'Standard-Zeilenende auswählen',
+  'nav.openFile': 'Datei öffnen…',
+  'nav.openFileTitle': 'Markdown- oder Textdatei öffnen (Strg+O)',
+  'nav.openFolder': 'Ordner öffnen…',
+  'nav.openFolderTitle': 'Arbeitsordner öffnen (Strg+Umschalt+O)',
+  'nav.newTab': 'Neuer Tab',
+  'nav.newTabTitle': 'Neues leeres Dokument anlegen (Strg+N)',
+  'nav.save': 'Speichern',
+  'nav.saveTitle': 'Aktives Dokument speichern (Strg+S)',
+  'nav.quickOpen': 'Schnellauswahl & Befehlspalette',
+  'nav.quickOpenTitle': 'Schnellauswahl & Befehlspalette (Strg+E / Strg+Umschalt+P)',
+  'nav.view': 'Ansicht',
+  'nav.viewTitle': 'Ansichts- und Editor-Optionen',
+  'nav.share': 'Teilen',
+  'nav.shareTitle': 'Teilen, Kopieren und Exportieren',
+  'nav.settings': 'Einstellungen',
+  'nav.settingsTitle': 'Einstellungen (Strg+,)',
+  'nav.viewModeEditor': 'Editor',
+  'nav.viewModeEditorTitle': 'Nur Editor anzeigen (Alt+1)',
+  'nav.viewModeSplit': 'Split',
+  'nav.viewModeSplitTitle': 'Geteilte Ansicht (Alt+2)',
+  'nav.viewModePreview': 'Lesen',
+  'nav.viewModePreviewTitle': 'Nur Vorschau anzeigen (Alt+3)',
+  'nav.exitZen': 'Zen beenden',
+  'nav.exitZenTitle': 'Zen-Fokusmodus beenden (Esc / F11)',
+  'nav.rotateSplitTitle': 'Ausrichtung umschalten (horizontal/vertikal)',
+  'nav.sidebarResizerTitle': 'Breite der Seitenleiste anpassen · Doppelklick für Standardbreite',
+  'nav.splitResizerTitle': 'Größe zwischen Editor und Vorschau anpassen · Doppelklick für 50/50',
+
+  // View Popover
+  'view.editorLayout': 'Editor & Layout',
+  'view.wordWrap': 'Automatischer Zeilenumbruch',
+  'view.syncScroll': 'Synchronisiertes Scrollen',
+  'view.autoSave': 'Automatisches Speichern',
+  'view.formatBar': 'Formatierungsleiste (Aa)',
+  'view.centered': 'Zentrierte Textspalte',
+  'view.appearance': 'Darstellung',
+  'view.rotateSplit': 'Geteilte Ansicht drehen',
+  'view.zen': 'Zen-Fokusmodus',
+  'view.theme': 'Design wechseln (Hell/Dunkel)',
+  'view.syncScrollTitle': 'Synchronisiertes Scrollen (Alt+Umschalt+Y)',
+  'view.autoSaveTitle': 'Automatisches Speichern (Alt+Umschalt+A)',
+  'view.themeTitle': 'Design wechseln: Hell / Dunkel (Alt+Umschalt+T)',
+
+  // Share Popover
+  'share.clipboard': 'Zwischenablage',
+  'share.copyMarkdown': 'Markdown-Quelltext',
+  'share.copyMarkdownTitle': 'Markdown-Quelltext in die Zwischenablage kopieren (Strg+Umschalt+C)',
+  'share.copyAi': 'Für KI kopieren (mit Metadaten)',
+  'share.copyAiTitle': 'Markdown als KI-Prompt-Kontext mit Dateinamen-Header kopieren (Strg+Umschalt+A)',
+  'share.copyRich': 'Formatierter Text (Word / Outlook)',
+  'share.copyRichTitle': 'Als formatierten Text kopieren – ideal für Word, Teams & Outlook (Strg+Umschalt+K)',
+  'share.exportPrint': 'Export & Drucken',
+  'share.exportHtml': 'Eigenständige 1-Datei-HTML (.html)',
+  'share.exportHtmlTitle': 'Als eigenständige 1-Datei-HTML exportieren (inkl. Bilder, Mathe & Diagramme) (Strg+Umschalt+H)',
+  'share.exportPdf': 'PDF-Dokument (.pdf)',
+  'share.exportPdfTitle': 'Direkt als PDF-Dokument exportieren (Strg+Umschalt+D)',
+  'share.print': 'Drucken…',
+  'share.printTitle': 'Drucken… (Strg+P)',
+  'share.saveAs': 'Speichern unter…',
+  'share.saveAsTitle': 'Speichern unter… (Strg+Umschalt+S)',
+
+  // Formatting Ribbon
+  'format.bold': 'Fett (Strg+B)',
+  'format.italic': 'Kursiv (Strg+I)',
+  'format.strike': 'Durchgestrichen (Strg+Umschalt+X)',
+  'format.h1': 'Überschrift 1 (Strg+1)',
+  'format.h2': 'Überschrift 2 (Strg+2)',
+  'format.h3': 'Überschrift 3 (Strg+3)',
+  'format.list': 'Aufzählungsliste',
+  'format.listBtn': 'Liste',
+  'format.orderedList': 'Nummerierte Liste',
+  'format.task': 'Aufgabenliste / Checkliste',
+  'format.taskBtn': 'Task',
+  'format.quote': 'Zitatblock (Strg+Umschalt+Q)',
+  'format.quoteBtn': 'Zitat',
+  'format.alert': 'GitHub Hinweis-Box einfügen',
+  'format.alertBtn': 'Hinweis',
+  'format.code': 'Inline-Code (Strg+Umschalt+E)',
+  'format.codeblock': 'Code-Block einfügen',
+  'format.codeblockBtn': 'Codeblock',
+  'format.link': 'Link einfügen (Strg+K)',
+  'format.linkBtn': 'Link',
+  'format.image': 'Bild einfügen',
+  'format.imageBtn': 'Bild',
+  'format.table': 'Markdown-Tabelle einfügen',
+  'format.tableBtn': 'Tabelle',
+  'format.alignTable': 'Markdown-Tabelle ausrichten (Alt+Umschalt+F)',
+  'format.alignTableBtn': 'Ausrichten',
+  'format.math': 'LaTeX Mathe-Block einfügen (Strg+Umschalt+M)',
+  'format.mathBtn': 'Mathe',
+  'format.mermaid': 'Mermaid-Diagramm einfügen',
+  'format.mermaidBtn': 'Diagramm',
+  'format.hr': 'Trennlinie einfügen',
+  'format.hrBtn': 'Linie',
+  'format.hide': 'Formatierungsleiste ausblenden (Alt+Umschalt+R)',
+  'format.show': 'Formatierungsleiste einblenden (Alt+Umschalt+R)',
+  'format.expandBtn': 'Aa Formatieren',
+
+  // Sidebar Explorer & Panels
+  'sidebar.filesTitle': 'Dateien & Ordner',
+  'sidebar.newFolder': 'Neuer Ordner',
+  'sidebar.newFolderTitle': 'Neuen Unterordner anlegen',
+  'sidebar.newFile': 'Neue Markdown-Datei',
+  'sidebar.newFileTitle': 'Neue Markdown-Datei im Ordner anlegen',
+  'sidebar.refreshTreeTitle': 'Ordnerbaum aktualisieren',
+  'sidebar.openFolder': 'Arbeitsordner öffnen…',
+  'sidebar.close': 'Seitenleiste schließen',
+  'sidebar.searchTitle': 'Projektweite Suche',
+  'sidebar.searchPlaceholder': 'In Markdown-Dateien suchen…',
+  'sidebar.searchClear': 'Suche löschen',
+  'sidebar.searchHint': 'Suchbegriff eingeben, um alle Markdown-Dateien im Ordner zu durchsuchen.',
+  'sidebar.matchCase': 'Groß-/Kleinschreibung beachten',
+  'sidebar.outlineTitle': 'Dokument-Gliederung',
+  'sidebar.emptyOutline': 'Keine Überschriften im Dokument gefunden',
+  'sidebar.noFolder': 'Kein Ordner geöffnet',
+  'sidebar.noFolderSub': 'Öffne einen lokalen Ordner, um den Datei-Explorer und die Volltextsuche zu nutzen.',
+  'sidebar.emptyFolder': 'Keine Markdown-Dateien in diesem Ordner.',
+  'sidebar.emptyHint': 'Öffne einen Ordner oder ziehe Dateien per Drag & Drop in das Fenster.',
+  'sidebar.openFolderBtn': 'Ordner öffnen',
+  'sidebar.openFileBtn': 'Datei öffnen',
+  'sidebar.recentFolders': 'Zuletzt geöffnete Ordner',
+  'sidebar.recentFiles': 'Zuletzt geöffnete Dateien',
+  'sidebar.dragPrompt': 'Oder ziehe Dateien & Ordner per Drag & Drop hierher',
+  'sidebar.removeRecent': 'Aus Verlauf entfernen',
+  'sidebar.scrollTop': 'Nach oben',
+  'format.toolbarAria': 'Markdown-Formatierung',
+
+  // Context Menus
+  'treeCtx.newFile': 'Neue Markdown-Datei…',
+  'treeCtx.newFolder': 'Neuer Unterordner…',
+  'treeCtx.rename': 'Umbenennen…',
+  'treeCtx.reveal': 'Im Windows Explorer anzeigen',
+  'treeCtx.delete': 'In den Papierkorb verschieben',
+
+  'tabCtx.close': 'Tab schließen',
+  'tabCtx.closeOthers': 'Andere Tabs schließen',
+  'tabCtx.closeAll': 'Alle Tabs schließen',
+  'tabCtx.closeRight': 'Tabs rechts schließen',
+  'tabCtx.duplicate': 'Tab duplizieren',
+  'tabCtx.copyPath': 'Dateipfad kopieren',
+  'tabCtx.openDocs': 'Geöffnete Dokumente',
+  'tabCtx.reveal': 'Im Explorer anzeigen',
+
+  'tableCtx.title': 'Tabelle',
+  'tableCtx.rowAbove': 'Zeile oberhalb einfügen',
+  'tableCtx.rowBelow': 'Zeile unterhalb einfügen',
+  'tableCtx.colLeft': 'Spalte links einfügen',
+  'tableCtx.colRight': 'Spalte rechts einfügen',
+  'tableCtx.delRow': 'Zeile löschen',
+  'tableCtx.delCol': 'Spalte löschen',
+  'tableCtx.format': 'Tabelle formatieren & ausrichten',
+
+  // Status Bar
+  'status.untitled': 'Unbenannt.md',
+  'status.draft': 'Entwurf',
+  'status.saved': 'Gespeichert',
+  'status.saving': 'Speichern…',
+  'status.unsaved': 'Ungespeichert',
+  'status.restored': 'Entwurf wiederhergestellt',
+  'status.cursor': 'Zeile {line}, Spalte {col}',
+  'status.summary': '{words} Wörter · ~{tokens} Tokens',
+  'status.docSummaryTitle': 'Detaillierte Dokument-Statistiken anzeigen (Klicken)',
+  'status.filepathTitle': 'Klicken, um Datei im Windows Explorer anzuzeigen',
+  'status.zoomResetTitle': 'Dokument-Zoom auf 100 % zurücksetzen (Strg+0)',
+  'status.eolToggleTitle': 'Zeilenende zwischen CRLF und LF umschalten',
+  'status.encodingTitle': 'Erkannte Dateikodierung (Speicherung erfolgt als UTF-8)',
+
+  // Settings Dialog
+  'settings.title': 'Einstellungen',
+  'settings.close': 'Schließen (Esc)',
+  'settings.done': 'Fertig',
+  'settings.groupGeneral': 'Allgemein',
+  'settings.groupAppearance': 'Erscheinungsbild',
+  'settings.groupEditor': 'Editor',
+  'settings.groupLayout': 'Layout & Fenster',
+  'settings.language': 'Sprache',
+  'settings.langDe': 'Deutsch',
+  'settings.langEn': 'Englisch',
+  'settings.languageSub': 'Wähle die Anzeigesprache für die Benutzeroberfläche.',
+  'settings.languageAria': 'Sprache auswählen',
+  'settings.theme': 'Farbschema',
+  'settings.themeSub': 'Wähle zwischen hellem, dunklem oder dem Windows-Systemdesign.',
+  'settings.themeSystem': 'System',
+  'settings.themeLight': 'Hell',
+  'settings.themeDark': 'Dunkel',
+  'settings.centered': 'Zentrierte Textspalte',
+  'settings.centeredSub': 'Begrenzt die Textbreite im reinen Editor-Modus auf eine angenehme Lesebreite.',
+  'settings.formatBar': 'Formatierungsleiste (Aa)',
+  'settings.formatBarSub': 'Schnellzugriff auf Markdown-Syntax (Fett, Überschriften, Tabellen, Formeln).',
+  'settings.wordWrap': 'Automatischer Zeilenumbruch',
+  'settings.wordWrapSub': 'Lange Textzeilen am Fensterrand weich umbrechen.',
+  'settings.spellcheck': 'Rechtschreibprüfung',
+  'settings.spellcheckSub': 'Systemeigene Rechtschreibprüfung im Editor aktivieren.',
+  'settings.autoSave': 'Automatisches Speichern',
+  'settings.autoSaveSub': 'Änderungen nach kurzer Inaktivität automatisch in die Datei schreiben.',
+  'settings.syncScroll': 'Synchronisiertes Scrollen',
+  'settings.syncScrollSub': 'Editor und Vorschau beim Scrollen synchron zueinander bewegen.',
+  'settings.eol': 'Standard-Zeilenende',
+  'settings.eolSub': 'Zeilenende für neu erstellte Dokumente (CRLF = Windows, LF = Linux/macOS).',
+  'settings.rotateSplit': 'Geteilte Ansicht drehen',
+  'settings.rotateSplitSub': 'Wechselt zwischen vertikaler (nebeneinander) und horizontaler Aufteilung.',
+  'settings.rotateSplitBtn': 'Drehen',
+  'settings.resetSplit': 'Aufteilung zurücksetzen',
+  'settings.resetSplitSub': 'Setzt den Schieberegler zwischen Editor und Vorschau wieder auf genau 50:50 zurück.',
+  'settings.resetSplitBtn': '50 / 50',
+  'settings.shortcuts': 'Tastaturkürzel',
+  'settings.shortcutsSub': 'Vollständige Übersicht aller Windows-Tastenkombinationen aufrufen.',
+  'settings.shortcutsBtn': 'Übersicht öffnen',
+
+  // Palette & Dialogs
+  'palette.placeholder': 'Dateiname eingeben oder „>“ für Befehle…',
+  'palette.badgeActive': 'Aktiv',
+  'palette.badgeOpen': 'Geöffnet',
+  'palette.badgeRecent': 'Zuletzt',
+  'palette.badgeFolder': 'Ordner',
+  'palette.empty': 'Keine Treffer gefunden',
+  'palette.navigateHint': 'Navigieren',
+  'palette.selectHint': 'Auswählen',
+  'palette.closeHint': 'Schließen',
+  'palette.commandsHint': 'Befehle',
+
+  // Dialogs
+  'tableDialog.title': 'Markdown-Tabelle erstellen',
+  'tableDialog.columns': 'Spalten',
+  'tableDialog.rows': 'Zeilen',
+  'tableDialog.alignment': 'Ausrichtung',
+  'tableDialog.alignLeft': 'Links',
+  'tableDialog.alignCenter': 'Zentriert',
+  'tableDialog.alignRight': 'Rechts',
+  'tableDialog.insert': 'Tabelle einfügen',
+  'tableDialog.cancel': 'Abbrechen',
+
+  'trashDialog.title': 'In den Papierkorb verschieben?',
+  'trashDialog.message': 'Möchtest du diese Datei wirklich in den Windows-Papierkorb verschieben?',
+  'trashDialog.confirmItem': 'Möchtest du „{name}“ wirklich in den Windows-Papierkorb verschieben?',
+  'trashDialog.confirm': 'In Papierkorb verschieben',
+  'trashDialog.cancel': 'Abbrechen',
+
+  'statsDialog.title': 'Dokument-Statistiken',
+  'statsDialog.words': 'Wörter',
+  'statsDialog.tokens': 'Geschätzte Tokens',
+  'statsDialog.chars': 'Zeichen',
+  'statsDialog.lines': 'Zeilen',
+  'statsDialog.readingTime': 'Lesezeit',
+  'statsDialog.readingTimeVal': '~{min} Min.',
+
+  'docStats.title': 'Dokument-Statistiken',
+  'docStats.words': 'Wörter',
+  'docStats.inDoc': 'Im Dokument',
+  'docStats.wordsSelected': '{count} markiert',
+  'docStats.chars': 'Zeichen',
+  'docStats.charsNoSpace': '{count} ohne Leerzeichen',
+  'docStats.charsNoSpaceSelected': '{count} ohne Leerzeichen ({selected} markiert)',
+  'docStats.structure': 'Struktur',
+  'docStats.paragraphs': '{count} Absätze',
+  'docStats.lines': '{count} Zeilen',
+  'docStats.linesCount': '{count} Zeilen',
+  'docStats.readTime': 'Lesezeit (~200 WPM)',
+  'docStats.speakTime': 'Sprechzeit: {min} Min.',
+  'docStats.speakTimeVal': 'Sprechzeit: {time}',
+  'docStats.gradeVeryEasy': 'Sehr leicht',
+  'docStats.gradeEasy': 'Leicht',
+  'docStats.gradeModerate': 'Mittelschwer (Standard)',
+  'docStats.gradeDifficult': 'Anspruchsvoll',
+  'docStats.gradeVeryDifficult': 'Sehr anspruchsvoll (Fachtext)',
+  'docStats.minAbbr': 'Min.',
+  'docStats.lessThanOneMin': '< 1 Min.',
+  'docStats.zeroMin': '0 Min.',
+  'docStats.readability': 'Lesbarkeit (Flesch Reading Ease)',
+  'docStats.aiTokens': 'KI-Token-Schätzung (Prompts)',
+  'docStats.aiTokensDesc': 'Geschätzt für GPT-4, Claude 3.5, Gemini 1.5',
+
+  'shortcutsDialog.title': 'Tastenkombinationen in MarkLive',
+  'shortcutsDialog.close': 'Schließen',
+  'shortcuts.quickOpen': 'Schnellauswahl (Dateien, Tabs & Verlauf)',
+  'shortcuts.commandPalette': 'Befehlspalette öffnen',
+  'shortcuts.newOpenFile': 'Neuer Tab / Datei öffnen',
+  'shortcuts.openFolder': 'Arbeitsordner öffnen',
+  'shortcuts.saveSaveAs': 'Speichern / Speichern unter…',
+  'shortcuts.closeTab': 'Aktuellen Tab schließen',
+  'shortcuts.restoreTab': 'Zuletzt geschlossenen Tab wiederherstellen',
+  'shortcuts.cycleTabs': 'Nächster / vorheriger Tab',
+  'shortcuts.toggleSidebar': 'Seitenleiste ein-/ausblenden',
+  'shortcuts.formatBasic': 'Fett / Kursiv / Link',
+  'shortcuts.formatAdvanced': 'Inline-Code / Durchgestrichen / Mathe',
+  'shortcuts.findReplace': 'Suchen & Ersetzen im Editor',
+  'shortcuts.searchWorkspace': 'Volltextsuche im Arbeitsordner',
+  'shortcuts.tableNav': 'Nächste / vorherige Tabellenzelle (neue Zeile am Ende)',
+  'shortcuts.formatTable': 'Markdown-Tabelle sauber ausrichten',
+  'shortcuts.toggleCheckbox': 'Aufgaben-Checkbox an-/abhaken (- [ ] / - [x])',
+  'shortcuts.smartPaste': 'Bild einfügen, Auswahl verlinken oder Tabelle konvertieren',
+  'shortcuts.smartPasteKeys': '(Bild / URL / Excel)',
+  'shortcuts.copyMarkdown': 'Markdown-Quelltext in die Zwischenablage kopieren',
+  'shortcuts.copyAi': 'Markdown als KI-Prompt-Kontext kopieren',
+  'shortcuts.copyRich': 'Als formatierten Text kopieren (Word / Teams / Outlook)',
+  'shortcuts.exportHtml': 'Als eigenständige HTML-Datei exportieren',
+  'shortcuts.exportPdf': 'Direkt als PDF-Datei exportieren',
+  'shortcuts.zoom': 'Dokument-Zoom vergrößern / verkleinern / 100 %',
+  'shortcuts.settings': 'Einstellungen öffnen',
+  'shortcuts.wordWrap': 'Zeilenumbruch im Editor umschalten',
+  'shortcuts.syncScroll': 'Synchronisiertes Scrollen an-/ausschalten',
+  'shortcuts.autoSave': 'Automatisches Speichern an-/ausschalten',
+  'shortcuts.viewModes': 'Editor / Split-Vorschau / Lesen',
+  'shortcuts.rotateSplit': 'Geteilte Ansicht drehen (Horizontal / Vertikal)',
+  'shortcuts.centeredEditor': 'Zentrierte Textspalte ein-/ausschalten',
+  'shortcuts.formatBar': 'Formatierungsleiste im Editor ein-/ausblenden',
+  'shortcuts.toggleTheme': 'Design wechseln (Hell / Dunkel)',
+  'shortcuts.zenMode': 'Zen-Fokusmodus umschalten / beenden',
+
+  'newFileDialog.title': 'Neue Markdown-Datei erstellen',
+  'newFileDialog.label': 'Dateiname',
+  'newFileDialog.placeholder': 'z. B. Notizen.md',
+  'newFileDialog.cancel': 'Abbrechen',
+  'newFileDialog.create': 'Erstellen',
+
+  'newFolderDialog.title': 'Neuen Unterordner erstellen',
+  'newFolderDialog.label': 'Ordnername',
+  'newFolderDialog.create': 'Erstellen',
+
+  'renameDialog.title': 'Element umbenennen',
+  'renameDialog.label': 'Neuer Name',
+  'renameDialog.submit': 'Umbenennen',
+
+  'search.openFolderPrompt': 'Bitte öffne zuerst einen Arbeitsordner (Strg+Umschalt+O).',
+  'search.noMatches': 'Keine Treffer gefunden.',
+  'search.summary': '{count} Treffer in {files} {fileLabel}',
+  'search.file': 'Datei',
+  'search.files': 'Dateien',
+
+  'unsavedDialog.title': 'Ungespeicherte Änderungen',
+  'unsavedDialog.desc': 'Möchtest du deine Änderungen vor dem Schließen speichern?',
+  'unsavedDialog.discard': 'Nicht speichern',
+  'unsavedDialog.cancel': 'Abbrechen',
+  'unsavedDialog.save': 'Speichern',
+
+  'externalBanner.text': 'Die Datei wurde außerhalb von MarkLive geändert.',
+  'externalBanner.reload': 'Neu laden',
+  'externalBanner.dismiss': 'Ignorieren',
+
+  'about.title': 'Über MarkLive',
+  'about.desc': 'Nativer High-Performance Markdown-Editor für Windows 11, kompiliert in Rust mit Microsoft Edge WebView2 ohne Node.js- oder Electron-Laufzeitumgebung.',
+  'about.shortcutsBtn': 'Tastenkürzel & Hilfe anzeigen (F1)',
+
+  // Drag & Drop
+  'drop.title': 'Dateien, Bilder oder Ordner hier ablegen',
+  'drop.sub': 'Markdown-Dateien öffnen als Tab · Bilder werden direkt eingefügt',
+
+  // Status Toasts
+  'toast.saved': 'Gespeichert',
+  'toast.copyMarkdown': 'Markdown-Quelltext in die Zwischenablage kopiert',
+  'toast.copyAi': 'KI-Prompt-Kontext in die Zwischenablage kopiert',
+  'toast.copyRich': 'Formatierter Rich-Text in die Zwischenablage kopiert',
+  'toast.exportHtml': 'HTML-Datei erfolgreich exportiert',
+  'toast.exportPdf': 'PDF-Dokument erfolgreich exportiert',
+  'toast.wordWrapOn': 'Automatischer Zeilenumbruch aktiviert',
+  'toast.wordWrapOff': 'Automatischer Zeilenumbruch deaktiviert',
+  'toast.spellcheckOn': 'Rechtschreibprüfung aktiviert',
+  'toast.spellcheckOff': 'Rechtschreibprüfung deaktiviert',
+  'toast.autoSaveOn': 'Automatisches Speichern aktiviert',
+  'toast.autoSaveOff': 'Automatisches Speichern deaktiviert',
+  'toast.syncScrollOn': 'Synchronisiertes Scrollen aktiviert',
+  'toast.syncScrollOff': 'Synchronisiertes Scrollen deaktiviert',
+  'toast.formatBarOn': 'Formatierungsleiste eingeblendet',
+  'toast.formatBarOff': 'Formatierungsleiste ausgeblendet',
+  'toast.centeredOn': 'Zentrierte Textspalte aktiviert',
+  'toast.centeredOff': 'Zentrierte Textspalte deaktiviert',
+  'toast.tableFormatted': 'Markdown-Tabelle formatiert',
+  'toast.trashSuccess': 'Erfolgreich in den Papierkorb verschoben',
+  'toast.fileCreated': 'Datei erstellt',
+  'toast.folderCreated': 'Ordner erstellt',
+  'toast.renamed': 'Erfolgreich umbenannt',
+  'toast.recentRemoved': 'Aus Verlauf entfernt',
+  'toast.langChanged': 'Sprache geändert: Deutsch',
+  // Additional Toasts & UI Feedback
+  'toast.tableRowAbove': 'Zeile oberhalb eingefügt',
+  'toast.tableRowBelow': 'Zeile unterhalb eingefügt',
+  'toast.tableRowDeleted': 'Zeile gelöscht',
+  'toast.tableColLeft': 'Spalte links eingefügt',
+  'toast.tableColRight': 'Spalte rechts eingefügt',
+  'toast.tableColDeleted': 'Spalte gelöscht',
+  'toast.tablesFormatted': '{count} Markdown-Tabellen ausgerichtet',
+  'toast.noTableFound': 'Keine Markdown-Tabelle im Dokument gefunden',
+  'toast.copyFailed': 'Kopieren in die Zwischenablage fehlgeschlagen',
+  'toast.copyPath': 'Dateipfad in Zwischenablage kopiert',
+  'toast.copyCode': 'Codeblock in Zwischenablage kopiert',
+  'toast.copyDiagram': 'Mermaid-SVG in Zwischenablage kopiert',
+  'toast.copySource': 'Quelltext in Zwischenablage kopiert',
+  'toast.copyAiWithName': 'Als KI-Kontext ({name}) kopiert',
+  'toast.recentFolderRemoved': 'Ordner aus Verlauf entfernt',
+  'toast.recentFileRemoved': 'Datei aus Verlauf entfernt',
+  'toast.saveClipboardImgFailed': 'Bild aus Zwischenablage konnte nicht gespeichert werden: {err}',
+  'toast.zenOn': 'Zen-Fokusmodus aktiviert · Esc oder F11 zum Beenden',
+  'toast.zenOff': 'Zen-Fokusmodus beendet',
+  'toast.htmlExportSuccess': 'HTML-Datei erfolgreich exportiert: {name}',
+  'toast.htmlExportFailed': 'HTML-Export fehlgeschlagen',
+  'toast.pdfExportSuccess': 'PDF-Dokument erfolgreich exportiert: {name}',
+  'toast.pdfExportFailed': 'PDF-Export fehlgeschlagen',
+  'toast.sectionLinkCopied': 'Abschnitt-Link kopiert',
+  'toast.noClosedTabs': 'Keine geschlossenen Tabs zum Wiederherstellen',
+  'toast.tabReopened': 'Tab wiederhergestellt: {name}',
+  'toast.draftReopened': 'Entwurf wiederhergestellt: {name}',
+  'toast.openFileFailed': 'Datei konnte nicht geöffnet werden: {name}',
+  'toast.splitOrientationH': 'Horizontale Teilung (Editor oben)',
+  'toast.splitOrientationV': 'Vertikale Teilung (Editor links)',
+  'toast.draftsRestored': '{count} ungespeicherte Entwürfe nach Systemstart wiederhergestellt',
+  'toast.draftRestored': '1 ungespeicherter Entwurf nach Systemstart wiederhergestellt',
+
+  // Tabs, Outlines & Tables
+  'tab.closeTitle': '{name} schließen',
+  'tab.unsavedTitle': 'Ungespeicherte Änderungen',
+  'tab.untitledName': 'Unbenannt-{num}.md',
+  'outline.lineTooltip': 'Zeile {line}: {text}',
+  'outline.untitledHeading': 'Überschrift',
+  'outline.oneSection': '1 Abschnitt',
+  'outline.sectionsCount': '{count} Abschnitte',
+  'search.matchLocation': 'Zeile {line}, Spalte {col}',
+  'search.searchFailed': 'Ordnersuche fehlgeschlagen: {err}',
+  'table.columnHeader': 'Spalte {num}',
+  'table.cellContent': 'Inhalt',
+
+  // Palette & Explorer
+  'palette.noMatchingCommand': 'Kein passender Befehl gefunden.',
+  'palette.noMatchingFiles': 'Keine passenden Dateien oder Befehle gefunden. Tipp: „>“ eingeben für alle Befehle.',
+  'sidebar.removeFolderFromRecentTitle': 'Ordner {folder} aus Verlauf entfernen',
+  'sidebar.removeFileFromRecentTitle': 'Datei {file} aus Verlauf entfernen',
+  'sidebar.treeLoadFailed': 'Ordnerbaum konnte nicht geladen werden: {err}',
+  'sidebar.trashFailed': 'Löschen in Papierkorb fehlgeschlagen: {err}',
+  'sidebar.emptyOutlineTextFile': 'Keine Überschriften (Text-/Konfigurationsdatei).',
+
+  // Unsaved Prompts
+  'unsavedDialog.descWithName': 'Möchtest du die Änderungen in „{name}“ vor dem Schließen speichern?',
+  'unsavedDialog.beforeQuitDesc': 'Ungespeicherte Änderungen in {names}. Vor dem Beenden speichern?',
+
+  // Resizers
+  'resizer.horizontalAria': 'Editor {ed}% oben, Vorschau {prev}% unten',
+  'resizer.verticalAria': 'Editor {ed}% links, Vorschau {prev}% rechts',
+  'resizer.sidebarAria': '{width} Pixel',
+
+  // Preview Actions
+  'preview.copy': 'Kopieren',
+  'preview.copyAria': 'Code in Zwischenablage kopieren',
+  'preview.copied': 'Kopiert ✓',
+  'preview.copySvg': 'SVG kopieren',
+  'preview.zoom': 'Vergrößern',
+  'preview.copySvgTitle': 'Diagramm als SVG kopieren',
+  'preview.zoomTitle': 'Diagramm in Großansicht öffnen',
+};
+
+const en: Record<string, string> = {
+  // Top Primary Bar & Navigation
+  'nav.files': 'Files',
+  'nav.filesAria': 'Sidebar: Show files and folders',
+  'nav.search': 'Search',
+  'nav.searchAria': 'Sidebar: Show workspace full-text search',
+  'nav.outline': 'Outline',
+  'nav.outlineAria': 'Sidebar: Show document outline',
+  'nav.toggleSidebarTitle': 'Toggle Sidebar (Ctrl+J)',
+  'nav.toggleSidebarAria': 'Toggle Sidebar',
+  'nav.viewModeGroupAria': 'View Mode',
+  'sidebar.asideAria': 'Project and document navigation',
+  'sidebar.tabsAria': 'Sidebar views',
+  'editor.paneAria': 'Markdown Editor',
+  'preview.paneAria': 'Live Markdown Preview',
+  'treeCtx.groupAria': 'File and folder actions',
+  'tabCtx.groupAria': 'Tab actions',
+  'tableCtx.groupAria': 'Table actions',
+  'share.groupAria': 'Share and export menu',
+  'view.groupAria': 'View and editor options',
+  'settings.themeAria': 'Select color scheme',
+  'settings.eolAria': 'Select default line endings',
+  'nav.openFile': 'Open File…',
+  'nav.openFileTitle': 'Open Markdown or text file (Ctrl+O)',
+  'nav.openFolder': 'Open Folder…',
+  'nav.openFolderTitle': 'Open workspace folder (Ctrl+Shift+O)',
+  'nav.newTab': 'New Tab',
+  'nav.newTabTitle': 'Create new empty document (Ctrl+N)',
+  'nav.save': 'Save',
+  'nav.saveTitle': 'Save active document (Ctrl+S)',
+  'nav.quickOpen': 'Quick Open & Command Palette',
+  'nav.quickOpenTitle': 'Quick Open & Command Palette (Ctrl+E / Ctrl+Shift+P)',
+  'nav.view': 'View',
+  'nav.viewTitle': 'View and editor options',
+  'nav.share': 'Share',
+  'nav.shareTitle': 'Share, copy, and export',
+  'nav.settings': 'Settings',
+  'nav.settingsTitle': 'Settings (Ctrl+,)',
+  'nav.viewModeEditor': 'Editor',
+  'nav.viewModeEditorTitle': 'Show editor only (Alt+1)',
+  'nav.viewModeSplit': 'Split',
+  'nav.viewModeSplitTitle': 'Split view (Alt+2)',
+  'nav.viewModePreview': 'Preview',
+  'nav.viewModePreviewTitle': 'Show preview only (Alt+3)',
+  'nav.exitZen': 'Exit Zen',
+  'nav.exitZenTitle': 'Exit Zen focus mode (Esc / F11)',
+  'nav.rotateSplitTitle': 'Toggle split orientation (horizontal/vertical)',
+  'nav.sidebarResizerTitle': 'Resize sidebar · Double-click for default width',
+  'nav.splitResizerTitle': 'Resize editor and preview · Double-click for 50/50',
+
+  // View Popover
+  'view.editorLayout': 'Editor & Layout',
+  'view.wordWrap': 'Word Wrap',
+  'view.syncScroll': 'Synchronized Scrolling',
+  'view.autoSave': 'Auto-Save',
+  'view.formatBar': 'Formatting Bar (Aa)',
+  'view.centered': 'Centered Text Column',
+  'view.appearance': 'Appearance',
+  'view.rotateSplit': 'Rotate Split View',
+  'view.zen': 'Zen Focus Mode',
+  'view.theme': 'Toggle Theme (Light/Dark)',
+  'view.syncScrollTitle': 'Synchronized Scrolling (Alt+Shift+Y)',
+  'view.autoSaveTitle': 'Auto-Save (Alt+Shift+A)',
+  'view.themeTitle': 'Toggle Theme: Light / Dark (Alt+Shift+T)',
+
+  // Share Popover
+  'share.clipboard': 'Clipboard',
+  'share.copyMarkdown': 'Markdown Source',
+  'share.copyMarkdownTitle': 'Copy Markdown source to clipboard (Ctrl+Shift+C)',
+  'share.copyAi': 'Copy for AI (with Metadata)',
+  'share.copyAiTitle': 'Copy Markdown as AI prompt context with file header (Ctrl+Shift+A)',
+  'share.copyRich': 'Formatted Text (Word / Outlook)',
+  'share.copyRichTitle': 'Copy as formatted rich text for Word, Teams & Outlook (Ctrl+Shift+K)',
+  'share.exportPrint': 'Export & Print',
+  'share.exportHtml': 'Standalone 1-File HTML (.html)',
+  'share.exportHtmlTitle': 'Export as standalone 1-file HTML with images, math & diagrams (Ctrl+Shift+H)',
+  'share.exportPdf': 'PDF Document (.pdf)',
+  'share.exportPdfTitle': 'Directly export as PDF document (Ctrl+Shift+D)',
+  'share.print': 'Print…',
+  'share.printTitle': 'Print… (Ctrl+P)',
+  'share.saveAs': 'Save As…',
+  'share.saveAsTitle': 'Save As… (Ctrl+Shift+S)',
+
+  // Formatting Ribbon
+  'format.bold': 'Bold (Ctrl+B)',
+  'format.italic': 'Italic (Ctrl+I)',
+  'format.strike': 'Strikethrough (Ctrl+Shift+X)',
+  'format.h1': 'Heading 1 (Ctrl+1)',
+  'format.h2': 'Heading 2 (Ctrl+2)',
+  'format.h3': 'Heading 3 (Ctrl+3)',
+  'format.list': 'Bulleted List',
+  'format.listBtn': 'List',
+  'format.orderedList': 'Numbered List',
+  'format.task': 'Task List / Checklist',
+  'format.taskBtn': 'Task',
+  'format.quote': 'Blockquote (Ctrl+Shift+Q)',
+  'format.quoteBtn': 'Quote',
+  'format.alert': 'Insert GitHub Callout Alert',
+  'format.alertBtn': 'Alert',
+  'format.code': 'Inline Code (Ctrl+Shift+E)',
+  'format.codeblock': 'Insert Code Block',
+  'format.codeblockBtn': 'Codeblock',
+  'format.link': 'Insert Link (Ctrl+K)',
+  'format.linkBtn': 'Link',
+  'format.image': 'Insert Image',
+  'format.imageBtn': 'Image',
+  'format.table': 'Insert Markdown Table',
+  'format.tableBtn': 'Table',
+  'format.alignTable': 'Format & Align Markdown Table (Alt+Shift+F)',
+  'format.alignTableBtn': 'Align',
+  'format.math': 'Insert LaTeX Math Block (Ctrl+Shift+M)',
+  'format.mathBtn': 'Math',
+  'format.mermaid': 'Insert Mermaid Diagram',
+  'format.mermaidBtn': 'Diagram',
+  'format.hr': 'Insert Horizontal Rule',
+  'format.hrBtn': 'Rule',
+  'format.hide': 'Hide formatting bar (Alt+Shift+R)',
+  'format.show': 'Show formatting bar (Alt+Shift+R)',
+  'format.expandBtn': 'Aa Format',
+
+  // Sidebar Explorer & Panels
+  'sidebar.filesTitle': 'Files & Folders',
+  'sidebar.newFolder': 'New Folder',
+  'sidebar.newFolderTitle': 'Create new subfolder',
+  'sidebar.newFile': 'New Markdown File',
+  'sidebar.newFileTitle': 'Create new Markdown file in folder',
+  'sidebar.refreshTreeTitle': 'Refresh folder tree',
+  'sidebar.openFolder': 'Open Workspace Folder…',
+  'sidebar.close': 'Close Sidebar',
+  'sidebar.searchTitle': 'Workspace Search',
+  'sidebar.searchPlaceholder': 'Search Markdown files…',
+  'sidebar.searchClear': 'Clear search',
+  'sidebar.searchHint': 'Enter a search term to find files across the workspace.',
+  'sidebar.matchCase': 'Match case',
+  'sidebar.outlineTitle': 'Document Outline',
+  'sidebar.emptyOutline': 'No headings found in document',
+  'sidebar.noFolder': 'No Folder Open',
+  'sidebar.noFolderSub': 'Open a local folder to use the file explorer and full-text workspace search.',
+  'sidebar.emptyFolder': 'No Markdown files found in this folder.',
+  'sidebar.emptyHint': 'Open a folder or drag and drop files into the window.',
+  'sidebar.openFolderBtn': 'Open Folder',
+  'sidebar.openFileBtn': 'Open File',
+  'sidebar.recentFolders': 'Recent Folders',
+  'sidebar.recentFiles': 'Recent Files',
+  'sidebar.dragPrompt': 'Or drag and drop files & folders here',
+  'sidebar.removeRecent': 'Remove from history',
+  'sidebar.scrollTop': 'Back to top',
+  'format.toolbarAria': 'Markdown formatting',
+
+  // Context Menus
+  'treeCtx.newFile': 'New Markdown File…',
+  'treeCtx.newFolder': 'New Subfolder…',
+  'treeCtx.rename': 'Rename…',
+  'treeCtx.reveal': 'Reveal in File Explorer',
+  'treeCtx.delete': 'Move to Recycle Bin',
+
+  'tabCtx.close': 'Close Tab',
+  'tabCtx.closeOthers': 'Close Other Tabs',
+  'tabCtx.closeAll': 'Close All Tabs',
+  'tabCtx.closeRight': 'Close Tabs to the Right',
+  'tabCtx.duplicate': 'Duplicate Tab',
+  'tabCtx.copyPath': 'Copy File Path',
+  'tabCtx.openDocs': 'Open Documents',
+  'tabCtx.reveal': 'Reveal in File Explorer',
+
+  'tableCtx.title': 'Table',
+  'tableCtx.rowAbove': 'Insert Row Above',
+  'tableCtx.rowBelow': 'Insert Row Below',
+  'tableCtx.colLeft': 'Insert Column Left',
+  'tableCtx.colRight': 'Insert Column Right',
+  'tableCtx.delRow': 'Delete Row',
+  'tableCtx.delCol': 'Delete Column',
+  'tableCtx.format': 'Format & Align Table',
+
+  // Status Bar
+  'status.untitled': 'Untitled.md',
+  'status.draft': 'Draft',
+  'status.saved': 'Saved',
+  'status.saving': 'Saving…',
+  'status.unsaved': 'Unsaved',
+  'status.restored': 'Draft restored',
+  'status.cursor': 'Line {line}, Column {col}',
+  'status.summary': '{words} words · ~{tokens} tokens',
+  'status.docSummaryTitle': 'Show detailed document statistics (Click)',
+  'status.filepathTitle': 'Click to reveal file in Windows Explorer',
+  'status.zoomResetTitle': 'Reset document zoom to 100% (Ctrl+0)',
+  'status.eolToggleTitle': 'Toggle line ending between CRLF and LF',
+  'status.encodingTitle': 'Detected file encoding (saved as UTF-8)',
+
+  // Settings Dialog
+  'settings.title': 'Settings',
+  'settings.close': 'Close (Esc)',
+  'settings.done': 'Done',
+  'settings.groupGeneral': 'General',
+  'settings.groupAppearance': 'Appearance',
+  'settings.groupEditor': 'Editor',
+  'settings.groupLayout': 'Layout & Window',
+  'settings.language': 'Language',
+  'settings.langDe': 'German',
+  'settings.langEn': 'English',
+  'settings.languageSub': 'Choose the display language for the user interface.',
+  'settings.languageAria': 'Select language',
+  'settings.theme': 'Theme',
+  'settings.themeSub': 'Choose between light, dark, or Windows system appearance.',
+  'settings.themeSystem': 'System',
+  'settings.themeLight': 'Light',
+  'settings.themeDark': 'Dark',
+  'settings.centered': 'Centered Text Column',
+  'settings.centeredSub': 'Caps editor text width in editor-only mode for comfortable reading.',
+  'settings.formatBar': 'Formatting Bar (Aa)',
+  'settings.formatBarSub': 'Quick access to Markdown syntax (Bold, Headings, Tables, Math).',
+  'settings.wordWrap': 'Word Wrap',
+  'settings.wordWrapSub': 'Softly wrap long lines at window edge.',
+  'settings.spellcheck': 'Spellcheck',
+  'settings.spellcheckSub': 'Enable native operating system spellchecking in editor.',
+  'settings.autoSave': 'Auto-Save',
+  'settings.autoSaveSub': 'Automatically save changes to disk after brief inactivity.',
+  'settings.syncScroll': 'Synchronized Scrolling',
+  'settings.syncScrollSub': 'Keep editor and live preview in fractional sync while scrolling.',
+  'settings.eol': 'Default Line Ending',
+  'settings.eolSub': 'Line ending for newly created documents (CRLF = Windows, LF = Linux/macOS).',
+  'settings.rotateSplit': 'Rotate Split View',
+  'settings.rotateSplitSub': 'Switch between vertical (side-by-side) and horizontal split.',
+  'settings.rotateSplitBtn': 'Rotate',
+  'settings.resetSplit': 'Reset Split',
+  'settings.resetSplitSub': 'Reset the divider ratio between editor and preview back to 50:50.',
+  'settings.resetSplitBtn': '50 / 50',
+  'settings.shortcuts': 'Keyboard Shortcuts',
+  'settings.shortcutsSub': 'Open the full cheat sheet of Windows shortcut keys.',
+  'settings.shortcutsBtn': 'Open Cheat Sheet',
+
+  // Palette & Dialogs
+  'palette.placeholder': 'Type file name or “>” for commands…',
+  'palette.badgeActive': 'Active',
+  'palette.badgeOpen': 'Open',
+  'palette.badgeRecent': 'Recent',
+  'palette.badgeFolder': 'Folder',
+  'palette.empty': 'No matching results found',
+  'palette.navigateHint': 'Navigate',
+  'palette.selectHint': 'Select',
+  'palette.closeHint': 'Close',
+  'palette.commandsHint': 'Commands',
+
+  // Dialogs
+  'tableDialog.title': 'Create Markdown Table',
+  'tableDialog.columns': 'Columns',
+  'tableDialog.rows': 'Rows',
+  'tableDialog.alignment': 'Alignment',
+  'tableDialog.alignLeft': 'Left',
+  'tableDialog.alignCenter': 'Center',
+  'tableDialog.alignRight': 'Right',
+  'tableDialog.insert': 'Insert Table',
+  'tableDialog.cancel': 'Cancel',
+
+  'trashDialog.title': 'Move to Recycle Bin?',
+  'trashDialog.message': 'Are you sure you want to move this file to the Windows Recycle Bin?',
+  'trashDialog.confirmItem': 'Are you sure you want to move “{name}” to the Windows Recycle Bin?',
+  'trashDialog.confirm': 'Move to Recycle Bin',
+  'trashDialog.cancel': 'Cancel',
+
+  'statsDialog.title': 'Document Statistics',
+  'statsDialog.words': 'Words',
+  'statsDialog.tokens': 'Estimated Tokens',
+  'statsDialog.chars': 'Characters',
+  'statsDialog.lines': 'Lines',
+  'statsDialog.readingTime': 'Reading Time',
+  'statsDialog.readingTimeVal': '~{min} min.',
+
+  'docStats.title': 'Document Statistics',
+  'docStats.words': 'Words',
+  'docStats.inDoc': 'In Document',
+  'docStats.wordsSelected': '{count} selected',
+  'docStats.chars': 'Characters',
+  'docStats.charsNoSpace': '{count} without spaces',
+  'docStats.charsNoSpaceSelected': '{count} without spaces ({selected} selected)',
+  'docStats.structure': 'Structure',
+  'docStats.paragraphs': '{count} paragraphs',
+  'docStats.lines': '{count} lines',
+  'docStats.linesCount': '{count} lines',
+  'docStats.readTime': 'Reading Time (~200 WPM)',
+  'docStats.speakTime': 'Speaking time: {min} min.',
+  'docStats.speakTimeVal': 'Speaking time: {time}',
+  'docStats.gradeVeryEasy': 'Very Easy',
+  'docStats.gradeEasy': 'Easy',
+  'docStats.gradeModerate': 'Moderate (Standard)',
+  'docStats.gradeDifficult': 'Difficult',
+  'docStats.gradeVeryDifficult': 'Very Difficult (Technical)',
+  'docStats.minAbbr': 'min',
+  'docStats.lessThanOneMin': '< 1 min',
+  'docStats.zeroMin': '0 min',
+  'docStats.readability': 'Readability (Flesch Reading Ease)',
+  'docStats.aiTokens': 'AI Token Estimation (Prompts)',
+  'docStats.aiTokensDesc': 'Estimated for GPT-4, Claude 3.5, Gemini 1.5',
+
+  'shortcutsDialog.title': 'Keyboard Shortcuts in MarkLive',
+  'shortcutsDialog.close': 'Close',
+  'shortcuts.quickOpen': 'Quick Open (files, tabs & history)',
+  'shortcuts.commandPalette': 'Open Command Palette',
+  'shortcuts.newOpenFile': 'New Tab / Open File',
+  'shortcuts.openFolder': 'Open Workspace Folder',
+  'shortcuts.saveSaveAs': 'Save / Save As…',
+  'shortcuts.closeTab': 'Close Active Tab',
+  'shortcuts.restoreTab': 'Reopen Recently Closed Tab',
+  'shortcuts.cycleTabs': 'Next / Previous Tab',
+  'shortcuts.toggleSidebar': 'Toggle Sidebar',
+  'shortcuts.formatBasic': 'Bold / Italic / Link',
+  'shortcuts.formatAdvanced': 'Inline Code / Strikethrough / Math',
+  'shortcuts.findReplace': 'Find & Replace in Editor',
+  'shortcuts.searchWorkspace': 'Full-Text Search in Folder',
+  'shortcuts.tableNav': 'Next / Previous Table Cell (new row at end)',
+  'shortcuts.formatTable': 'Format & Align Markdown Table',
+  'shortcuts.toggleCheckbox': 'Toggle Task Checkbox (- [ ] / - [x])',
+  'shortcuts.smartPaste': 'Insert Image, Link Selection, or Convert Table',
+  'shortcuts.smartPasteKeys': '(Image / URL / Excel)',
+  'shortcuts.copyMarkdown': 'Copy Markdown Source to Clipboard',
+  'shortcuts.copyAi': 'Copy Markdown as AI Prompt Context',
+  'shortcuts.copyRich': 'Copy Formatted Text (Word / Teams / Outlook)',
+  'shortcuts.exportHtml': 'Export as Standalone HTML File',
+  'shortcuts.exportPdf': 'Directly Export as PDF Document',
+  'shortcuts.zoom': 'Zoom In / Out / Reset (100%)',
+  'shortcuts.settings': 'Open Settings',
+  'shortcuts.wordWrap': 'Toggle Word Wrap in Editor',
+  'shortcuts.syncScroll': 'Toggle Synchronized Scrolling',
+  'shortcuts.autoSave': 'Toggle Auto-Save',
+  'shortcuts.viewModes': 'Editor / Split View / Preview',
+  'shortcuts.rotateSplit': 'Rotate Split View (Horizontal / Vertical)',
+  'shortcuts.centeredEditor': 'Toggle Centered Text Column',
+  'shortcuts.formatBar': 'Show / Hide Formatting Bar',
+  'shortcuts.toggleTheme': 'Toggle Theme (Light / Dark)',
+  'shortcuts.zenMode': 'Toggle / Exit Zen Focus Mode',
+
+  'newFileDialog.title': 'Create New Markdown File',
+  'newFileDialog.label': 'File Name',
+  'newFileDialog.placeholder': 'e.g. Notes.md',
+  'newFileDialog.cancel': 'Cancel',
+  'newFileDialog.create': 'Create',
+
+  'newFolderDialog.title': 'Create New Subfolder',
+  'newFolderDialog.label': 'Folder Name',
+  'newFolderDialog.create': 'Create',
+
+  'renameDialog.title': 'Rename Item',
+  'renameDialog.label': 'New Name',
+  'renameDialog.submit': 'Rename',
+
+  'search.openFolderPrompt': 'Please open a workspace folder first (Ctrl+Shift+O).',
+  'search.noMatches': 'No matching results found.',
+  'search.summary': '{count} results in {files} {fileLabel}',
+  'search.file': 'file',
+  'search.files': 'files',
+
+  'unsavedDialog.title': 'Unsaved Changes',
+  'unsavedDialog.desc': 'Do you want to save your changes before closing?',
+  'unsavedDialog.discard': "Don't Save",
+  'unsavedDialog.cancel': 'Cancel',
+  'unsavedDialog.save': 'Save',
+
+  'externalBanner.text': 'The file was modified outside of MarkLive.',
+  'externalBanner.reload': 'Reload',
+  'externalBanner.dismiss': 'Dismiss',
+
+  'about.title': 'About MarkLive',
+  'about.desc': 'Native high-performance Markdown editor for Windows 11, compiled in Rust with Microsoft Edge WebView2 without Node.js or Electron runtime dependencies.',
+  'about.shortcutsBtn': 'Show Keyboard Shortcuts & Help (F1)',
+
+  // Drag & Drop
+  'drop.title': 'Drop files, images, or folders here',
+  'drop.sub': 'Markdown files open in tabs · Images are embedded automatically',
+
+  // Status Toasts
+  'toast.saved': 'Saved',
+  'toast.copyMarkdown': 'Markdown source copied to clipboard',
+  'toast.copyAi': 'AI prompt context copied to clipboard',
+  'toast.copyRich': 'Formatted rich text copied to clipboard',
+  'toast.exportHtml': 'HTML file successfully exported',
+  'toast.exportPdf': 'PDF document successfully exported',
+  'toast.wordWrapOn': 'Word wrap enabled',
+  'toast.wordWrapOff': 'Word wrap disabled',
+  'toast.spellcheckOn': 'Spellcheck enabled',
+  'toast.spellcheckOff': 'Spellcheck disabled',
+  'toast.autoSaveOn': 'Auto-save enabled',
+  'toast.autoSaveOff': 'Auto-save disabled',
+  'toast.syncScrollOn': 'Synchronized scrolling enabled',
+  'toast.syncScrollOff': 'Synchronized scrolling disabled',
+  'toast.formatBarOn': 'Formatting bar shown',
+  'toast.formatBarOff': 'Formatting bar hidden',
+  'toast.centeredOn': 'Centered text column enabled',
+  'toast.centeredOff': 'Centered text column disabled',
+  'toast.tableFormatted': 'Markdown table formatted',
+  'toast.trashSuccess': 'Successfully moved to Recycle Bin',
+  'toast.fileCreated': 'File created',
+  'toast.folderCreated': 'Folder created',
+  'toast.renamed': 'Successfully renamed',
+  'toast.recentRemoved': 'Removed from history',
+  'toast.langChanged': 'Language changed: English',
+  // Additional Toasts & UI Feedback
+  'toast.tableRowAbove': 'Row inserted above',
+  'toast.tableRowBelow': 'Row inserted below',
+  'toast.tableRowDeleted': 'Row deleted',
+  'toast.tableColLeft': 'Column inserted left',
+  'toast.tableColRight': 'Column inserted right',
+  'toast.tableColDeleted': 'Column deleted',
+  'toast.tablesFormatted': '{count} Markdown tables aligned',
+  'toast.noTableFound': 'No Markdown tables found in document',
+  'toast.copyFailed': 'Failed to copy to clipboard',
+  'toast.copyPath': 'File path copied to clipboard',
+  'toast.copyCode': 'Code block copied to clipboard',
+  'toast.copyDiagram': 'Mermaid SVG copied to clipboard',
+  'toast.copySource': 'Source text copied to clipboard',
+  'toast.copyAiWithName': 'Copied as AI context ({name})',
+  'toast.recentFolderRemoved': 'Folder removed from history',
+  'toast.recentFileRemoved': 'File removed from history',
+  'toast.saveClipboardImgFailed': 'Failed to save image from clipboard: {err}',
+  'toast.zenOn': 'Zen focus mode enabled · Esc or F11 to exit',
+  'toast.zenOff': 'Zen focus mode exited',
+  'toast.htmlExportSuccess': 'HTML file successfully exported: {name}',
+  'toast.htmlExportFailed': 'HTML export failed',
+  'toast.pdfExportSuccess': 'PDF document successfully exported: {name}',
+  'toast.pdfExportFailed': 'PDF export failed',
+  'toast.sectionLinkCopied': 'Section link copied',
+  'toast.noClosedTabs': 'No closed tabs to restore',
+  'toast.tabReopened': 'Tab restored: {name}',
+  'toast.draftReopened': 'Draft restored: {name}',
+  'toast.openFileFailed': 'Failed to open file: {name}',
+  'toast.splitOrientationH': 'Horizontal split (Editor top)',
+  'toast.splitOrientationV': 'Vertical split (Editor left)',
+  'toast.draftsRestored': '{count} unsaved drafts restored after startup',
+  'toast.draftRestored': '1 unsaved draft restored after startup',
+
+  // Tabs, Outlines & Tables
+  'tab.closeTitle': 'Close {name}',
+  'tab.unsavedTitle': 'Unsaved changes',
+  'tab.untitledName': 'Untitled-{num}.md',
+  'outline.lineTooltip': 'Line {line}: {text}',
+  'outline.untitledHeading': 'Heading',
+  'outline.oneSection': '1 section',
+  'outline.sectionsCount': '{count} sections',
+  'search.matchLocation': 'Line {line}, Column {col}',
+  'search.searchFailed': 'Workspace search failed: {err}',
+  'table.columnHeader': 'Column {num}',
+  'table.cellContent': 'Content',
+
+  // Palette & Explorer
+  'palette.noMatchingCommand': 'No matching commands found.',
+  'palette.noMatchingFiles': 'No matching files or commands found. Tip: type ">" to browse all commands.',
+  'sidebar.removeFolderFromRecentTitle': 'Remove folder {folder} from history',
+  'sidebar.removeFileFromRecentTitle': 'Remove file {file} from history',
+  'sidebar.treeLoadFailed': 'Failed to load folder tree: {err}',
+  'sidebar.trashFailed': 'Failed to move to Recycle Bin: {err}',
+  'sidebar.emptyOutlineTextFile': 'No headings found (text/configuration file).',
+
+  // Unsaved Prompts
+  'unsavedDialog.descWithName': 'Do you want to save changes to "{name}" before closing?',
+  'unsavedDialog.beforeQuitDesc': 'Unsaved changes in {names}. Save before exiting?',
+
+  // Resizers
+  'resizer.horizontalAria': 'Editor {ed}% top, preview {prev}% bottom',
+  'resizer.verticalAria': 'Editor {ed}% left, preview {prev}% right',
+  'resizer.sidebarAria': '{width} pixels',
+
+  // Preview Actions
+  'preview.copy': 'Copy',
+  'preview.copyAria': 'Copy code to clipboard',
+  'preview.copied': 'Copied ✓',
+  'preview.copySvg': 'Copy SVG',
+  'preview.zoom': 'Zoom',
+  'preview.copySvgTitle': 'Copy diagram as SVG',
+  'preview.zoomTitle': 'Open diagram in large view',
+};
+
+const dictionaries: Record<Language, Record<string, string>> = { de, en };
+
+let currentLanguage: Language = ((): Language => {
+  if (typeof window !== 'undefined') {
+    try {
+      const saved = localStorage.getItem('marklive.language');
+      if (saved === 'de' || saved === 'en') return saved;
+    } catch {}
+  }
+  return 'de';
+})();
+const listeners = new Set<(lang: Language) => void>();
+
+/**
+ * Get the currently active application language.
+ */
+
+/**
+ * Localize a keyboard shortcut string or single key name for the target language.
+ * German Windows conventions use: Strg, Umschalt, Entf, BildAuf, BildAb.
+ * English Windows conventions use: Ctrl, Shift, Del, PageUp, PageDown.
+ */
+export function localizeShortcut(shortcut: string, lang: Language = currentLanguage): string {
+  if (!shortcut) return '';
+  if (lang === 'en') {
+    return shortcut
+      .replace(/\bStrg\b/g, 'Ctrl')
+      .replace(/\bUmschalt\b/g, 'Shift')
+      .replace(/\bEntf\b/g, 'Del')
+      .replace(/\b(BildAuf|Bild auf)\b/gi, 'PageUp')
+      .replace(/\b(BildAb|Bild ab)\b/gi, 'PageDown')
+      .replace(/\bLeertaste\b/gi, 'Space');
+  } else {
+    return shortcut
+      .replace(/\bCtrl\b/gi, 'Strg')
+      .replace(/\bShift\b/gi, 'Umschalt')
+      .replace(/\bDel\b/gi, 'Entf')
+      .replace(/\b(PageUp|PgUp)\b/gi, 'BildAuf')
+      .replace(/\b(PageDown|PgDn)\b/gi, 'BildAb')
+      .replace(/\bSpace\b/gi, 'Leertaste');
+  }
+}
+
+export function getLanguage(): Language {
+  return currentLanguage;
+}
+
+/**
+ * Translate a key into the active language, with optional parameter interpolation.
+ * If the key is not found in the current language, falls back to German, then returns the key itself.
+ */
+export function t(key: string, params?: TranslationParams): string {
+  const dict = dictionaries[currentLanguage] ?? de;
+  let text = dict[key] ?? de[key] ?? key;
+
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      text = text.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v));
+    }
+  }
+
+  return text;
+}
+
+/**
+ * Register a listener to be notified whenever the language changes.
+ * Returns an unregister function.
+ */
+export function onLanguageChange(listener: (lang: Language) => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+/**
+ * Set the current application language, updating the DOM and notifying listeners.
+ */
+export function setLanguage(lang: Language, persist = true): void {
+  if (lang !== 'de' && lang !== 'en') return;
+  currentLanguage = lang;
+
+  if (persist) {
+    try {
+      localStorage.setItem('marklive.language', lang);
+    } catch {}
+  }
+
+  updateDomLanguage();
+
+  for (const listener of listeners) {
+    try {
+      listener(lang);
+    } catch (err) {
+      console.error('Error in language change listener:', err);
+    }
+  }
+}
+
+/**
+ * Scan the DOM and update textContent, title, aria-label, and placeholder
+ * for elements marked with data-i18n attributes.
+ */
+export function updateDomLanguage(root: Document | HTMLElement = document): void {
+  if (typeof document === 'undefined') return;
+
+  document.documentElement.lang = currentLanguage;
+
+  // 1. Text content
+  root.querySelectorAll<HTMLElement>('[data-i18n]').forEach((el) => {
+    const key = el.dataset.i18n;
+    if (key) {
+      el.textContent = t(key);
+    }
+  });
+
+  // 2. Title attributes / tooltips
+  root.querySelectorAll<HTMLElement>('[data-i18n-title]').forEach((el) => {
+    const key = el.dataset.i18nTitle;
+    if (key) {
+      el.title = t(key);
+    }
+  });
+
+  // 3. Aria-label attributes
+  root.querySelectorAll<HTMLElement>('[data-i18n-aria]').forEach((el) => {
+    const key = el.dataset.i18nAria;
+    if (key) {
+      el.setAttribute('aria-label', t(key));
+    }
+  });
+
+  // 4. Input placeholders
+  root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('[data-i18n-placeholder]').forEach((el) => {
+    const key = el.dataset.i18nPlaceholder;
+    if (key) {
+      el.placeholder = t(key);
+    }
+  });
+
+  // 5. Shortcuts in menus, popovers, and context menus
+  root.querySelectorAll<HTMLElement>('[data-shortcut], .menu-item-shortcut, .ctx-shortcut').forEach((el) => {
+    if (!el.dataset.rawShortcut) {
+      el.dataset.rawShortcut = el.dataset.shortcut || el.textContent?.trim() || '';
+    }
+    el.textContent = localizeShortcut(el.dataset.rawShortcut, currentLanguage);
+  });
+
+  // 6. Keyboard keys inside the shortcuts dialog grid
+  root.querySelectorAll<HTMLElement>('#shortcuts-dialog .shortcuts-grid kbd').forEach((kbd) => {
+    if (!kbd.dataset.rawShortcut) {
+      kbd.dataset.rawShortcut = kbd.textContent?.trim() || '';
+    }
+    kbd.textContent = localizeShortcut(kbd.dataset.rawShortcut, currentLanguage);
+  });
+}
+
+// Automatically ensure the DOM matches the initial language upon load
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => updateDomLanguage());
+  } else {
+    updateDomLanguage();
+  }
+}
+

@@ -24,12 +24,26 @@ import {
 import { installProgressiveEnhancements } from './polyfills';
 import { safeSetMarkdownHTML } from './sanitizer';
 import { SidebarExplorerController } from './sidebar-explorer';
+import {
+  SIDEBAR_WIDTH_DEFAULT,
+  SIDEBAR_WIDTH_MAX,
+  clampSidebarWidth,
+  clampSplitRatio,
+  formatSidebarValueText,
+  formatSplitValueText,
+  parseSplitRatios,
+  type SplitRatios,
+  snapSplitRatio,
+  splitRatioFromPointer,
+} from './layout-utils';
 import { calculateDetailedStats } from './stats-utils';
 import { SyncScrollController } from './sync-scroll';
 import { findAdjacentTabId, reorderTabList } from './tab-utils';
-import { bindThemeSystem } from './theme';
+import { bindThemeSystem, toggleTheme } from './theme';
+import { SettingsController } from './settings';
+import { getLanguage, setLanguage, onLanguageChange, t, updateDomLanguage, Language } from './i18n';
 import { estimateTokens } from './token-utils';
-import { WELCOME_MARKDOWN } from './welcome';
+import { WELCOME_MARKDOWN, getWelcomeMarkdown } from './welcome';
 import { WorkspaceSearchController } from './workspace-search';
 
 installProgressiveEnhancements();
@@ -72,6 +86,9 @@ class MarkLiveApp {
 
   private splitRatio = 50;
   private splitOrientation: 'vertical' | 'horizontal' = 'vertical';
+  /** Remembered split ratio per orientation so toggling restores each layout's own proportions. */
+  private splitRatios: SplitRatios = parseSplitRatios(null);
+  private editorCentered = false;
   private zoomPercent = 100;
   private autoSaveEnabled = false;
   private recentFiles: string[] = [];
@@ -127,13 +144,14 @@ class MarkLiveApp {
     isAfter: boolean;
   } | null = null;
   private suppressNextTabClick = false;
+  private settingsCtrl!: SettingsController;
 
   public async init(): Promise<void> {
     const cmHost = document.getElementById('codemirror-host')!;
     this.editor = new MarkdownEditorController(cmHost, '', {
       onDocChanged: (content) => this.handleEditorContentChange(content),
       onCursorChanged: (line, col, selChars, selWords) => {
-        this.statusCursorEl.textContent = `Zeile ${line}, Spalte ${col}`;
+        this.statusCursorEl.textContent = t('status.cursor', { line, col });
         this.lastSelection = { chars: selChars, words: selWords };
         this.updateWordCountDisplay();
       },
@@ -189,13 +207,13 @@ class MarkLiveApp {
         this.recentFolders = this.recentFolders.filter((p) => p !== folderPath);
         this.schedulePrefsSave();
         this.explorer.renderEmptyStateWithRecents(this.recentFolders, this.recentFiles);
-        this.showToast('Ordner aus Verlauf entfernt');
+        this.showToast(t('toast.recentFolderRemoved'));
       },
       onRemoveRecentFile: (filePath) => {
         this.recentFiles = this.recentFiles.filter((p) => p !== filePath);
         this.schedulePrefsSave();
         this.explorer.renderEmptyStateWithRecents(this.recentFolders, this.recentFiles);
-        this.showToast('Datei aus Verlauf entfernt');
+        this.showToast(t('toast.recentFileRemoved'));
       },
     });
 
@@ -271,37 +289,39 @@ class MarkLiveApp {
             onAlignTable: () => this.alignActiveMarkdownTables(),
             onInsertTableRowAbove: () => {
               if (this.editor.modifyTable({ type: 'insert-row', direction: 'above' })) {
-                this.showToast('Zeile oberhalb eingefügt');
+                this.showToast(t('toast.tableRowAbove'));
               }
             },
             onInsertTableRowBelow: () => {
               if (this.editor.modifyTable({ type: 'insert-row', direction: 'below' })) {
-                this.showToast('Zeile unterhalb eingefügt');
+                this.showToast(t('toast.tableRowBelow'));
               }
             },
             onDeleteTableRow: () => {
               if (this.editor.modifyTable({ type: 'delete-row' })) {
-                this.showToast('Zeile gelöscht');
+                this.showToast(t('toast.tableRowDeleted'));
               }
             },
             onInsertTableColumnLeft: () => {
               if (this.editor.modifyTable({ type: 'insert-col', direction: 'left' })) {
-                this.showToast('Spalte links eingefügt');
+                this.showToast(t('toast.tableColLeft'));
               }
             },
             onInsertTableColumnRight: () => {
               if (this.editor.modifyTable({ type: 'insert-col', direction: 'right' })) {
-                this.showToast('Spalte rechts eingefügt');
+                this.showToast(t('toast.tableColRight'));
               }
             },
             onDeleteTableColumn: () => {
               if (this.editor.modifyTable({ type: 'delete-col' })) {
-                this.showToast('Spalte gelöscht');
+                this.showToast(t('toast.tableColDeleted'));
               }
             },
             onSetViewMode: (mode) => this.setViewMode(mode),
             splitOrientation: this.splitOrientation,
             onToggleSplitOrientation: () => this.toggleSplitOrientation(),
+            centeredEditorActive: this.editorCentered,
+            onToggleCenteredEditor: () => this.toggleEditorCentered(),
             onShowDocStats: () => this.openDocStatsPopover(),
             formatBarVisible: this.formatBarVisible,
             onToggleFormatBar: () => this.toggleFormatBar(),
@@ -320,8 +340,9 @@ class MarkLiveApp {
             onOpenEditorReplace: () => this.openEditorReplacePanel(),
             onOpenSearchPanel: () => this.switchSidebarPanel('search'),
             onOpenOutlinePanel: () => this.switchSidebarPanel('outline'),
-            onToggleZen: () => this.appEl.classList.toggle('is-zen'),
-            onToggleTheme: () => document.getElementById('btn-theme-toggle')?.click(),
+            onToggleZen: () => void this.toggleZen(),
+            onToggleTheme: () => toggleTheme(),
+            onOpenSettings: () => this.settingsCtrl.openSettings(),
             onRevealInExplorer: () => {
               const p = this.activeTab?.path ?? this.explorer.rootPath;
               if (p) void backend.revealInExplorer(p);
@@ -341,6 +362,38 @@ class MarkLiveApp {
 
     this.bindCompositeKeyboardNav();
     this.bindUIEvents();
+
+    this.settingsCtrl = new SettingsController(
+      () => ({
+        wordWrap: this.editor.isWordWrapEnabled(),
+        spellcheck: this.editor.isSpellcheckEnabled(),
+        autoSave: this.autoSaveEnabled,
+        syncScroll: this.syncScroll.isEnabled(),
+        formatBarVisible: this.formatBarVisible,
+        centeredEditor: this.editorCentered,
+        lineEnding: this.activeTab?.lineEnding ?? 'CRLF',
+        language: getLanguage(),
+      }),
+      {
+        onToggleWordWrap: () => this.toggleWordWrap(),
+        onToggleSpellcheck: () => this.toggleSpellcheck(),
+        onToggleAutoSave: () => this.toggleAutoSave(),
+        onToggleSyncScroll: () => this.toggleSyncScroll(),
+        onToggleFormatBar: () => this.toggleFormatBar(),
+        onToggleCenteredEditor: () => this.toggleEditorCentered(),
+        onToggleOrientation: () => this.toggleSplitOrientation(),
+        onToggleZen: () => void this.toggleZen(),
+        onResetSplit: () => this.setSplitRatio(50),
+        onSetLineEnding: (eol) => this.setActiveTabLineEnding(eol),
+        onSetLanguage: (lang) => {
+          setLanguage(lang);
+          this.schedulePrefsSave();
+        },
+        onOpenShortcuts: () => {
+          (document.getElementById('shortcuts-dialog') as HTMLDialogElement)?.showModal();
+        },
+      },
+    );
     bindThemeSystem(() => {
       if (this.activeTab) {
         void this.renderPreviewImmediate(
@@ -348,6 +401,27 @@ class MarkLiveApp {
           this.activeTab.parentDir ?? this.explorer.rootPath,
         );
       }
+    });
+
+    onLanguageChange((lang) => {
+      this.editor.setAppLanguage(lang);
+      this.settingsCtrl?.syncAll();
+      this.updateStatusBar();
+      this.renderTabBar();
+      if (!this.explorer.hasWorkspace) {
+        this.explorer.renderEmptyStateWithRecents(this.recentFolders, this.recentFiles);
+      } else {
+        void this.explorer.refresh();
+      }
+      if (this.activeTab) {
+        this.renderOutline(this.activeTab.outline);
+        void this.renderPreviewImmediate(
+          this.activeTab.currentContent,
+          this.activeTab.parentDir ?? this.explorer.rootPath,
+        );
+      }
+      this.syncWindowMetadata();
+      this.showToast(t('toast.langChanged'));
     });
     this.bindBackendEvents();
 
@@ -389,7 +463,12 @@ class MarkLiveApp {
     }
 
     if (this.tabs.length === 0) {
-      this.createNewTab('Willkommen.md', WELCOME_MARKDOWN, false);
+      const isEn = getLanguage() === 'en';
+      this.createNewTab(
+        isEn ? 'Welcome.md' : 'Willkommen.md',
+        getWelcomeMarkdown(getLanguage()),
+        false,
+      );
     }
   }
 
@@ -417,24 +496,30 @@ class MarkLiveApp {
   // ==========================================================================
 
   private applyRestoredUiPrefs(prefs: UiSessionPrefs): void {
-    this.setSplitRatio(prefs.splitRatio || 50, false);
     this.setSplitOrientation(prefs.splitOrientation ?? 'vertical', false);
+    this.setSplitRatio(prefs.splitRatio || 50, false);
     this.setZoomPercent(prefs.zoomPercent || 100, false);
 
     this.syncScroll.setEnabled(prefs.syncScroll);
-    const syncBtn = document.getElementById('btn-sync-scroll')!;
-    syncBtn.classList.toggle('is-active', prefs.syncScroll);
-    syncBtn.setAttribute('aria-pressed', String(prefs.syncScroll));
+    const syncBtn = document.getElementById('btn-sync-scroll');
+    if (syncBtn) {
+      syncBtn.classList.toggle('is-active', prefs.syncScroll);
+      syncBtn.setAttribute('aria-pressed', String(prefs.syncScroll));
+    }
 
     this.autoSaveEnabled = prefs.autoSave;
-    const autoBtn = document.getElementById('btn-autosave')!;
-    autoBtn.classList.toggle('is-active', prefs.autoSave);
-    autoBtn.setAttribute('aria-pressed', String(prefs.autoSave));
+    const autoBtn = document.getElementById('btn-autosave');
+    if (autoBtn) {
+      autoBtn.classList.toggle('is-active', prefs.autoSave);
+      autoBtn.setAttribute('aria-pressed', String(prefs.autoSave));
+    }
 
     this.editor.setWordWrap(prefs.wordWrap);
-    const wrapBtn = document.getElementById('btn-word-wrap')!;
-    wrapBtn.classList.toggle('is-active', prefs.wordWrap);
-    wrapBtn.setAttribute('aria-pressed', String(prefs.wordWrap));
+    const wrapBtn = document.getElementById('btn-word-wrap');
+    if (wrapBtn) {
+      wrapBtn.classList.toggle('is-active', prefs.wordWrap);
+      wrapBtn.setAttribute('aria-pressed', String(prefs.wordWrap));
+    }
 
     this.editor.setSpellcheck(prefs.spellcheck);
 
@@ -443,18 +528,33 @@ class MarkLiveApp {
     }
     this.applyFormatBarVisibility();
 
+    if (prefs.language === 'de' || prefs.language === 'en') {
+      setLanguage(prefs.language, false);
+      this.editor.setAppLanguage(prefs.language);
+    }
+
     this.recentFiles = prefs.recentFiles ?? [];
     this.recentFolders = prefs.recentFolders ?? [];
+    this.settingsCtrl?.syncAll();
+  }
+
+  public toggleSpellcheck(): void {
+    const next = !this.editor.isSpellcheckEnabled();
+    this.editor.setSpellcheck(next);
+    this.settingsCtrl?.syncAll();
+    this.schedulePrefsSave();
+    this.showToast(next ? t('toast.spellcheckOn') : t('toast.spellcheckOff'));
   }
 
   public toggleFormatBar(): void {
     this.formatBarVisible = !this.formatBarVisible;
     this.applyFormatBarVisibility();
+    this.settingsCtrl?.syncAll();
     this.schedulePrefsSave();
     this.showToast(
       this.formatBarVisible
-        ? 'Formatierungsleiste eingeblendet'
-        : 'Formatierungsleiste ausgeblendet',
+        ? t('toast.formatBarOn')
+        : t('toast.formatBarOff'),
     );
   }
 
@@ -469,15 +569,136 @@ class MarkLiveApp {
     }
   }
 
-  private setSplitRatio(pct: number, persist = true): void {
-    const clamped = Math.max(20, Math.min(80, pct));
-    this.splitRatio = clamped;
-    document.documentElement.style.setProperty('--split-ratio', `${clamped.toFixed(2)}%`);
-    document
-      .getElementById('split-resizer')
-      ?.setAttribute('aria-valuenow', String(Math.round(clamped)));
+  private setSidebarWidth(px: number, persist = true): void {
+    const clamped = clampSidebarWidth(px, window.innerWidth);
+    document.documentElement.style.setProperty('--sidebar-width', `${clamped}px`);
+    const resizer = document.getElementById('sidebar-resizer');
+    resizer?.setAttribute('aria-valuenow', String(clamped));
+    resizer?.setAttribute('aria-valuetext', formatSidebarValueText(clamped));
     if (persist) {
+      try {
+        localStorage.setItem('marklive.sidebarWidth', String(clamped));
+      } catch {
+        // Storage unavailable: width simply is not persisted.
+      }
+    }
+  }
+
+  private initLayoutPreferences(): void {
+    try {
+      this.splitRatios = parseSplitRatios(localStorage.getItem('marklive.splitRatios'));
+      this.editorCentered = localStorage.getItem('marklive.editorCentered') === '1';
+    } catch {
+      // ignore
+    }
+    this.splitRatios[this.splitOrientation] = this.splitRatio;
+    this.applyEditorCentered();
+
+    // Auto-collapse sidebar on narrow screens during startup to grant primary space to editor
+    if (window.innerWidth < 800 && !this.sidebarEl.classList.contains('is-collapsed')) {
+      this.sidebarEl.classList.add('is-collapsed');
+    }
+  }
+
+  private applyEditorCentered(): void {
+    this.appEl.dataset.editorWidth = this.editorCentered ? 'centered' : 'full';
+  }
+
+  private toggleEditorCentered(): void {
+    this.editorCentered = !this.editorCentered;
+    this.applyEditorCentered();
+    this.settingsCtrl?.syncAll();
+    try {
+      localStorage.setItem('marklive.editorCentered', this.editorCentered ? '1' : '0');
+    } catch {
+      // ignore
+    }
+    this.showToast(
+      this.editorCentered ? t('toast.centeredOn') : t('toast.centeredOff'),
+    );
+  }
+
+  private bindSidebarResizer(): void {
+    const handle = document.getElementById('sidebar-resizer');
+    if (!handle) return;
+
+    let stored = SIDEBAR_WIDTH_DEFAULT;
+    try {
+      const raw = Number(localStorage.getItem('marklive.sidebarWidth'));
+      if (raw > 0) stored = raw;
+    } catch {
+      // ignore
+    }
+    this.setSidebarWidth(stored, false);
+
+    handle.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      handle.setPointerCapture(e.pointerId);
+      handle.classList.add('is-dragging');
+      const left = this.sidebarEl.getBoundingClientRect().left;
+
+      const onMove = (ev: PointerEvent) => this.setSidebarWidth(ev.clientX - left, false);
+      const onUp = (ev: PointerEvent) => {
+        handle.releasePointerCapture(ev.pointerId);
+        handle.classList.remove('is-dragging');
+        handle.removeEventListener('pointermove', onMove);
+        handle.removeEventListener('pointerup', onUp);
+        handle.removeEventListener('pointercancel', onUp);
+        this.setSidebarWidth(this.sidebarEl.getBoundingClientRect().width);
+      };
+      handle.addEventListener('pointermove', onMove);
+      handle.addEventListener('pointerup', onUp);
+      handle.addEventListener('pointercancel', onUp);
+    });
+
+    handle.addEventListener('dblclick', () => this.setSidebarWidth(SIDEBAR_WIDTH_DEFAULT));
+
+    handle.addEventListener('keydown', (e) => {
+      const current = this.sidebarEl.getBoundingClientRect().width;
+      const step = e.shiftKey ? 32 : 16;
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        this.setSidebarWidth(current - step);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        this.setSidebarWidth(current + step);
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        this.setSidebarWidth(SIDEBAR_WIDTH_DEFAULT);
+      } else if (e.key === 'End') {
+        e.preventDefault();
+        this.setSidebarWidth(SIDEBAR_WIDTH_MAX);
+      }
+    });
+
+    window.addEventListener('resize', () => {
+      const w = this.sidebarEl.getBoundingClientRect().width;
+      if (w > 0) this.setSidebarWidth(w, false);
+    });
+  }
+
+  private setSplitRatio(pct: number, persist = true): void {
+    const clamped = clampSplitRatio(pct);
+    this.splitRatio = clamped;
+    this.splitRatios[this.splitOrientation] = clamped;
+    document.documentElement.style.setProperty('--split-ratio', `${clamped.toFixed(2)}%`);
+    const splitResizer = document.getElementById('split-resizer');
+    splitResizer?.setAttribute('aria-valuenow', String(Math.round(clamped)));
+    splitResizer?.setAttribute(
+      'aria-valuetext',
+      formatSplitValueText(this.splitOrientation, clamped),
+    );
+    if (persist) {
+      this.saveSplitRatios();
       this.schedulePrefsSave();
+    }
+  }
+
+  private saveSplitRatios(): void {
+    try {
+      localStorage.setItem('marklive.splitRatios', JSON.stringify(this.splitRatios));
+    } catch {
+      // Storage unavailable: ratios are only kept for this session.
     }
   }
 
@@ -489,6 +710,7 @@ class MarkLiveApp {
     if (persist) {
       this.schedulePrefsSave();
     }
+    this.settingsCtrl?.syncAll();
   }
 
   private setSplitOrientation(orientation: 'vertical' | 'horizontal', persist = true): void {
@@ -500,30 +722,21 @@ class MarkLiveApp {
     const resizer = document.getElementById('split-resizer');
     resizer?.setAttribute('aria-orientation', orientation);
 
-    const btn = document.getElementById('btn-toggle-split-orientation');
-    if (btn) {
-      btn.title =
-        orientation === 'horizontal'
-          ? 'Auf vertikale Teilung umschalten (Alt+Umschalt+S)'
-          : 'Auf horizontale Teilung umschalten (Alt+Umschalt+S)';
-      const iconVert = btn.querySelector<HTMLElement>('.icon-split-vert');
-      const iconHoriz = btn.querySelector<HTMLElement>('.icon-split-horiz');
-      if (iconVert) iconVert.style.display = orientation === 'horizontal' ? 'none' : 'block';
-      if (iconHoriz) iconHoriz.style.display = orientation === 'horizontal' ? 'block' : 'none';
-    }
-
     if (persist) {
       this.schedulePrefsSave();
     }
+    this.settingsCtrl?.syncAll();
   }
 
   private toggleSplitOrientation(): void {
     const next = this.splitOrientation === 'horizontal' ? 'vertical' : 'horizontal';
+    this.splitRatios[this.splitOrientation] = this.splitRatio;
     this.setSplitOrientation(next);
+    this.setSplitRatio(this.splitRatios[next]);
     this.showToast(
       next === 'horizontal'
-        ? 'Horizontale Teilung (Editor oben)'
-        : 'Vertikale Teilung (Editor links)',
+        ? t('toast.splitOrientationH')
+        : t('toast.splitOrientationV'),
     );
   }
 
@@ -536,29 +749,38 @@ class MarkLiveApp {
 
     const content = this.activeTab?.currentContent ?? '';
     const stats = calculateDetailedStats(content, this.lastSelection);
+    const isEn = getLanguage() === 'en';
+    const locale = isEn ? 'en-US' : 'de-DE';
 
-    document.getElementById('stat-words')!.textContent = stats.wordsTotal.toLocaleString('de-DE');
+    document.getElementById('stat-words')!.textContent = stats.wordsTotal.toLocaleString(locale);
     document.getElementById('stat-words-sub')!.textContent =
       stats.wordsSelected > 0
-        ? `${stats.wordsSelected.toLocaleString('de-DE')} markiert`
-        : 'Im Dokument';
+        ? t('docStats.wordsSelected', { count: stats.wordsSelected.toLocaleString(locale) })
+        : t('docStats.inDoc');
 
-    document.getElementById('stat-chars')!.textContent = stats.charsTotal.toLocaleString('de-DE');
+    document.getElementById('stat-chars')!.textContent = stats.charsTotal.toLocaleString(locale);
     document.getElementById('stat-chars-no-space')!.textContent =
-      `${stats.charsNoSpaces.toLocaleString('de-DE')} ohne Leerzeichen${
-        stats.charsSelected > 0 ? ` (${stats.charsSelected} markiert)` : ''
-      }`;
+      stats.charsSelected > 0
+        ? t('docStats.charsNoSpaceSelected', {
+            count: stats.charsNoSpaces.toLocaleString(locale),
+            selected: stats.charsSelected.toLocaleString(locale),
+          })
+        : t('docStats.charsNoSpace', { count: stats.charsNoSpaces.toLocaleString(locale) });
 
-    document.getElementById('stat-paragraphs')!.textContent = stats.paragraphsTotal.toLocaleString('de-DE');
-    document.getElementById('stat-lines')!.textContent = `${stats.linesTotal.toLocaleString('de-DE')} Zeilen`;
+    document.getElementById('stat-paragraphs')!.textContent = stats.paragraphsTotal.toLocaleString(locale);
+    document.getElementById('stat-lines')!.textContent = t('docStats.linesCount', {
+      count: stats.linesTotal.toLocaleString(locale),
+    });
 
     document.getElementById('stat-read-time')!.textContent = stats.readingTimeString;
-    document.getElementById('stat-speak-time')!.textContent = `Sprechzeit: ${stats.speakingTimeString}`;
+    document.getElementById('stat-speak-time')!.textContent = t('docStats.speakTimeVal', {
+      time: stats.speakingTimeString,
+    });
 
     document.getElementById('stat-flesch-score')!.textContent = `${stats.fleschScore} / 100`;
     document.getElementById('stat-flesch-grade')!.textContent = stats.fleschGrade;
 
-    document.getElementById('stat-tokens')!.textContent = `~${stats.tokensEstimate.toLocaleString('de-DE')} Tokens`;
+    document.getElementById('stat-tokens')!.textContent = `~${stats.tokensEstimate.toLocaleString(locale)} Tokens`;
 
     if (typeof popover.showPopover === 'function') {
       try {
@@ -603,6 +825,7 @@ class MarkLiveApp {
       wordWrap: this.editor.isWordWrapEnabled(),
       spellcheck: this.editor.isSpellcheckEnabled(),
       formatBarVisible: this.formatBarVisible,
+      language: getLanguage(),
       recentFiles: this.recentFiles,
       recentFolders: this.recentFolders,
       sessionFiles,
@@ -646,7 +869,7 @@ class MarkLiveApp {
       const id = crypto.randomUUID();
       const tab: OpenTab = {
         id,
-        name: draft.name || `Unbenannt-${this.untitledCounter++}.md`,
+        name: draft.name || t('tab.untitledName', { num: this.untitledCounter++ }),
         path: draft.path,
         parentDir: draft.parentDir ?? this.explorer.rootPath,
         savedContent: draft.savedContent,
@@ -665,12 +888,12 @@ class MarkLiveApp {
 
     if (this.tabs.length > 0) {
       this.activateTab(this.tabs[this.tabs.length - 1].id);
-      this.statusSaveBadge.textContent = 'Entwurf wiederhergestellt';
+      this.statusSaveBadge.textContent = t('status.restored');
       if (restoredCount > 0) {
         this.showToast(
           restoredCount === 1
-            ? '1 ungespeicherter Entwurf nach Systemstart wiederhergestellt'
-            : `${restoredCount} ungespeicherte Entwürfe nach Systemstart wiederhergestellt`,
+            ? t('toast.draftRestored')
+            : t('toast.draftsRestored', { count: restoredCount }),
         );
       }
     }
@@ -754,7 +977,7 @@ class MarkLiveApp {
   private createNewTab(name?: string, initialContent = '', markDirty = false): void {
     this.persistActiveTabScrollAndState();
 
-    const tabName = name ?? `Unbenannt-${this.untitledCounter++}.md`;
+    const tabName = name ?? t('tab.untitledName', { num: this.untitledCounter++ });
     const id = crypto.randomUUID();
     const state = this.editor.createState(initialContent);
 
@@ -834,7 +1057,7 @@ class MarkLiveApp {
     } catch (err) {
       console.error('Datei konnte nicht geöffnet werden:', err);
       const fileName = baseNameOfPath(path);
-      this.showToast(`Datei konnte nicht geöffnet werden: ${fileName}`);
+      this.showToast(t('toast.openFileFailed', { name: fileName }));
       const prevLen = this.recentFiles.length;
       this.recentFiles = this.recentFiles.filter(
         (p) => p.toLowerCase() !== normLower,
@@ -902,6 +1125,7 @@ class MarkLiveApp {
         tab.name,
         tab.parentDir ?? this.explorer.rootPath,
         tab.lineEnding,
+        getLanguage(),
       );
       if (!res.saved || !res.path) return false;
       tab.path = res.path;
@@ -930,10 +1154,10 @@ class MarkLiveApp {
     return true;
   }
 
-  private toggleActiveTabLineEnding(): void {
+  private setActiveTabLineEnding(eol: 'CRLF' | 'LF'): void {
     const tab = this.activeTab;
-    if (!tab) return;
-    tab.lineEnding = tab.lineEnding === 'CRLF' ? 'LF' : 'CRLF';
+    if (!tab || tab.lineEnding === eol) return;
+    tab.lineEnding = eol;
     if (tab.path) {
       tab.isDirty = true;
       this.renderTabBar();
@@ -941,6 +1165,13 @@ class MarkLiveApp {
       this.scheduleDraftSync();
     }
     this.updateStatusBar();
+    this.settingsCtrl?.syncAll();
+  }
+
+  private toggleActiveTabLineEnding(): void {
+    const tab = this.activeTab;
+    if (!tab) return;
+    this.setActiveTabLineEnding(tab.lineEnding === 'CRLF' ? 'LF' : 'CRLF');
   }
 
   private async requestCloseTab(tabId: string): Promise<boolean> {
@@ -950,7 +1181,7 @@ class MarkLiveApp {
 
     if (tab.isDirty) {
       const choice = await this.promptUnsavedChanges(
-        `Möchtest du die Änderungen in „${tab.name}“ speichern?`,
+        t('unsavedDialog.descWithName', { name: tab.name }),
       );
       if (choice === 'cancel') return false;
       if (choice === 'save') {
@@ -987,15 +1218,15 @@ class MarkLiveApp {
   private async reopenLastClosedTab(): Promise<void> {
     const last = this.closedTabsHistory.pop();
     if (!last) {
-      this.showToast('Keine geschlossenen Tabs zum Wiederherstellen');
+      this.showToast(t('toast.noClosedTabs'));
       return;
     }
     if (last.path) {
       await this.openFileByPath(last.path);
-      this.showToast(`Tab wiederhergestellt: ${last.name}`);
+      this.showToast(t('toast.tabReopened', { name: last.name }));
     } else {
       this.createNewTab(last.name, last.content, false);
-      this.showToast(`Entwurf wiederhergestellt: ${last.name}`);
+      this.showToast(t('toast.draftReopened', { name: last.name }));
     }
   }
 
@@ -1228,9 +1459,10 @@ class MarkLiveApp {
         this.outlineCountBadgeEl.textContent = '';
       } else {
         this.outlineCountBadgeEl.textContent = String(outline.length);
-        this.outlineCountBadgeEl.title = `${outline.length} ${
-          outline.length === 1 ? 'Abschnitt' : 'Abschnitte'
-        }`;
+        this.outlineCountBadgeEl.title =
+          outline.length === 1
+            ? t('outline.oneSection')
+            : t('outline.sectionsCount', { count: outline.length });
       }
     }
 
@@ -1238,8 +1470,8 @@ class MarkLiveApp {
       const hint = document.createElement('p');
       hint.className = 'muted-hint';
       hint.textContent = this.activeTab && !isMarkdownPath(this.activeTab.name)
-        ? 'Keine Überschriften (Text-/Konfigurationsdatei).'
-        : 'Keine Überschriften im Dokument.';
+        ? t('sidebar.emptyOutlineTextFile')
+        : t('sidebar.emptyOutline');
       this.outlineEl.appendChild(hint);
       return;
     }
@@ -1249,8 +1481,8 @@ class MarkLiveApp {
       btn.type = 'button';
       btn.className = `outline-item outline-lvl-${item.level}`;
       btn.dataset.headingSlug = item.slug;
-      btn.textContent = item.text || 'Überschrift';
-      btn.title = `Zeile ${item.line}: ${item.text}`;
+      btn.textContent = item.text || t('outline.untitledHeading');
+      btn.title = t('outline.lineTooltip', { line: item.line, text: item.text });
       btn.addEventListener('click', () => {
         this.syncScroll.lockScrollForNavigation('editor', 500);
         this.editor.jumpToLine(item.line);
@@ -1324,7 +1556,7 @@ class MarkLiveApp {
       if (tab.isDirty) {
         const dot = document.createElement('span');
         dot.className = 'tab-dirty-dot';
-        dot.title = 'Ungespeicherte Änderungen';
+        dot.title = t('tab.unsavedTitle');
         selectBtn.appendChild(dot);
       }
 
@@ -1335,7 +1567,7 @@ class MarkLiveApp {
       const closeBtn = document.createElement('button');
       closeBtn.type = 'button';
       closeBtn.className = 'tab-close-btn';
-      closeBtn.setAttribute('aria-label', `${tab.name} schließen`);
+      closeBtn.setAttribute('aria-label', t('tab.closeTitle', { name: tab.name }));
       closeBtn.textContent = '×';
       closeBtn.addEventListener('click', () => {
         void this.requestCloseTab(tab.id);
@@ -1411,22 +1643,23 @@ class MarkLiveApp {
     const tab = this.activeTab;
     if (!tab) return;
 
+    const isEn = getLanguage() === 'en';
     this.statusPathBtn.textContent = tab.path ?? tab.name;
     this.statusSaveBadge.textContent = tab.isDirty
-      ? 'Ungespeichert'
+      ? t('status.unsaved')
       : tab.path
-        ? 'Gespeichert'
-        : 'Entwurf';
+        ? t('status.saved')
+        : t('status.draft');
     this.statusSaveBadge.classList.toggle('is-dirty', tab.isDirty);
 
     const { words, readingTimeSec } = tab.stats;
     this.updateWordCountDisplay();
     if (this.statusReadtimeEl) {
       if (readingTimeSec < 60) {
-        this.statusReadtimeEl.textContent = `${readingTimeSec} Sek. Lesezeit`;
+        this.statusReadtimeEl.textContent = isEn ? `${readingTimeSec}s read time` : `${readingTimeSec} Sek. Lesezeit`;
       } else {
         const mins = Math.ceil(readingTimeSec / 60);
-        this.statusReadtimeEl.textContent = `~${mins} Min. Lesezeit`;
+        this.statusReadtimeEl.textContent = isEn ? `~${mins} min read time` : `~${mins} Min. Lesezeit`;
       }
     }
     this.statusZoomBtn.textContent = `${this.zoomPercent}%`;
@@ -1439,20 +1672,29 @@ class MarkLiveApp {
     if (!tab) return;
     const { words, readingTimeSec } = tab.stats;
     const totalTokens = estimateTokens(tab.currentContent);
+    const isEn = getLanguage() === 'en';
+    const locale = isEn ? 'en-US' : 'de-DE';
+    const wordLabel = isEn ? (words === 1 ? 'word' : 'words') : (words === 1 ? 'Wort' : 'Wörter');
     const readingTimeStr = readingTimeSec < 60
-      ? `${readingTimeSec} Sek. Lesezeit`
-      : `~${Math.ceil(readingTimeSec / 60)} Min. Lesezeit`;
+      ? (isEn ? `${readingTimeSec}s read time` : `${readingTimeSec} Sek. Lesezeit`)
+      : (isEn ? `~${Math.ceil(readingTimeSec / 60)} min read time` : `~${Math.ceil(readingTimeSec / 60)} Min. Lesezeit`);
 
     if (this.statusDocSummaryBtn) {
       if (this.lastSelection.chars > 0) {
         const selW = this.lastSelection.words;
         const selC = this.lastSelection.chars;
         const selTokens = Math.ceil(Math.max(selC / 3.7, selW * 1.25));
-        this.statusDocSummaryBtn.textContent = `${selW} von ${words.toLocaleString('de-DE')} Wörtern · ~${selTokens.toLocaleString('de-DE')} Tokens`;
-        this.statusDocSummaryBtn.title = `Auswahl: ${selW.toLocaleString('de-DE')} Wörter (${selC.toLocaleString('de-DE')} Z.), ~${selTokens.toLocaleString('de-DE')} Tokens · Dokument: ${words.toLocaleString('de-DE')} Wörter (~${totalTokens.toLocaleString('de-DE')} Tokens, ${readingTimeStr}) · Klicken für Details`;
+        this.statusDocSummaryBtn.textContent = isEn
+          ? `${selW} of ${words.toLocaleString(locale)} words · ~${selTokens.toLocaleString(locale)} tokens`
+          : `${selW} von ${words.toLocaleString(locale)} Wörtern · ~${selTokens.toLocaleString(locale)} Tokens`;
+        this.statusDocSummaryBtn.title = isEn
+          ? `Selection: ${selW.toLocaleString(locale)} words (${selC.toLocaleString(locale)} ch.), ~${selTokens.toLocaleString(locale)} tokens · Document: ${words.toLocaleString(locale)} words (~${totalTokens.toLocaleString(locale)} tokens, ${readingTimeStr}) · Click for details`
+          : `Auswahl: ${selW.toLocaleString(locale)} Wörter (${selC.toLocaleString(locale)} Z.), ~${selTokens.toLocaleString(locale)} Tokens · Dokument: ${words.toLocaleString(locale)} Wörter (~${totalTokens.toLocaleString(locale)} Tokens, ${readingTimeStr}) · Klicken für Details`;
       } else {
-        this.statusDocSummaryBtn.textContent = `${words.toLocaleString('de-DE')} ${words === 1 ? 'Wort' : 'Wörter'} · ~${totalTokens.toLocaleString('de-DE')} Tokens`;
-        this.statusDocSummaryBtn.title = `Dokument-Statistiken: ${words.toLocaleString('de-DE')} Wörter · ~${totalTokens.toLocaleString('de-DE')} Tokens · ${readingTimeStr} · Klicken für Details`;
+        this.statusDocSummaryBtn.textContent = `${words.toLocaleString(locale)} ${wordLabel} · ~${totalTokens.toLocaleString(locale)} tokens`;
+        this.statusDocSummaryBtn.title = isEn
+          ? `Document statistics: ${words.toLocaleString(locale)} words · ~${totalTokens.toLocaleString(locale)} tokens · ${readingTimeStr} · Click for details`
+          : `Dokument-Statistiken: ${words.toLocaleString(locale)} Wörter · ~${totalTokens.toLocaleString(locale)} Tokens · ${readingTimeStr} · Klicken für Details`;
       }
     }
 
@@ -1460,9 +1702,11 @@ class MarkLiveApp {
       if (this.lastSelection.chars > 0) {
         const selW = this.lastSelection.words;
         const selC = this.lastSelection.chars;
-        this.statusWordsEl.textContent = `${selW} von ${words.toLocaleString('de-DE')} Wörtern markiert (${selC.toLocaleString('de-DE')} Z.)`;
+        this.statusWordsEl.textContent = isEn
+          ? `${selW} of ${words.toLocaleString(locale)} words selected (${selC.toLocaleString(locale)} ch.)`
+          : `${selW} von ${words.toLocaleString(locale)} Wörtern markiert (${selC.toLocaleString(locale)} Z.)`;
       } else {
-        this.statusWordsEl.textContent = `${words.toLocaleString('de-DE')} ${words === 1 ? 'Wort' : 'Wörter'}`;
+        this.statusWordsEl.textContent = `${words.toLocaleString(locale)} ${wordLabel}`;
       }
     }
     if (this.statusTokensEl) {
@@ -1470,9 +1714,9 @@ class MarkLiveApp {
         const selW = this.lastSelection.words;
         const selC = this.lastSelection.chars;
         const selTokens = Math.ceil(Math.max(selC / 3.7, selW * 1.25));
-        this.statusTokensEl.textContent = `~${selTokens.toLocaleString('de-DE')} Tokens (~${totalTokens.toLocaleString('de-DE')})`;
+        this.statusTokensEl.textContent = `~${selTokens.toLocaleString(locale)} Tokens (~${totalTokens.toLocaleString(locale)})`;
       } else {
-        this.statusTokensEl.textContent = `~${totalTokens.toLocaleString('de-DE')} Tokens`;
+        this.statusTokensEl.textContent = `~${totalTokens.toLocaleString(locale)} Tokens`;
       }
     }
   }
@@ -1534,45 +1778,86 @@ class MarkLiveApp {
   private toggleWordWrap(): void {
     const next = !this.editor.isWordWrapEnabled();
     this.editor.setWordWrap(next);
-    const btn = document.getElementById('btn-word-wrap')!;
-    btn.classList.toggle('is-active', next);
-    btn.setAttribute('aria-pressed', String(next));
+    const btn = document.getElementById('btn-word-wrap');
+    if (btn) {
+      btn.classList.toggle('is-active', next);
+      btn.setAttribute('aria-pressed', String(next));
+    }
+    this.settingsCtrl?.syncAll();
     this.schedulePrefsSave();
   }
 
   private toggleSyncScroll(): void {
     const next = !this.syncScroll.isEnabled();
     this.syncScroll.setEnabled(next);
-    const btn = document.getElementById('btn-sync-scroll')!;
-    btn.classList.toggle('is-active', next);
-    btn.setAttribute('aria-pressed', String(next));
+    const btn = document.getElementById('btn-sync-scroll');
+    if (btn) {
+      btn.classList.toggle('is-active', next);
+      btn.setAttribute('aria-pressed', String(next));
+    }
+    this.settingsCtrl?.syncAll();
     this.schedulePrefsSave();
   }
 
   private toggleAutoSave(): void {
     this.autoSaveEnabled = !this.autoSaveEnabled;
-    const btn = document.getElementById('btn-autosave')!;
-    btn.classList.toggle('is-active', this.autoSaveEnabled);
-    btn.setAttribute('aria-pressed', String(this.autoSaveEnabled));
+    const btn = document.getElementById('btn-autosave');
+    if (btn) {
+      btn.classList.toggle('is-active', this.autoSaveEnabled);
+      btn.setAttribute('aria-pressed', String(this.autoSaveEnabled));
+    }
+    this.settingsCtrl?.syncAll();
     this.schedulePrefsSave();
   }
 
+  private async toggleZen(force?: boolean): Promise<void> {
+    const isCurrentlyZen = this.appEl.classList.contains('is-zen');
+    const next = typeof force === 'boolean' ? force : !isCurrentlyZen;
+    if (next === isCurrentlyZen) return;
+
+    if (next) {
+      this.appEl.classList.add('is-zen');
+
+      // Clear focus from top-bar elements so it slides away smoothly
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+      this.editor.focus();
+
+      // Activate native Windows OS borderless fullscreen
+      void backend.setWindowState({ fullscreen: true });
+
+      // Inform user of Zen mode shortcuts
+      this.showToast(t('toast.zenOn'), 2800);
+    } else {
+      this.appEl.classList.remove('is-zen');
+      this.editor.focus();
+
+      // Exit native Windows OS borderless fullscreen
+      void backend.setWindowState({ fullscreen: false });
+
+      // Inform user
+      this.showToast(t('toast.zenOff'), 1800);
+    }
+    this.settingsCtrl?.syncAll();
+  }
+
   private async triggerOpenFilesDialog(): Promise<void> {
-    const res = await backend.openFilesDialog();
+    const res = await backend.openFilesDialog(getLanguage());
     for (const f of res.files) {
       this.openTabFromPayload(f);
     }
   }
 
   private async triggerOpenFolderDialog(): Promise<void> {
-    const res = await backend.openFolderDialog();
+    const res = await backend.openFolderDialog(getLanguage());
     if (res.tree) {
       this.explorer.setTree(res.tree);
       this.switchSidebarPanel('files');
     }
   }
 
-  private showToast(message: string): void {
+  private showToast(message: string, durationMs = 2800): void {
     // Never mutate the polite live region while a modal dialog makes outside DOM inert
     if (document.querySelector('dialog[open]')) return;
     window.clearTimeout(this.toastTimer);
@@ -1581,7 +1866,7 @@ class MarkLiveApp {
     this.toastTimer = window.setTimeout(() => {
       this.statusToastEl.classList.remove('is-visible');
       this.statusToastEl.textContent = '';
-    }, 2800);
+    }, durationMs);
   }
 
   private async flushActivePreviewRender(): Promise<void> {
@@ -1601,10 +1886,10 @@ class MarkLiveApp {
     const count = this.editor.alignMarkdownTables();
     if (count > 0) {
       this.showToast(
-        count === 1 ? 'Markdown-Tabelle ausgerichtet' : `${count} Markdown-Tabellen ausgerichtet`,
+        count === 1 ? t('toast.tableFormatted') : t('toast.tablesFormatted', { count }),
       );
     } else {
-      this.showToast('Keine Markdown-Tabelle im Dokument gefunden');
+      this.showToast(t('toast.noTableFound'));
     }
   }
 
@@ -1675,10 +1960,10 @@ class MarkLiveApp {
     try {
       await this.flushActivePreviewRender();
       await copyRichPreviewToClipboard(this.previewContentEl, tab.currentContent);
-      this.showToast('Als formatierter Text in die Zwischenablage kopiert');
+      this.showToast(t('toast.copyRich'));
     } catch (err) {
       console.error('Formatierter Text konnte nicht kopiert werden:', err);
-      this.showToast('Kopieren in die Zwischenablage fehlgeschlagen');
+      this.showToast(t('toast.copyFailed'));
     }
   }
 
@@ -1687,10 +1972,10 @@ class MarkLiveApp {
     if (!tab) return;
     try {
       await navigator.clipboard.writeText(tab.currentContent);
-      this.showToast(isMarkdownPath(tab.name) ? 'Markdown in Zwischenablage kopiert' : 'Quelltext in Zwischenablage kopiert');
+      this.showToast(isMarkdownPath(tab.name) ? t('toast.copyMarkdown') : t('toast.copySource'));
     } catch (err) {
       console.error('Markdown konnte nicht kopiert werden:', err);
-      this.showToast('Kopieren in die Zwischenablage fehlgeschlagen');
+      this.showToast(t('toast.copyFailed'));
     }
   }
 
@@ -1706,10 +1991,10 @@ class MarkLiveApp {
       const body = tab.currentContent.endsWith('\n') ? tab.currentContent : `${tab.currentContent}\n`;
       const payload = `${fence}${ext}:${tab.name}\n${body}${fence}\n`;
       await navigator.clipboard.writeText(payload);
-      this.showToast(`Als KI-Kontext (${tab.name}) kopiert`);
+      this.showToast(t('toast.copyAiWithName', { name: tab.name }));
     } catch (err) {
       console.error('KI-Kontext konnte nicht kopiert werden:', err);
-      this.showToast('Kopieren in die Zwischenablage fehlgeschlagen');
+      this.showToast(t('toast.copyFailed'));
     }
   }
 
@@ -1726,13 +2011,14 @@ class MarkLiveApp {
         baseDir,
         baseDir,
         renderedHtml,
+        getLanguage(),
       );
       if (res.exported && res.path) {
-        this.showToast(`HTML exportiert: ${baseNameOfPath(res.path)}`);
+        this.showToast(t('toast.htmlExportSuccess', { name: baseNameOfPath(res.path) }));
       }
     } catch (err) {
       console.error('HTML-Export fehlgeschlagen:', err);
-      this.showToast('HTML-Export fehlgeschlagen');
+      this.showToast(t('toast.htmlExportFailed'));
     }
   }
 
@@ -1741,18 +2027,18 @@ class MarkLiveApp {
     if (!tab) return;
     const baseDir = tab.parentDir ?? this.explorer.rootPath;
     try {
-      const pick = await backend.pickPdfSavePath(tab.name, baseDir);
+      const pick = await backend.pickPdfSavePath(tab.name, baseDir, getLanguage());
       if (!pick.chosen || pick.token === undefined) {
         return;
       }
       const token = pick.token;
       const res = await this.withLightPaperPreview(() => backend.executePdfExport(token));
       if (res.exported && res.path) {
-        this.showToast(`PDF exportiert: ${baseNameOfPath(res.path)}`);
+        this.showToast(t('toast.pdfExportSuccess', { name: baseNameOfPath(res.path) }));
       }
     } catch (err) {
       console.error('PDF-Export fehlgeschlagen:', err);
-      this.showToast('PDF-Export fehlgeschlagen');
+      this.showToast(t('toast.pdfExportFailed'));
     }
   }
 
@@ -1875,18 +2161,19 @@ class MarkLiveApp {
       });
     }
 
-    document.getElementById('btn-word-wrap')!.addEventListener('click', () => {
+    document.getElementById('btn-word-wrap')?.addEventListener('click', () => {
       this.toggleWordWrap();
     });
-    document.getElementById('btn-sync-scroll')!.addEventListener('click', () => {
+    document.getElementById('btn-sync-scroll')?.addEventListener('click', () => {
       this.toggleSyncScroll();
     });
-    document.getElementById('btn-autosave')!.addEventListener('click', () => {
+    document.getElementById('btn-autosave')?.addEventListener('click', () => {
       this.toggleAutoSave();
     });
 
-    const toggleZen = () => this.appEl.classList.toggle('is-zen');
-    document.getElementById('btn-zen')!.addEventListener('click', toggleZen);
+    document.getElementById('btn-exit-zen')?.addEventListener('click', () => {
+      void this.toggleZen(false);
+    });
 
     // Context menu actions for tab bar
     this.tabContextMenuEl.addEventListener('click', async (e) => {
@@ -1916,12 +2203,12 @@ class MarkLiveApp {
         case 'copy-path':
           if (tab.path) {
             await navigator.clipboard.writeText(tab.path).catch(() => {});
-            this.showToast('Dateipfad in Zwischenablage kopiert');
+            this.showToast(t('toast.copyPath'));
           }
           break;
         case 'copy-markdown':
           await navigator.clipboard.writeText(tab.currentContent).catch(() => {});
-          this.showToast(isMarkdownPath(tab.name) ? 'Markdown in Zwischenablage kopiert' : 'Quelltext in Zwischenablage kopiert');
+          this.showToast(isMarkdownPath(tab.name) ? t('toast.copyMarkdown') : t('toast.copySource'));
           break;
         case 'copy-ai-context': {
           let fence = '```';
@@ -1932,7 +2219,7 @@ class MarkLiveApp {
           const body = tab.currentContent.endsWith('\n') ? tab.currentContent : `${tab.currentContent}\n`;
           const payload = `${fence}${ext}:${tab.name}\n${body}${fence}\n`;
           await navigator.clipboard.writeText(payload).catch(() => {});
-          this.showToast(`Als KI-Kontext (${tab.name}) kopiert`);
+          this.showToast(t('toast.copyAiWithName', { name: tab.name }));
           break;
         }
       }
@@ -1947,32 +2234,32 @@ class MarkLiveApp {
       switch (action) {
         case 'row-above':
           if (this.editor.modifyTable({ type: 'insert-row', direction: 'above' })) {
-            this.showToast('Zeile oberhalb eingefügt');
+            this.showToast(t('toast.tableRowAbove'));
           }
           break;
         case 'row-below':
           if (this.editor.modifyTable({ type: 'insert-row', direction: 'below' })) {
-            this.showToast('Zeile unterhalb eingefügt');
+            this.showToast(t('toast.tableRowBelow'));
           }
           break;
         case 'delete-row':
           if (this.editor.modifyTable({ type: 'delete-row' })) {
-            this.showToast('Zeile gelöscht');
+            this.showToast(t('toast.tableRowDeleted'));
           }
           break;
         case 'col-left':
           if (this.editor.modifyTable({ type: 'insert-col', direction: 'left' })) {
-            this.showToast('Spalte links eingefügt');
+            this.showToast(t('toast.tableColLeft'));
           }
           break;
         case 'col-right':
           if (this.editor.modifyTable({ type: 'insert-col', direction: 'right' })) {
-            this.showToast('Spalte rechts eingefügt');
+            this.showToast(t('toast.tableColRight'));
           }
           break;
         case 'delete-col':
           if (this.editor.modifyTable({ type: 'delete-col' })) {
-            this.showToast('Spalte gelöscht');
+            this.showToast(t('toast.tableColDeleted'));
           }
           break;
         case 'align':
@@ -2169,14 +2456,14 @@ class MarkLiveApp {
       const sepCell =
         align === 'center' ? ':---:' : align === 'right' ? '---:' : ':---';
 
-      const headers = Array.from({ length: cols }, (_, i) => `Spalte ${i + 1}`);
+      const headers = Array.from({ length: cols }, (_, i) => t('table.columnHeader', { num: i + 1 }));
       const seps = Array.from({ length: cols }, () => sepCell);
       const lines = [
         `| ${headers.join(' | ')} |`,
         `| ${seps.join(' | ')} |`,
       ];
       for (let r = 0; r < rows; r++) {
-        const cells = Array.from({ length: cols }, () => 'Inhalt');
+        const cells = Array.from({ length: cols }, () => t('table.cellContent'));
         lines.push(`| ${cells.join(' | ')} |`);
       }
       this.editor.insertSnippet(`\n${lines.join('\n')}\n`);
@@ -2204,11 +2491,12 @@ class MarkLiveApp {
 
       const onMove = (ev: PointerEvent) => {
         const rect = splitContainer.getBoundingClientRect();
-        const pct =
-          this.splitOrientation === 'horizontal'
-            ? ((ev.clientY - rect.top) / rect.height) * 100
-            : ((ev.clientX - rect.left) / rect.width) * 100;
-        this.setSplitRatio(pct, false);
+        const pct = splitRatioFromPointer(
+          this.splitOrientation,
+          { x: ev.clientX, y: ev.clientY },
+          rect,
+        );
+        this.setSplitRatio(snapSplitRatio(pct), false);
       };
 
       const onUp = (ev: PointerEvent) => {
@@ -2216,6 +2504,7 @@ class MarkLiveApp {
         resizer.classList.remove('is-dragging');
         resizer.removeEventListener('pointermove', onMove);
         resizer.removeEventListener('pointerup', onUp);
+        this.saveSplitRatios();
         this.schedulePrefsSave();
       };
 
@@ -2227,22 +2516,25 @@ class MarkLiveApp {
       this.setSplitRatio(50);
     });
 
+    this.bindSidebarResizer();
+    this.initLayoutPreferences();
+
     resizer.addEventListener('keydown', (e) => {
       const isHoriz = this.splitOrientation === 'horizontal';
+      const step = e.shiftKey ? 10 : 3;
       if ((!isHoriz && e.key === 'ArrowLeft') || (isHoriz && e.key === 'ArrowUp')) {
         e.preventDefault();
-        this.setSplitRatio(this.splitRatio - 3);
+        this.setSplitRatio(this.splitRatio - step);
       } else if ((!isHoriz && e.key === 'ArrowRight') || (isHoriz && e.key === 'ArrowDown')) {
         e.preventDefault();
-        this.setSplitRatio(this.splitRatio + 3);
+        this.setSplitRatio(this.splitRatio + step);
       } else if (e.key === 'Home') {
         e.preventDefault();
         this.setSplitRatio(50);
+      } else if (e.key === 'End') {
+        e.preventDefault();
+        this.setSplitRatio(80);
       }
-    });
-
-    document.getElementById('btn-toggle-split-orientation')?.addEventListener('click', () => {
-      this.toggleSplitOrientation();
     });
 
     const openStats = () => this.openDocStatsPopover();
@@ -2285,10 +2577,10 @@ class MarkLiveApp {
         const codeEl = copyBtn.closest('.code-block-wrapper')?.querySelector('pre code');
         if (codeEl) {
           void navigator.clipboard.writeText(codeEl.textContent ?? '').then(() => {
-            copyBtn.textContent = 'Kopiert ✓';
-            this.showToast('Codeblock in Zwischenablage kopiert');
+            copyBtn.textContent = t('preview.copied');
+            this.showToast(t('toast.copyCode'));
             setTimeout(() => {
-              copyBtn.textContent = 'Kopieren';
+              copyBtn.textContent = t('preview.copy');
             }, 1400);
           });
         }
@@ -2301,10 +2593,10 @@ class MarkLiveApp {
         const svgEl = wrapper?.querySelector('svg');
         if (svgEl) {
           void navigator.clipboard.writeText(svgEl.outerHTML).then(() => {
-            copyMermaidBtn.textContent = 'Kopiert ✓';
-            this.showToast('Mermaid-SVG in Zwischenablage kopiert');
+            copyMermaidBtn.textContent = t('preview.copied');
+            this.showToast(t('toast.copyDiagram'));
             setTimeout(() => {
-              copyMermaidBtn.textContent = 'SVG kopieren';
+              copyMermaidBtn.textContent = t('preview.copySvg');
             }, 1400);
           });
         }
@@ -2332,7 +2624,7 @@ class MarkLiveApp {
           });
           if (anchor.classList.contains('heading-anchor')) {
             void navigator.clipboard?.writeText(href);
-            this.showToast('Abschnitt-Link kopiert');
+            this.showToast(t('toast.sectionLinkCopied'));
           }
         } else if (
           href.startsWith('https://') ||
@@ -2446,12 +2738,15 @@ class MarkLiveApp {
           const hasOpenPopover = !!document.querySelector(':popover-open');
           if (this.appEl.classList.contains('is-zen') && !hasOpenPopover) {
             consume();
-            this.appEl.classList.remove('is-zen');
+            void this.toggleZen(false);
             return;
           }
         }
 
-        if (mod && !e.altKey && !e.shiftKey && key === 'e') {
+        if (mod && !e.altKey && !e.shiftKey && (key === ',' || e.key === ',')) {
+          consume();
+          this.settingsCtrl.openSettings();
+        } else if (mod && !e.altKey && !e.shiftKey && key === 'e') {
           consume();
           this.palette.open('files');
         } else if (mod && !e.altKey && e.shiftKey && key === 'p') {
@@ -2487,6 +2782,12 @@ class MarkLiveApp {
         } else if (mod && !e.altKey && e.shiftKey && key === 'c') {
           consume();
           void this.copyCurrentTabMarkdown();
+        } else if (mod && !e.altKey && e.shiftKey && key === 'a') {
+          consume();
+          void this.copyCurrentTabAiContext();
+        } else if (mod && !e.altKey && e.shiftKey && key === 'h') {
+          consume();
+          void this.exportCurrentTabHtml();
         } else if (mod && !e.altKey && e.shiftKey && key === 'd') {
           consume();
           void this.exportCurrentTabPdf();
@@ -2537,12 +2838,24 @@ class MarkLiveApp {
         } else if (e.altKey && !mod && e.shiftKey && key === 's') {
           consume();
           this.toggleSplitOrientation();
+        } else if (e.altKey && !mod && e.shiftKey && key === 'b') {
+          consume();
+          this.toggleEditorCentered();
         } else if (e.altKey && !mod && e.shiftKey && key === 'r') {
           consume();
           this.toggleFormatBar();
+        } else if (e.altKey && !mod && e.shiftKey && key === 'y') {
+          consume();
+          this.toggleSyncScroll();
+        } else if (e.altKey && !mod && e.shiftKey && key === 'a') {
+          consume();
+          this.toggleAutoSave();
+        } else if (e.altKey && !mod && e.shiftKey && key === 't') {
+          consume();
+          toggleTheme();
         } else if (e.key === 'F11') {
           consume();
-          toggleZen();
+          void this.toggleZen();
         } else if (e.key === 'F1') {
           consume();
           shortcutsDialog.showModal();
@@ -2632,7 +2945,7 @@ class MarkLiveApp {
 
       const names = dirtyTabs.map((t) => `„${t.name}“`).join(', ');
       const choice = await this.promptUnsavedChanges(
-        `Ungespeicherte Änderungen in ${names}. Vor dem Beenden speichern?`,
+        t('unsavedDialog.beforeQuitDesc', { names }),
       );
       if (choice === 'cancel') return;
 
