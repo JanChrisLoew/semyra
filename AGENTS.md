@@ -5,6 +5,9 @@ Semyra is a native **Windows 11 x64 Markdown editor with live preview for the AI
 > [!IMPORTANT]
 > **Product Context & Design Authority (`docs/PRODUCT_CONTEXT.md`)**:  
 > The authoritative product and design specification is maintained in [`docs/PRODUCT_CONTEXT.md`](docs/PRODUCT_CONTEXT.md). For all future features, refactorings, and UI/theme adjustments, developers and AI coding agents MUST strictly consult and comply with `docs/PRODUCT_CONTEXT.md` (neutral-first Markdown typography, Steel Blue interaction accent `#83A5C6` Dark / `#426B91` Light, Amber `#D0A774` / `#986C3D` solely for unsaved changes, and preservation of the desktop-grade local performance).
+>
+> **Session Work Log Requirement (`WORK_LOG.md`)**:  
+> At the conclusion of every development session or major task sequence, developers and AI coding agents MUST document key activities, technical decisions, changed files, and test results in [`WORK_LOG.md`](WORK_LOG.md).
 
 ## 1. Architecture Overview
 
@@ -76,3 +79,14 @@ cargo build --release
   - Enclose search inputs in `<search>` with explicit `<label class="visually-hidden">` elements.
   - Keep interactive close buttons as siblings of `<button role="tab">` inside `.tab-slot` (never nest `<button>` inside `[role="tab"]`), and maintain roving `tabindex` keyboard support.
   - Maintain dual light/dark theme support via `:root { color-scheme: light dark; }`, `light-dark()` tokens, and `<meta name="color-scheme">` synchronization with the Win32 titlebar (`window.set_theme`).
+
+## 5. Development Workflow & Session Logging (`WORK_LOG.md`)
+
+- **Session Log Requirement**: At the conclusion of every development session or feature/refactoring task, developers and AI coding agents MUST append or update an entry in [`WORK_LOG.md`](WORK_LOG.md).
+- **Structure of Entries**: Each entry must document:
+  1. **Date & Scope**: Timestamp and summary of the user's task or feature goals.
+  2. **Key Changes**: Concrete files modified/created/deleted and architectural decisions made.
+  3. **Verification & Build**: Results of `npm run typecheck`, `npm test`, `cargo test`, and `Build-Release.ps1`.
+  4. **Decisions & Next Steps**: Important considerations, trade-offs, or open items for subsequent sessions.
+- **Language**: Log entries are documented in German with precise technical identifiers.
+
