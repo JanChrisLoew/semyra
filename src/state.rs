@@ -79,10 +79,7 @@ impl AppState {
             allowed_roots.insert(normalize_existing_path(folder));
         }
 
-        let pasted_assets_dir = dirs::data_local_dir()
-            .unwrap_or_else(std::env::temp_dir)
-            .join("MarkLive")
-            .join("pasted-assets");
+        let pasted_assets_dir = crate::fs_ops::app_data_dir().join("pasted-assets");
         allowed_roots.insert(normalize_existing_path(&pasted_assets_dir));
 
         let recovered_drafts = load_recovery_snapshot();

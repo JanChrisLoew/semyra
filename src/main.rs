@@ -10,7 +10,7 @@ mod state;
 mod window_prefs;
 
 use crate::fs_ops::{clean_windows_path, is_image_path, normalize_existing_path};
-use crate::icon_gen::render_marklive_rgba;
+use crate::icon_gen::render_semyra_rgba;
 use crate::ipc::handle_protocol_request;
 use crate::single_instance::{
     cleanup_instance_lock, start_primary_instance_listener, try_forward_to_running_instance,
@@ -72,7 +72,7 @@ fn parse_cli_targets() -> CliArgs {
 }
 
 fn generate_window_rgba_icon(size: u32) -> Option<Icon> {
-    let rgba = render_marklive_rgba(size);
+    let rgba = render_semyra_rgba(size);
     Icon::from_rgba(rgba, size, size).ok()
 }
 
@@ -130,7 +130,7 @@ fn cleanup_stale_webview_profiles(base_data_dir: &Path) {
 
 fn dispatch_frontend_event(webview: &WebView, event_name: &str, payload_json: &str) {
     let js = format!(
-        "if (window.__markliveReceive) {{ window.__markliveReceive({:?}, {}); }}",
+        "if (window.__semyraReceive) {{ window.__semyraReceive({:?}, {}); }}",
         event_name, payload_json
     );
     let _ = webview.evaluate_script(&js);
@@ -152,13 +152,13 @@ fn build_webview_with_context<'a>(
         .with_transparent(false)
         .with_clipboard(true)
         .with_devtools(cfg!(debug_assertions))
-        .with_asynchronous_custom_protocol("marklive".into(), move |_webview_id, req, responder| {
+        .with_asynchronous_custom_protocol("semyra".into(), move |_webview_id, req, responder| {
             handle_protocol_request(protocol_state.clone(), req, responder);
         })
         .with_navigation_handler(move |uri| {
-            let allowed = uri.starts_with("https://marklive.localhost")
-                || uri.starts_with("http://marklive.localhost")
-                || uri.starts_with("marklive://");
+            let allowed = uri.starts_with("https://semyra.localhost")
+                || uri.starts_with("http://semyra.localhost")
+                || uri.starts_with("semyra://");
             if !allowed
                 && (uri.starts_with("https://")
                     || uri.starts_with("http://")
@@ -224,7 +224,7 @@ fn build_webview_with_context<'a>(
             }
             true
         })
-        .with_url("marklive://localhost/");
+        .with_url("semyra://localhost/");
 
     #[cfg(target_os = "windows")]
     let builder = builder
@@ -289,9 +289,7 @@ fn main() {
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
 
-    let base_data_dir = dirs::data_local_dir()
-        .unwrap_or_else(env::temp_dir)
-        .join("MarkLive");
+    let base_data_dir = crate::fs_ops::app_data_dir();
 
     let is_primary = !cli.force_new_window;
     if is_primary {
@@ -307,7 +305,7 @@ fn main() {
     );
 
     let mut win_builder = WindowBuilder::new()
-        .with_title("MarkLive")
+        .with_title("Semyra")
         .with_inner_size(LogicalSize::new(prefs.width, prefs.height))
         .with_min_inner_size(LogicalSize::new(760.0, 480.0))
         .with_maximized(prefs.maximized)

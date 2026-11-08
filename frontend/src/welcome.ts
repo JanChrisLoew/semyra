@@ -1,8 +1,8 @@
 import { getLanguage, Language } from './i18n';
 
-export const WELCOME_MARKDOWN_DE = `# Willkommen bei MarkLive 👋
+export const WELCOME_MARKDOWN_DE = `# Willkommen bei Semyra 👋
 
-**MarkLive** ist dein nativer **Windows 11 x64 Markdown-Editor** auf Basis von **Rust** (\`pulldown-cmark\` + \`syntect\`) mit sofortiger Live-Vorschau.
+**Semyra** ist dein nativer **Windows 11 Markdown-Viewer und -Editor für das KI-Zeitalter** auf Basis von **Rust** (\`pulldown-cmark\` + \`syntect\`) mit sofortiger Live-Vorschau.
 
 > [!TIP]
 > Drücke **Strg + E** für die **Schnellauswahl** (Dateien & Verlauf) oder **Strg + Umschalt + P** für die **Befehlspalette**. Öffne Dateien über **Strg + O**, füge Screenshots per **Strg + V** ein oder ziehe Dateien & Bilder direkt per **Drag & Drop** ins Fenster!
@@ -19,7 +19,7 @@ export const WELCOME_MARKDOWN_DE = `# Willkommen bei MarkLive 👋
 
 \`\`\`rust
 fn gruss_aus_windows_11(name: &str) -> String {
-    format!("Hallo {name}, viel Spaß beim Schreiben in MarkLive!")
+    format!("Hallo {name}, viel Spaß beim Schreiben in Semyra!")
 }
 \`\`\`
 
@@ -50,9 +50,9 @@ flowchart LR
 \`\`\`
 `;
 
-export const WELCOME_MARKDOWN_EN = `# Welcome to MarkLive 👋
+export const WELCOME_MARKDOWN_EN = `# Welcome to Semyra 👋
 
-**MarkLive** is your native **Windows 11 x64 Markdown editor** powered by **Rust** (\`pulldown-cmark\` + \`syntect\`) with instant live preview.
+**Semyra** is your native **Windows 11 Markdown viewer and editor for the AI era**, powered by **Rust** (\`pulldown-cmark\` + \`syntect\`) with instant live preview.
 
 > [!TIP]
 > Press **Ctrl + E** for **Quick Open** (files & history) or **Ctrl + Shift + P** for the **Command Palette**. Open files with **Ctrl + O**, paste screenshots via **Ctrl + V**, or drag & drop files and images directly into the window!
@@ -69,7 +69,7 @@ export const WELCOME_MARKDOWN_EN = `# Welcome to MarkLive 👋
 
 \`\`\`rust
 fn greetings_from_windows_11(name: &str) -> String {
-    format!("Hello {name}, enjoy writing in MarkLive!")
+    format!("Hello {name}, enjoy writing in Semyra!")
 }
 \`\`\`
 

@@ -38,9 +38,7 @@ pub fn save_clipboard_image(
     let (assets_dir, use_relative) = if let Some(doc_dir) = base_dir.filter(|d| d.is_dir()) {
         (doc_dir.join("assets"), true)
     } else {
-        let fallback = dirs::data_local_dir()
-            .unwrap_or_else(std::env::temp_dir)
-            .join("MarkLive")
+        let fallback = super::app_data_dir()
             .join("pasted-assets");
         (fallback, false)
     };
@@ -125,7 +123,7 @@ mod tests {
 
     #[test]
     fn searches_markdown_files_and_saves_clipboard_png() {
-        let tmp = std::env::temp_dir().join(format!("marklive_test_{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("semyra_test_{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
 

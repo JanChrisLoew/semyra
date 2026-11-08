@@ -242,11 +242,11 @@ const listeners: {
 
 declare global {
   interface Window {
-    __markliveReceive?: (eventName: string, payload: unknown) => void;
+    __semyraReceive?: (eventName: string, payload: unknown) => void;
   }
 }
 
-window.__markliveReceive = (eventName: string, payload: unknown) => {
+const dispatchReceivedEvent = (eventName: string, payload: unknown) => {
   const list = listeners[eventName as keyof BackendEventMap];
   if (list) {
     for (const fn of list) {
@@ -254,6 +254,8 @@ window.__markliveReceive = (eventName: string, payload: unknown) => {
     }
   }
 };
+
+window.__semyraReceive = dispatchReceivedEvent;
 
 export function onBackendEvent<K extends keyof BackendEventMap>(
   event: K,

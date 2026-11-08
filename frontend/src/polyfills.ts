@@ -1,7 +1,7 @@
 /**
  * Progressive enhancement fallbacks for modern HTML features (`popover`,
  * Invoker Commands `commandfor`/`command`, `focusgroup="menu"`, and
- * `<dialog closedby="any">`) so MarkLive works identically in WebView2 and
+ * `<dialog closedby="any">`) so Semyra works identically in WebView2 and
  * standards-based test environments (`jsdom`).
  */
 export function installProgressiveEnhancements(): void {

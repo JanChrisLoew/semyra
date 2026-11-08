@@ -114,7 +114,7 @@ pub fn write_text_file(path: &Path, content: &str, prefer_crlf: bool) -> Result<
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let tmp_name = format!(".marklive-save-{}-{nanos:x}.tmp", std::process::id());
+    let tmp_name = format!(".semyra-save-{}-{nanos:x}.tmp", std::process::id());
     let tmp_path = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())

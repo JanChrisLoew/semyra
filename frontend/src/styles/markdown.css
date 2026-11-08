@@ -68,8 +68,8 @@
 
 .markdown-body h3 { font-size: 1.25em; }
 .markdown-body h4 { font-size: 1.08em; }
-.markdown-body h5 { font-size: 0.95em; color: var(--fg-secondary); }
-.markdown-body h6 { font-size: 0.88em; color: var(--fg-muted); }
+.markdown-body h5 { font-size: 0.95em; }
+.markdown-body h6 { font-size: 0.88em; }
 
 .markdown-body p,
 .markdown-body ul,
@@ -118,9 +118,9 @@
 }
 
 .markdown-body blockquote {
-  padding: 0.5em 1em;
-  color: var(--fg-secondary);
-  border-left: 4px solid var(--border-strong);
+  padding: 0.6em 1.1em;
+  color: var(--fg-primary);
+  border-left: 3.5px solid var(--border-strong);
   background: var(--bg-subtle);
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
 }
@@ -151,28 +151,29 @@
   gap: 6px;
 }
 
-.gfm-alert-note { border-left-color: #2f81f7; }
-.gfm-alert-note .gfm-alert-title { color: #2f81f7; }
+.gfm-alert-note { border-left-color: var(--color-accent); }
+.gfm-alert-note .gfm-alert-title { color: var(--color-accent); }
 
-.gfm-alert-tip { border-left-color: #2da44e; }
-.gfm-alert-tip .gfm-alert-title { color: #2da44e; }
+.gfm-alert-tip { border-left-color: var(--color-teal-subtle); }
+.gfm-alert-tip .gfm-alert-title { color: var(--color-teal-subtle); }
 
-.gfm-alert-important { border-left-color: #8250df; }
-.gfm-alert-important .gfm-alert-title { color: #8250df; }
+.gfm-alert-important { border-left-color: #8f7ce6; }
+.gfm-alert-important .gfm-alert-title { color: #8f7ce6; }
 
-.gfm-alert-warning { border-left-color: #d29922; }
-.gfm-alert-warning .gfm-alert-title { color: #d29922; }
+.gfm-alert-warning { border-left-color: var(--color-unsaved-dot); }
+.gfm-alert-warning .gfm-alert-title { color: var(--color-unsaved-dot); }
 
-.gfm-alert-caution { border-left-color: #cf222e; }
-.gfm-alert-caution .gfm-alert-title { color: #cf222e; }
+.gfm-alert-caution { border-left-color: var(--danger); }
+.gfm-alert-caution .gfm-alert-title { color: var(--danger); }
 
 /* Inline Code & Syntect Code Blocks */
-.markdown-body code {
+.markdown-body :not(pre) > code {
   font-family: var(--font-mono);
-  font-size: 0.87em;
-  padding: 0.18em 0.42em;
+  font-size: 0.88em;
+  padding: 0.16em 0.42em;
   border-radius: 5px;
-  background: var(--bg-subtle);
+  background: var(--color-accent-subtle);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .code-block-wrapper {
@@ -231,6 +232,8 @@
 
 .code-block-wrapper pre code {
   padding: 0;
+  border: 0;
+  border-radius: 0;
   background: transparent;
   font-size: 13.5px;
   line-height: 1.55;
@@ -449,9 +452,6 @@
 .frontmatter-card pre code {
   background: transparent;
   padding: 0;
-}
-
-.frontmatter-card pre code {
-  background: transparent;
-  padding: 0;
+  border: 0;
+  border-radius: 0;
 }

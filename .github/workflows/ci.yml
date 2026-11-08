@@ -45,11 +45,11 @@ jobs:
       - name: Run Rust unit tests
         run: cargo test --locked
 
-      - name: Build standalone MarkLive.exe (Release)
+      - name: Build standalone Semyra.exe (Release)
         run: cargo build --release --locked
 
-      - name: Upload MarkLive.exe artifact
+      - name: Upload Semyra.exe artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MarkLive-win11-x64
-          path: target/release/MarkLive.exe
+          name: Semyra-win11-x64
+          path: target/release/Semyra.exe

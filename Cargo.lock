@@ -1373,31 +1373,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
-name = "marklive"
-version = "0.2.0"
-dependencies = [
- "base64 0.22.1",
- "dirs 5.0.1",
- "http",
- "mime_guess",
- "notify",
- "percent-encoding",
- "pulldown-cmark",
- "rfd",
- "rust-embed",
- "serde",
- "serde_json",
- "syntect",
- "tao",
- "trash",
- "webview2-com",
- "window-vibrancy",
- "windows-core",
- "winresource",
- "wry",
-]
-
-[[package]]
 name = "markup5ever"
 version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2240,6 +2215,31 @@ name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+
+[[package]]
+name = "semyra"
+version = "0.2.0"
+dependencies = [
+ "base64 0.22.1",
+ "dirs 5.0.1",
+ "http",
+ "mime_guess",
+ "notify",
+ "percent-encoding",
+ "pulldown-cmark",
+ "rfd",
+ "rust-embed",
+ "serde",
+ "serde_json",
+ "syntect",
+ "tao",
+ "trash",
+ "webview2-com",
+ "window-vibrancy",
+ "windows-core",
+ "winresource",
+ "wry",
+]
 
 [[package]]
 name = "serde"

@@ -1,8 +1,9 @@
 /// Shared procedural Windows 11 Fluent icon generator used by both `build.rs` (multi-DPI `.ico`)
 /// and `src/main.rs` (runtime `tao::window::Icon`).
 
-/// Renders the MarkLive rounded-badge icon into top-down `RGBA` bytes (`size * size * 4`).
-pub fn render_marklive_rgba(size: u32) -> Vec<u8> {
+/// Renders the Semyra rounded-badge icon (Midnight background with geometric S-monogram and Steel Blue accent)
+/// into top-down `RGBA` bytes (`size * size * 4`).
+pub fn render_semyra_rgba(size: u32) -> Vec<u8> {
     let mut rgba = vec![0u8; (size * size * 4) as usize];
     let s = size as f32;
 
@@ -28,50 +29,64 @@ pub fn render_marklive_rgba(size: u32) -> Vec<u8> {
                 continue;
             }
 
-            // Fluent Blue-Indigo diagonal gradient
+            // Semyra Midnight-to-Slate subtle gradient (#151A22 to #1D2633)
             let t = ((dx + dy) / (2.0 * s)).clamp(0.0, 1.0);
-            let mut r = 37.0 * (1.0 - t) + 99.0 * t;
-            let mut g = 99.0 * (1.0 - t) + 102.0 * t;
-            let mut b = 235.0 * (1.0 - t) + 241.0 * t;
+            let mut r = 21.0 * (1.0 - t) + 29.0 * t;
+            let mut g = 26.0 * (1.0 - t) + 38.0 * t;
+            let mut b = 34.0 * (1.0 - t) + 51.0 * t;
 
-            // Subtle top specular highlight
+            // Subtle top specular highlight (Windows 11 Fluent)
             if dy < s * 0.22 {
-                let hl = (1.0 - dy / (s * 0.22)) * 0.14;
+                let hl = (1.0 - dy / (s * 0.22)) * 0.16;
                 r += (255.0 - r) * hl;
                 g += (255.0 - g) * hl;
                 b += (255.0 - b) * hl;
             }
 
-            // Crisp white "M" + Markdown downward arrow in normalized [0..1] coords
+            // Geometric "S" Monogram in normalized coords [0..1]
+            // Composed of structured Markdown-inspired segments:
+            // Top bar, upper-left stem, middle bar, lower-right stem, bottom bar
             let nx = dx / s;
             let ny = dy / s;
-            let mut fg = false;
 
-            if (0.28..=0.72).contains(&ny) {
-                if (0.20..=0.28).contains(&nx) || (0.50..=0.58).contains(&nx) {
-                    fg = true;
-                }
-                let diag_y = (ny - 0.28) / 0.30;
-                if (0.0..=1.0).contains(&diag_y) {
-                    let tl = 0.24 + diag_y * 0.15;
-                    let tr = 0.54 - diag_y * 0.15;
-                    if (nx - tl).abs() < 0.044 || (nx - tr).abs() < 0.044 {
-                        fg = true;
-                    }
-                }
+            let mut is_fg = false;
+            let mut is_accent = false;
+
+            // 1. Top bar: ny in [0.26, 0.35], nx in [0.30, 0.63]
+            if (0.26..=0.35).contains(&ny) && (0.30..=0.63).contains(&nx) {
+                is_fg = true;
+            }
+            // 2. Steel-Blue Accent block at upper right: ny in [0.26, 0.35], nx in [0.64..0.72]
+            if (0.26..=0.35).contains(&ny) && (0.64..=0.72).contains(&nx) {
+                is_accent = true;
+            }
+            // 3. Upper-left vertical spine: ny in [0.33, 0.52], nx in [0.30, 0.40]
+            if (0.33..=0.52).contains(&ny) && (0.30..=0.40).contains(&nx) {
+                is_fg = true;
+            }
+            // 4. Middle horizontal bar: ny in [0.46, 0.55], nx in [0.30, 0.72]
+            if (0.46..=0.55).contains(&ny) && (0.30..=0.72).contains(&nx) {
+                is_fg = true;
+            }
+            // 5. Lower-right vertical spine: ny in [0.49, 0.68], nx in [0.62, 0.72]
+            if (0.49..=0.68).contains(&ny) && (0.62..=0.72).contains(&nx) {
+                is_fg = true;
+            }
+            // 6. Bottom bar: ny in [0.65, 0.74], nx in [0.30, 0.72]
+            if (0.65..=0.74).contains(&ny) && (0.30..=0.72).contains(&nx) {
+                is_fg = true;
             }
 
-            if (0.30..=0.62).contains(&ny) && (0.70..=0.78).contains(&nx) {
-                fg = true;
-            }
-            if (0.54..=0.72).contains(&ny) && (nx - 0.74).abs() <= (0.72 - ny) * 0.85 {
-                fg = true;
-            }
-
-            if fg {
-                r = 255.0;
-                g = 255.0;
-                b = 255.0;
+            if is_accent {
+                // Semyra Steel Blue (#83A5C6 / RGB 131, 165, 198)
+                r = 131.0;
+                g = 165.0;
+                b = 198.0;
+            } else if is_fg {
+                // Crisp Ice White (#EEF3F7 / RGB 238, 243, 247)
+                r = 238.0;
+                g = 243.0;
+                b = 247.0;
             }
 
             let idx = ((y * size + x) * 4) as usize;
@@ -91,7 +106,7 @@ pub fn generate_multi_size_ico(sizes: &[u32]) -> Vec<u8> {
     let mut frames: Vec<(u32, Vec<u8>)> = Vec::with_capacity(sizes.len());
 
     for &size in sizes {
-        let rgba = render_marklive_rgba(size);
+        let rgba = render_semyra_rgba(size);
         let mut bgra_bottom_up = vec![0u8; rgba.len()];
         for y in 0..size {
             let src_row = (size - 1 - y) as usize;

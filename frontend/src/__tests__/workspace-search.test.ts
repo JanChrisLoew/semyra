@@ -44,7 +44,7 @@ describe('WorkspaceSearchController', () => {
     getWorkspaceRootPath.mockReturnValue(null);
     const controller = createController();
 
-    searchInputEl.value = 'MarkLive';
+    searchInputEl.value = 'Semyra';
     await controller.runSearch();
 
     expect(resultsContainerEl.textContent).toContain('Bitte öffne zuerst einen Arbeitsordner');
@@ -58,15 +58,15 @@ describe('WorkspaceSearchController', () => {
         relPath: 'Guide.md',
         name: 'Guide.md',
         matches: [
-          { line: 5, column: 3, preview: 'MarkLive rocks' },
-          { line: 12, column: 1, preview: 'Use MarkLive daily' },
+          { line: 5, column: 3, preview: 'Semyra rocks' },
+          { line: 12, column: 1, preview: 'Use Semyra daily' },
         ],
       },
       {
         path: 'C:\\Projekte\\Notes\\TODO.md',
         relPath: 'TODO.md',
         name: 'TODO.md',
-        matches: [{ line: 2, column: 7, preview: 'Test MarkLive' }],
+        matches: [{ line: 2, column: 7, preview: 'Test Semyra' }],
       },
     ];
 
@@ -75,7 +75,7 @@ describe('WorkspaceSearchController', () => {
 
     expect(clearBtn.hidden).toBe(true);
 
-    searchInputEl.value = 'MarkLive';
+    searchInputEl.value = 'Semyra';
     searchInputEl.dispatchEvent(new Event('input'));
 
     expect(clearBtn.hidden).toBe(false);
@@ -84,7 +84,7 @@ describe('WorkspaceSearchController', () => {
     // Fast forward debounce timer (180ms)
     await vi.advanceTimersByTimeAsync(200);
 
-    expect(searchSpy).toHaveBeenCalledWith('C:\\Projekte\\Notes', 'MarkLive', false);
+    expect(searchSpy).toHaveBeenCalledWith('C:\\Projekte\\Notes', 'Semyra', false);
     expect(statusBadgeEl.textContent).toBe('3');
     expect(statusBadgeEl.title).toBe('3 Treffer in 2 Dateien');
 

@@ -1,5 +1,5 @@
 /**
- * Lightweight, zero-dependency internationalization (i18n) module for MarkLive.
+ * Lightweight, zero-dependency internationalization (i18n) module for Semyra.
  * Supports reactive in-place language switching between German ('de') and English ('en').
  */
 
@@ -303,7 +303,7 @@ const de: Record<string, string> = {
   'docStats.aiTokens': 'KI-Token-Schätzung (Prompts)',
   'docStats.aiTokensDesc': 'Geschätzt für GPT-4, Claude 3.5, Gemini 1.5',
 
-  'shortcutsDialog.title': 'Tastenkombinationen in MarkLive',
+  'shortcutsDialog.title': 'Tastenkombinationen in Semyra',
   'shortcutsDialog.close': 'Schließen',
   'shortcuts.quickOpen': 'Schnellauswahl (Dateien, Tabs & Verlauf)',
   'shortcuts.commandPalette': 'Befehlspalette öffnen',
@@ -366,12 +366,14 @@ const de: Record<string, string> = {
   'unsavedDialog.cancel': 'Abbrechen',
   'unsavedDialog.save': 'Speichern',
 
-  'externalBanner.text': 'Die Datei wurde außerhalb von MarkLive geändert.',
+  'externalBanner.text': 'Die Datei wurde außerhalb von Semyra geändert.',
   'externalBanner.reload': 'Neu laden',
   'externalBanner.dismiss': 'Ignorieren',
 
-  'about.title': 'Über MarkLive',
-  'about.desc': 'Nativer High-Performance Markdown-Editor für Windows 11, kompiliert in Rust mit Microsoft Edge WebView2 ohne Node.js- oder Electron-Laufzeitumgebung.',
+  'about.title': 'Über Semyra',
+  'about.claim': 'Markdown for the AI era.',
+  'about.desc': 'Semyra ist ein nativer Markdown-Viewer und -Editor für Windows – entwickelt für Dokumentation, Prompts, Skills und Agentenanweisungen.',
+  'about.shortcutsSub': 'Übersicht aller Tastenkürzel und Navigationshilfen anzeigen.',
   'about.shortcutsBtn': 'Tastenkürzel & Hilfe anzeigen (F1)',
 
   // Drag & Drop
@@ -773,7 +775,7 @@ const en: Record<string, string> = {
   'docStats.aiTokens': 'AI Token Estimation (Prompts)',
   'docStats.aiTokensDesc': 'Estimated for GPT-4, Claude 3.5, Gemini 1.5',
 
-  'shortcutsDialog.title': 'Keyboard Shortcuts in MarkLive',
+  'shortcutsDialog.title': 'Keyboard Shortcuts in Semyra',
   'shortcutsDialog.close': 'Close',
   'shortcuts.quickOpen': 'Quick Open (files, tabs & history)',
   'shortcuts.commandPalette': 'Open Command Palette',
@@ -836,12 +838,14 @@ const en: Record<string, string> = {
   'unsavedDialog.cancel': 'Cancel',
   'unsavedDialog.save': 'Save',
 
-  'externalBanner.text': 'The file was modified outside of MarkLive.',
+  'externalBanner.text': 'The file was modified outside of Semyra.',
   'externalBanner.reload': 'Reload',
   'externalBanner.dismiss': 'Dismiss',
 
-  'about.title': 'About MarkLive',
-  'about.desc': 'Native high-performance Markdown editor for Windows 11, compiled in Rust with Microsoft Edge WebView2 without Node.js or Electron runtime dependencies.',
+  'about.title': 'About Semyra',
+  'about.claim': 'Markdown for the AI era.',
+  'about.desc': 'A native Markdown viewer and editor for documentation, prompts, skills, and agent instructions.',
+  'about.shortcutsSub': 'View keyboard shortcuts and navigation guide.',
   'about.shortcutsBtn': 'Show Keyboard Shortcuts & Help (F1)',
 
   // Drag & Drop
@@ -954,7 +958,7 @@ const dictionaries: Record<Language, Record<string, string>> = { de, en };
 let currentLanguage: Language = ((): Language => {
   if (typeof window !== 'undefined') {
     try {
-      const saved = localStorage.getItem('marklive.language');
+      const saved = localStorage.getItem('semyra.language');
       if (saved === 'de' || saved === 'en') return saved;
     } catch {}
   }
@@ -1031,7 +1035,7 @@ export function setLanguage(lang: Language, persist = true): void {
 
   if (persist) {
     try {
-      localStorage.setItem('marklive.language', lang);
+      localStorage.setItem('semyra.language', lang);
     } catch {}
   }
 

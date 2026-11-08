@@ -101,10 +101,7 @@ impl Default for WindowPrefs {
 }
 
 fn prefs_path() -> PathBuf {
-    dirs::data_local_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("MarkLive")
-        .join("window_prefs.json")
+    crate::fs_ops::app_data_dir().join("window_prefs.json")
 }
 
 pub fn load_window_prefs() -> WindowPrefs {

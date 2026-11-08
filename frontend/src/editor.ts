@@ -59,7 +59,7 @@ const markdownHighlightStyle = HighlightStyle.define([
   { tag: tags.strikethrough, textDecoration: 'line-through' },
   { tag: [tags.monospace, tags.processingInstruction], color: 'var(--accent)' },
   { tag: [tags.link, tags.url], color: 'var(--accent)', textDecoration: 'underline' },
-  { tag: tags.quote, color: 'var(--fg-secondary)', fontStyle: 'italic' },
+  { tag: tags.quote, fontStyle: 'italic' },
   { tag: tags.meta, color: 'var(--fg-muted)' },
 ]);
 

@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
-test.describe('MarkLive Layout & Split Matrix', () => {
+test.describe('Semyra Layout & Split Matrix', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     // Wait for the app shell and codemirror to be ready

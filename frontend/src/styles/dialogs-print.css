@@ -172,9 +172,13 @@ kbd {
   cursor: pointer;
 }
 
-.palette-item.is-selected,
 .palette-item:hover {
+  background: var(--bg-hover);
+}
+
+.palette-item.is-selected {
   background: var(--bg-active);
+  box-shadow: inset 2.5px 0 0 var(--accent);
 }
 
 .palette-item:focus-visible {
@@ -539,7 +543,8 @@ dialog.settings-dialog {
 
 .settings-seg-btn.is-active {
   background: var(--bg-elevated);
-  color: var(--fg-primary);
+  color: var(--accent);
+  font-weight: 600;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 

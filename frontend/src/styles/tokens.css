@@ -1,116 +1,209 @@
 /* ==========================================================================
-   MarkLive – Design Tokens, Color Scheme, Scrollbars & Base Accessibility
+   Semyra – Design Tokens, Color Scheme, Scrollbars & Base Accessibility
+   Harmonized Design System (Midnight / Slate Dark · Pure White / Slate Light)
    ========================================================================== */
 
 :root {
-  /* Raw Light / Dark Palette Tokens (100% solid, opaque surfaces to prevent desktop wallpaper & window bleed-through) */
-  --bg-chrome-light: #f3f5f9;
-  --bg-chrome-dark: #181a20;
+  /* --- Semyra Canonical Theme Tokens (Midnight · Slate · Steel · Ice White · Steel Blue · Warm Beige) --- */
+  --semyra-canvas-light: #ffffff;
+  --semyra-canvas-dark: #12161e;
 
-  --bg-sidebar-light: #f8fafc;
-  --bg-sidebar-dark: #1c1f26;
+  --semyra-chrome-light: #f3f5f7;
+  --semyra-chrome-dark: #161b24;
 
-  --bg-surface-light: #ffffff;
-  --bg-surface-dark: #14161c;
+  --semyra-sidebar-light: #eaeff4;
+  --semyra-sidebar-dark: #1a212b;
 
-  --bg-elevated-light: #ffffff;
-  --bg-elevated-dark: #232731;
+  --semyra-surface-light: #ffffff;
+  --semyra-surface-dark: #202935;
 
-  --bg-subtle-light: #f1f4f9;
-  --bg-subtle-dark: #282d38;
+  --semyra-surface-raised-light: #f0f3f6;
+  --semyra-surface-raised-dark: #273240;
 
-  --bg-hover-light: rgba(15, 23, 42, 0.06);
-  --bg-hover-dark: rgba(255, 255, 255, 0.07);
+  --semyra-border-light: #d6dde4;
+  --semyra-border-dark: #323e4d;
 
-  --bg-active-light: rgba(37, 99, 235, 0.11);
-  --bg-active-dark: rgba(96, 165, 250, 0.16);
+  --semyra-text-primary-light: #202934;
+  --semyra-text-primary-dark: #edf2f5;
 
-  --fg-primary-light: #181c24;
-  --fg-primary-dark: #e8ecf4;
+  --semyra-text-secondary-light: #506173;
+  --semyra-text-secondary-dark: #8292a2;
 
-  --fg-secondary-light: #525c6e;
-  --fg-secondary-dark: #9ba5b7;
+  --semyra-text-muted-light: #6b7c8e;
+  --semyra-text-muted-dark: #6e7e8e;
 
-  --fg-muted-light: #626d80;
-  --fg-muted-dark: #8d98ac;
+  --semyra-text-inverse-light: #ffffff;
+  --semyra-text-inverse-dark: #12161e;
 
-  --border-subtle-light: rgba(15, 23, 42, 0.10);
-  --border-subtle-dark: rgba(255, 255, 255, 0.09);
+  /* Primary Interaction Accent: Steel Blue */
+  --semyra-accent-light: #426b91;
+  --semyra-accent-dark: #83a5c6;
 
-  --border-strong-light: rgba(15, 23, 42, 0.18);
-  --border-strong-dark: rgba(255, 255, 255, 0.16);
+  --semyra-accent-hover-light: #345b7e;
+  --semyra-accent-hover-dark: #9db8d2;
 
-  --accent-light: #005fb8;
-  --accent-dark: #60cdff;
+  --semyra-accent-subtle-light: #e4edf5;
+  --semyra-accent-subtle-dark: #223344;
 
-  --accent-fg-light: #ffffff;
-  --accent-fg-dark: #061826;
+  --semyra-accent-border-light: #9ab3c7;
+  --semyra-accent-border-dark: #55738e;
 
-  --danger-light: #c42b1c;
-  --danger-dark: #ff99a4;
+  --semyra-focus-ring-light: #426b91;
+  --semyra-focus-ring-dark: #83a5c6;
 
-  --scrollbar-thumb-light: rgba(100, 112, 132, 0.45);
-  --scrollbar-thumb-dark: rgba(148, 163, 184, 0.36);
-  --scrollbar-track-light: transparent;
-  --scrollbar-track-dark: transparent;
+  /* Semyra Status & Branding Accents */
+  --semyra-unsaved-dot-light: #986c3d;
+  --semyra-unsaved-dot-dark: #d0a774;
 
-  /* Fallback defaults for browsers without light-dark() */
-  --bg-chrome: var(--bg-chrome-light);
-  --bg-sidebar: var(--bg-sidebar-light);
-  --bg-surface: var(--bg-surface-light);
-  --bg-elevated: var(--bg-elevated-light);
-  --bg-subtle: var(--bg-subtle-light);
-  --bg-hover: var(--bg-hover-light);
-  --bg-active: var(--bg-active-light);
-  --fg-primary: var(--fg-primary-light);
-  --fg-secondary: var(--fg-secondary-light);
-  --fg-muted: var(--fg-muted-light);
-  --border-subtle: var(--border-subtle-light);
-  --border-strong: var(--border-strong-light);
-  --accent: var(--accent-light);
-  --accent-fg: var(--accent-fg-light);
-  --danger: var(--danger-light);
-  --scrollbar-thumb: var(--scrollbar-thumb-light);
-  --scrollbar-track: var(--scrollbar-track-light);
+  /* Semyra Warm Beige Accent Nuance */
+  --semyra-warm-neutral-light: #806b55;
+  --semyra-warm-neutral-dark: #d5c7b5;
+
+  --semyra-warm-bg-light: rgba(199, 184, 165, 0.20);
+  --semyra-warm-bg-dark: rgba(213, 199, 181, 0.12);
+
+  --semyra-warm-border-light: rgba(180, 160, 138, 0.45);
+  --semyra-warm-border-dark: rgba(213, 199, 181, 0.32);
+
+  /* Sparingly used functional nuances */
+  --semyra-teal-subtle-light: #24756c;
+  --semyra-teal-subtle-dark: #63b9ac;
+
+  --semyra-danger-light: #c42b1c;
+  --semyra-danger-dark: #ff99a4;
+
+  --semyra-scrollbar-thumb-light: rgba(80, 97, 115, 0.4);
+  --semyra-scrollbar-thumb-dark: rgba(138, 154, 169, 0.35);
+
+  /* Fallback defaults for browsers without light-dark() (Light by default) */
+  --color-canvas: var(--semyra-canvas-light);
+  --color-chrome: var(--semyra-chrome-light);
+  --color-sidebar: var(--semyra-sidebar-light);
+  --color-surface: var(--semyra-surface-light);
+  --color-surface-raised: var(--semyra-surface-raised-light);
+  --color-border: var(--semyra-border-light);
+  --color-text-primary: var(--semyra-text-primary-light);
+  --color-text-secondary: var(--semyra-text-secondary-light);
+  --color-text-muted: var(--semyra-text-muted-light);
+  --color-text-inverse: var(--semyra-text-inverse-light);
+  --color-accent: var(--semyra-accent-light);
+  --color-accent-hover: var(--semyra-accent-hover-light);
+  --color-accent-subtle: var(--semyra-accent-subtle-light);
+  --color-accent-border: var(--semyra-accent-border-light);
+  --color-focus-ring: var(--semyra-focus-ring-light);
+  --color-warm-neutral: var(--semyra-warm-neutral-light);
+  --color-warm-bg: var(--semyra-warm-bg-light);
+  --color-warm-border: var(--semyra-warm-border-light);
+  --color-teal-subtle: var(--semyra-teal-subtle-light);
+  --color-unsaved-dot: var(--semyra-unsaved-dot-light);
+  --color-danger: var(--semyra-danger-light);
+
+  /* Backwards-compatible mappings for existing CSS modules */
+  --bg-chrome: var(--color-chrome);
+  --bg-sidebar: var(--color-sidebar);
+  --bg-surface: var(--color-canvas);
+  --bg-elevated: var(--color-surface);
+  --bg-subtle: var(--color-surface-raised);
+  --bg-hover: rgba(32, 41, 52, 0.06);
+  --bg-active: var(--color-accent-subtle);
+  --fg-primary: var(--color-text-primary);
+  --fg-secondary: var(--color-text-secondary);
+  --fg-muted: var(--color-text-muted);
+  --border-subtle: var(--color-border);
+  --border-strong: var(--color-accent-border);
+  --accent: var(--color-accent);
+  --accent-hover: var(--color-accent-hover);
+  --accent-fg: var(--color-text-inverse);
+  --danger: var(--color-danger);
+  --warm-neutral: var(--color-warm-neutral);
+  --warm-bg: var(--color-warm-bg);
+  --warm-border: var(--color-warm-border);
+  --scrollbar-thumb: var(--semyra-scrollbar-thumb-light);
+  --scrollbar-track: transparent;
 
   @media (prefers-color-scheme: dark) {
-    --bg-chrome: var(--bg-chrome-dark);
-    --bg-sidebar: var(--bg-sidebar-dark);
-    --bg-surface: var(--bg-surface-dark);
-    --bg-elevated: var(--bg-elevated-dark);
-    --bg-subtle: var(--bg-subtle-dark);
-    --bg-hover: var(--bg-hover-dark);
-    --bg-active: var(--bg-active-dark);
-    --fg-primary: var(--fg-primary-dark);
-    --fg-secondary: var(--fg-secondary-dark);
-    --fg-muted: var(--fg-muted-dark);
-    --border-subtle: var(--border-subtle-dark);
-    --border-strong: var(--border-strong-dark);
-    --accent: var(--accent-dark);
-    --accent-fg: var(--accent-fg-dark);
-    --danger: var(--danger-dark);
-    --scrollbar-thumb: var(--scrollbar-thumb-dark);
-    --scrollbar-track: var(--scrollbar-track-dark);
+    --color-canvas: var(--semyra-canvas-dark);
+    --color-chrome: var(--semyra-chrome-dark);
+    --color-sidebar: var(--semyra-sidebar-dark);
+    --color-surface: var(--semyra-surface-dark);
+    --color-surface-raised: var(--semyra-surface-raised-dark);
+    --color-border: var(--semyra-border-dark);
+    --color-text-primary: var(--semyra-text-primary-dark);
+    --color-text-secondary: var(--semyra-text-secondary-dark);
+    --color-text-muted: var(--semyra-text-muted-dark);
+    --color-text-inverse: var(--semyra-text-inverse-dark);
+    --color-accent: var(--semyra-accent-dark);
+    --color-accent-hover: var(--semyra-accent-hover-dark);
+    --color-accent-subtle: var(--semyra-accent-subtle-dark);
+    --color-accent-border: var(--semyra-accent-border-dark);
+    --color-focus-ring: var(--semyra-focus-ring-dark);
+    --color-teal-subtle: var(--semyra-teal-subtle-dark);
+    --color-warm-neutral: var(--semyra-warm-neutral-dark);
+    --color-warm-bg: var(--semyra-warm-bg-dark);
+    --color-warm-border: var(--semyra-warm-border-dark);
+    --color-unsaved-dot: var(--semyra-unsaved-dot-dark);
+    --color-danger: var(--semyra-danger-dark);
+
+    --bg-chrome: var(--color-chrome);
+    --bg-sidebar: var(--color-sidebar);
+    --bg-surface: var(--color-canvas);
+    --bg-elevated: var(--color-surface);
+    --bg-subtle: var(--color-surface-raised);
+    --bg-hover: rgba(238, 243, 247, 0.07);
+    --bg-active: var(--color-accent-subtle);
+    --fg-primary: var(--color-text-primary);
+    --fg-secondary: var(--color-text-secondary);
+    --fg-muted: var(--color-text-muted);
+    --border-subtle: var(--color-border);
+    --border-strong: var(--color-accent-border);
+    --accent: var(--color-accent);
+    --accent-hover: var(--color-accent-hover);
+    --accent-fg: var(--color-text-inverse);
+    --danger: var(--color-danger);
+    --scrollbar-thumb: var(--semyra-scrollbar-thumb-dark);
   }
 
   @supports (color: light-dark(white, black)) {
-    --bg-chrome: light-dark(var(--bg-chrome-light), var(--bg-chrome-dark));
-    --bg-sidebar: light-dark(var(--bg-sidebar-light), var(--bg-sidebar-dark));
-    --bg-surface: light-dark(var(--bg-surface-light), var(--bg-surface-dark));
-    --bg-elevated: light-dark(var(--bg-elevated-light), var(--bg-elevated-dark));
-    --bg-subtle: light-dark(var(--bg-subtle-light), var(--bg-subtle-dark));
-    --bg-hover: light-dark(var(--bg-hover-light), var(--bg-hover-dark));
-    --bg-active: light-dark(var(--bg-active-light), var(--bg-active-dark));
-    --fg-primary: light-dark(var(--fg-primary-light), var(--fg-primary-dark));
-    --fg-secondary: light-dark(var(--fg-secondary-light), var(--fg-secondary-dark));
-    --fg-muted: light-dark(var(--fg-muted-light), var(--fg-muted-dark));
-    --border-subtle: light-dark(var(--border-subtle-light), var(--border-subtle-dark));
-    --border-strong: light-dark(var(--border-strong-light), var(--border-strong-dark));
-    --accent: light-dark(var(--accent-light), var(--accent-dark));
-    --accent-fg: light-dark(var(--accent-fg-light), var(--accent-fg-dark));
-    --danger: light-dark(var(--danger-light), var(--danger-dark));
-    --scrollbar-thumb: light-dark(var(--scrollbar-thumb-light), var(--scrollbar-thumb-dark));
-    --scrollbar-track: light-dark(var(--scrollbar-track-light), var(--scrollbar-track-dark));
+    --color-canvas: light-dark(var(--semyra-canvas-light), var(--semyra-canvas-dark));
+    --color-chrome: light-dark(var(--semyra-chrome-light), var(--semyra-chrome-dark));
+    --color-sidebar: light-dark(var(--semyra-sidebar-light), var(--semyra-sidebar-dark));
+    --color-surface: light-dark(var(--semyra-surface-light), var(--semyra-surface-dark));
+    --color-surface-raised: light-dark(var(--semyra-surface-raised-light), var(--semyra-surface-raised-dark));
+    --color-border: light-dark(var(--semyra-border-light), var(--semyra-border-dark));
+    --color-text-primary: light-dark(var(--semyra-text-primary-light), var(--semyra-text-primary-dark));
+    --color-text-secondary: light-dark(var(--semyra-text-secondary-light), var(--semyra-text-secondary-dark));
+    --color-text-muted: light-dark(var(--semyra-text-muted-light), var(--semyra-text-muted-dark));
+    --color-text-inverse: light-dark(var(--semyra-text-inverse-light), var(--semyra-text-inverse-dark));
+    --color-accent: light-dark(var(--semyra-accent-light), var(--semyra-accent-dark));
+    --color-accent-hover: light-dark(var(--semyra-accent-hover-light), var(--semyra-accent-hover-dark));
+    --color-accent-subtle: light-dark(var(--semyra-accent-subtle-light), var(--semyra-accent-subtle-dark));
+    --color-accent-border: light-dark(var(--semyra-accent-border-light), var(--semyra-accent-border-dark));
+    --color-focus-ring: light-dark(var(--semyra-focus-ring-light), var(--semyra-focus-ring-dark));
+    --color-teal-subtle: light-dark(var(--semyra-teal-subtle-light), var(--semyra-teal-subtle-dark));
+    --color-warm-neutral: light-dark(var(--semyra-warm-neutral-light), var(--semyra-warm-neutral-dark));
+    --color-warm-bg: light-dark(var(--semyra-warm-bg-light), var(--semyra-warm-bg-dark));
+    --color-warm-border: light-dark(var(--semyra-warm-border-light), var(--semyra-warm-border-dark));
+    --color-unsaved-dot: light-dark(var(--semyra-unsaved-dot-light), var(--semyra-unsaved-dot-dark));
+    --color-danger: light-dark(var(--semyra-danger-light), var(--semyra-danger-dark));
+
+    --bg-chrome: var(--color-chrome);
+    --bg-sidebar: var(--color-sidebar);
+    --bg-surface: var(--color-canvas);
+    --bg-elevated: var(--color-surface);
+    --bg-subtle: var(--color-surface-raised);
+    --bg-hover: light-dark(rgba(32, 41, 52, 0.06), rgba(238, 243, 247, 0.07));
+    --bg-active: var(--color-accent-subtle);
+    --fg-primary: var(--color-text-primary);
+    --fg-secondary: var(--color-text-secondary);
+    --fg-muted: var(--color-text-muted);
+    --border-subtle: var(--color-border);
+    --border-strong: var(--color-accent-border);
+    --accent: var(--color-accent);
+    --accent-hover: var(--color-accent-hover);
+    --accent-fg: var(--color-text-inverse);
+    --danger: var(--color-danger);
+    --scrollbar-thumb: light-dark(var(--semyra-scrollbar-thumb-light), var(--semyra-scrollbar-thumb-dark));
+    --scrollbar-track: transparent;
   }
 
   /* MANDATORY: Apply color-scheme to :root and reflect <meta name="color-scheme"> override */
@@ -206,4 +299,10 @@ body {
   position: absolute;
   white-space: nowrap;
   width: 1px;
+}
+
+/* Global High-Contrast Focus Ring */
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 1px;
 }

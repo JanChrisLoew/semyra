@@ -1,13 +1,13 @@
 [package]
-name = "marklive"
+name = "semyra"
 version = "0.2.0"
 edition = "2021"
-description = "Nativer Windows 11 Markdown-Editor mit Live-Vorschau"
+description = "Nativer Windows 11 Markdown-Viewer und -Editor für das KI-Zeitalter"
 license = "MIT"
-authors = ["MarkLive"]
+authors = ["Semyra"]
 
 [[bin]]
-name = "MarkLive"
+name = "Semyra"
 path = "src/main.rs"
 
 [dependencies]

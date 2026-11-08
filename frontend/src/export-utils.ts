@@ -10,11 +10,11 @@
 import { renderMermaidLightInClone } from './sanitizer';
 
 const ALERT_COLORS: Record<string, string> = {
-  'gfm-alert-note': '#2f81f7',
-  'gfm-alert-tip': '#2da44e',
+  'gfm-alert-note': '#426b91',
+  'gfm-alert-tip': '#24756c',
   'gfm-alert-important': '#8250df',
-  'gfm-alert-warning': '#d29922',
-  'gfm-alert-caution': '#cf222e',
+  'gfm-alert-warning': '#986c3d',
+  'gfm-alert-caution': '#c42b1c',
 };
 
 function syncTaskCheckboxesAndStripChrome(clone: HTMLElement, source: HTMLElement): void {
@@ -157,11 +157,11 @@ export async function buildOfficeFriendlyHtml(
   for (const quote of clone.querySelectorAll<HTMLElement>('blockquote')) {
     quote.setAttribute(
       'style',
-      'margin: 10px 0; padding: 4px 14px; border-left: 4px solid #005fb8; color: #444c56;',
+      'margin: 10px 0; padding: 6px 14px; border-left: 3.5px solid #d0d7de; background-color: #f6f8fa; border-radius: 0 6px 6px 0; color: #202934;',
     );
   }
   for (const alert of clone.querySelectorAll<HTMLElement>('.gfm-alert')) {
-    let accent = '#005fb8';
+    let accent = '#3b678f';
     for (const [cls, hex] of Object.entries(ALERT_COLORS)) {
       if (alert.classList.contains(cls)) {
         accent = hex;

@@ -1,13 +1,14 @@
-# MarkLive
+# Semyra
 
-**MarkLive** ist eine native **Windows 11 x64 Desktop-Anwendung in Rust** (`MarkLive.exe`) zum schnellen, ablenkungsfreien Bearbeiten von Markdown-Dateien mit sofortiger Live-Vorschau.
+> **Markdown for the AI era.**  
+> *Semyra* ist eine native **Windows 11 x64 Desktop-Anwendung in Rust** (`Semyra.exe`) zum schnellen, fokussierten Bearbeiten und Visualisieren von Markdown-Dateien – entwickelt für Dokumentation, Prompts, Skills und Agentenanweisungen.
 
 ## Highlights & Architektur
 
-- **Natives Windows-11-Erlebnis**: Gebaut mit Rust (`tao` + `wry` WebView2 über `https://marklive.localhost`), nativem **Mica-Hintergrundmaterial** (`window-vibrancy`), Multi-DPI-App-Icon (`16/32/48/256 px`), Fluent-Scrollbars, nativen Dateidialogen (`rfd`), Multi-Monitor-sicherer Fenstergeometrie-Persistenz und Explorer-Drag-&-Drop.
+- **Natives Windows-11-Erlebnis**: Gebaut mit Rust (`tao` + `wry` WebView2 über `https://semyra.localhost`), nativem **Mica-Hintergrundmaterial** (`window-vibrancy`), harmonisiertem Semyra-Farbsystem (Midnight/Slate Dark · Reinweiß/Slate Light), Multi-DPI-App-Icon (`16/32/48/256 px`), Fluent-Scrollbars, nativen Dateidialogen (`rfd`), Multi-Monitor-sicherer Fenstergeometrie-Persistenz und Explorer-Drag-&-Drop.
 - **Single-Instance & Multi-Window Support**: Aus dem Windows Explorer geöffnete Dateien werden automatisch als neue Tabs an das laufende Fenster übergeben; über `--new-window` lässt sich jederzeit ein unabhängiges Zweitfenster starten.
 - **Schnellauswahl & Befehlspalette (`Strg+E` / `Strg+Umschalt+P`)**: Fuzzy-Suche zum blitzschnellen Wechseln zwischen offenen Tabs, sämtlichen Markdown-Dateien des Arbeitsordners, zuletzt geöffneten Dateien/Ordnern sowie allen Editor-, Ansichts- und Export-Befehlen (`>`).
-- **Sitzungs-Wiederherstellung & Crash-Recovery**: Stellt geöffnete Dokumente, aktiven Tab, Split-Verhältnis, Dokument-Zoom (`75 %–175 %`), Zeilenumbruch und Rechtschreibprüfung beim nächsten Start wieder her; ungespeicherte Entwürfe werden zusätzlich laufend unter `%LOCALAPPDATA%\MarkLive\drafts\recovery.json` gesichert.
+- **Sitzungs-Wiederherstellung & Crash-Recovery**: Stellt geöffnete Dokumente, aktiven Tab, Split-Verhältnis, Dokument-Zoom (`75 %–175 %`), Zeilenumbruch und Rechtschreibprüfung beim nächsten Start wieder her; ungespeicherte Entwürfe werden zusätzlich laufend unter `%LOCALAPPDATA%\Semyra\drafts\recovery.json` gesichert.
 - **Schnelle Rust-Markdown-Engine + Inkrementelles DOM-Morphing**: `pulldown-cmark` + `syntect` rendern GitHub-Flavored Markdown (Tabellen, interaktive Checklisten, GitHub-Alerts `[!NOTE]`..`[!CAUTION]`, Fußnoten, YAML-Frontmatter, Syntax-Highlighting) auf Hintergrund-Threads ohne UI-Blockade; die Live-Vorschau aktualisiert geänderte Blöcke inkrementell und cached **KaTeX**-Formeln sowie **Mermaid**-Diagramme flackerfrei.
 - **Smartes Markdown-Editing**:
   - Automatische Fortsetzung (und sauberes Beenden bei leerem Eintrag) von Aufzählungs-, Aufgaben- und nummerierten Listen sowie Zitatblöcken per `Enter`
@@ -23,7 +24,7 @@
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\Build-Release.ps1
 ```
-Das Skript führt nacheinander TypeScript-Typprüfung (`tsc --noEmit`), Frontend-Unit-Tests (`vitest`), das Vite-Produktionsbundle (`frontend/dist`), die Rust-Unit-Tests (`cargo test`) sowie `cargo build --release` aus und erzeugt die eigenständige Datei `target\release\MarkLive.exe`.
+Das Skript führt nacheinander TypeScript-Typprüfung (`tsc --noEmit`), Frontend-Unit-Tests (`vitest`), das Vite-Produktionsbundle (`frontend/dist`), die Rust-Unit-Tests (`cargo test`) sowie `cargo build --release` aus und erzeugt die eigenständige Datei `target\release\Semyra.exe`.
 
 ### Manuelle Einzelschritte
 ```powershell
@@ -41,12 +42,12 @@ cargo build --release
 ## Windows-11-Installation & `.md`-Dateizuordnung (ohne Adminrechte)
 
 ```powershell
-# Installiert MarkLive nach %LOCALAPPDATA%\Programs\MarkLive, legt Startmenü-Eintrag an
-# und registriert .md / .markdown sowie "Mit MarkLive öffnen" im Windows Explorer:
-powershell -ExecutionPolicy Bypass -File .\installer\Install-MarkLive.ps1
+# Installiert Semyra nach %LOCALAPPDATA%\Programs\Semyra, legt Startmenü-Eintrag an
+# und registriert .md / .markdown sowie "Mit Semyra öffnen" im Windows Explorer:
+powershell -ExecutionPolicy Bypass -File .\installer\Install-Semyra.ps1
 
 # Saubere Deinstallation:
-powershell -ExecutionPolicy Bypass -File .\installer\Uninstall-MarkLive.ps1
+powershell -ExecutionPolicy Bypass -File .\installer\Uninstall-Semyra.ps1
 ```
 
-Für ein klassisches Windows-Setup-Paket (`MarkLive-Setup-x64.exe`) liegt zusätzlich das Inno-Setup-6-Skript unter `installer\MarkLive.iss` bereit. Technische Architektur- und Beitragsrichtlinien für Entwickler und KI-Agenten sind in `AGENTS.md` dokumentiert.
+Für ein klassisches Windows-Setup-Paket (`Semyra-Setup-x64.exe`) liegt zusätzlich das Inno-Setup-6-Skript unter `installer\Semyra.iss` bereit. Technische Architektur- und Beitragsrichtlinien für Entwickler und KI-Agenten sind in `AGENTS.md` dokumentiert.

@@ -247,7 +247,7 @@ async function renderMermaidBlocksCached(
         continue;
       }
 
-      const id = `marklive-mermaid-${++mermaidCounter}`;
+      const id = `semyra-mermaid-${++mermaidCounter}`;
       try {
         const { svg } = await mermaid.render(id, definition);
         if (mermaidCache.size >= MAX_MERMAID_CACHE) {

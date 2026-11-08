@@ -245,16 +245,16 @@ describe('MarkdownEditorController keybindings & folding integration', () => {
   });
 
   it('switches editor grammar dynamically via setLanguageForFile', async () => {
-    const { host, ctrl } = createController('{\n  "name": "marklive"\n}\n');
+    const { host, ctrl } = createController('{\n  "name": "semyra"\n}\n');
 
     await ctrl.setLanguageForFile('package.json');
-    expect(ctrl.getContent()).toContain('"name": "marklive"');
+    expect(ctrl.getContent()).toContain('"name": "semyra"');
 
     await ctrl.setLanguageForFile('config.yaml');
-    expect(ctrl.getContent()).toContain('"name": "marklive"');
+    expect(ctrl.getContent()).toContain('"name": "semyra"');
 
     await ctrl.setLanguageForFile('README.md');
-    expect(ctrl.getContent()).toContain('"name": "marklive"');
+    expect(ctrl.getContent()).toContain('"name": "semyra"');
 
     ctrl.view.destroy();
     host.remove();

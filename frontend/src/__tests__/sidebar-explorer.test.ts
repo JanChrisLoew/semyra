@@ -101,8 +101,8 @@ describe('SidebarExplorerController', () => {
     });
 
     explorer.renderEmptyStateWithRecents(
-      ['C:\\Projekte\\MarkLive', 'C:\\Docs'],
-      ['C:\\Projekte\\MarkLive\\README.md', 'C:\\Docs\\Notizen.md'],
+      ['C:\\Projekte\\Semyra', 'C:\\Docs'],
+      ['C:\\Projekte\\Semyra\\README.md', 'C:\\Docs\\Notizen.md'],
     );
 
     const rows = fileTreeEl.querySelectorAll('.recent-entry-row');
@@ -113,11 +113,11 @@ describe('SidebarExplorerController', () => {
 
     // Click remove on first folder
     removeBtns[0].click();
-    expect(onRemoveRecentFolder).toHaveBeenCalledWith('C:\\Projekte\\MarkLive');
+    expect(onRemoveRecentFolder).toHaveBeenCalledWith('C:\\Projekte\\Semyra');
 
     // Click remove on first file
     removeBtns[2].click();
-    expect(onRemoveRecentFile).toHaveBeenCalledWith('C:\\Projekte\\MarkLive\\README.md');
+    expect(onRemoveRecentFile).toHaveBeenCalledWith('C:\\Projekte\\Semyra\\README.md');
   });
 
   it('marks active tree row with .context-active on contextmenu and clears it on popover toggle close', () => {

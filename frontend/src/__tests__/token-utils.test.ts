@@ -20,7 +20,7 @@ describe('estimateTokens', () => {
   });
 
   it('scales proportionally for larger Markdown documents and code blocks', () => {
-    const markdown = `# System Prompt: Code Assistent\n\nDu bist ein spezialisierter Assistent.\n\n\`\`\`rust\nfn main() {\n    println!("MarkLive");\n}\n\`\`\`\n`;
+    const markdown = `# System Prompt: Code Assistent\n\nDu bist ein spezialisierter Assistent.\n\n\`\`\`rust\nfn main() {\n    println!("Semyra");\n}\n\`\`\`\n`;
     const tokens = estimateTokens(markdown);
     expect(tokens).toBeGreaterThan(25);
     expect(tokens).toBeLessThan(60);

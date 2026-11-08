@@ -6,29 +6,29 @@ describe('palette-items', () => {
   it('deduplicates open tabs, workspace files, recent files, and active workspace folder', async () => {
     const items = await buildPaletteFileItems({
       tabs: [
-        { id: 't1', name: 'README.md', path: 'C:\\Projekte\\MarkLive\\README.md' },
+        { id: 't1', name: 'README.md', path: 'C:\\Projekte\\Semyra\\README.md' },
         { id: 't2', name: 'Unbenannt-1.md', path: null },
       ],
       activeTabId: 't1',
-      workspaceRootPath: 'C:\\Projekte\\MarkLive',
+      workspaceRootPath: 'C:\\Projekte\\Semyra',
       getWorkspaceFiles: async () => [
         {
           name: 'README.md',
-          path: 'c:\\projekte\\marklive\\readme.md', // case-insensitive duplicate of open tab
+          path: 'c:\\projekte\\semyra\\readme.md', // case-insensitive duplicate of open tab
           relPath: 'README.md',
         },
         {
           name: 'AGENTS.md',
-          path: 'C:\\Projekte\\MarkLive\\AGENTS.md',
+          path: 'C:\\Projekte\\Semyra\\AGENTS.md',
           relPath: 'AGENTS.md',
         },
       ],
       recentFiles: [
-        'C:\\Projekte\\MarkLive\\AGENTS.md', // duplicate of workspace file
+        'C:\\Projekte\\Semyra\\AGENTS.md', // duplicate of workspace file
         'C:\\Archiv\\Notiz.md',
       ],
       recentFolders: [
-        'c:\\projekte\\marklive', // currently active workspace -> omitted
+        'c:\\projekte\\semyra', // currently active workspace -> omitted
         'C:\\Archiv',
       ],
       onActivateTab: vi.fn(),
@@ -39,7 +39,7 @@ describe('palette-items', () => {
     expect(items.map((i) => i.id)).toEqual([
       'tab:t1',
       'tab:t2',
-      'ws:C:\\Projekte\\MarkLive\\AGENTS.md',
+      'ws:C:\\Projekte\\Semyra\\AGENTS.md',
       'recent:C:\\Archiv\\Notiz.md',
       'folder:C:\\Archiv',
     ]);

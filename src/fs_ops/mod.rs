@@ -48,6 +48,12 @@ pub fn normalize_existing_path(path: &Path) -> PathBuf {
     }
 }
 
+/// Returns the local application data directory (`%LOCALAPPDATA%\Semyra`).
+pub fn app_data_dir() -> PathBuf {
+    let base = dirs::data_local_dir().unwrap_or_else(std::env::temp_dir);
+    base.join("Semyra")
+}
+
 pub fn is_markdown_path(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())

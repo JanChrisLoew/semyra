@@ -377,7 +377,7 @@ mod tests {
     #[test]
     fn creates_clean_templates_for_different_file_types() {
         let temp = std::env::temp_dir().join(format!(
-            "marklive_test_{}",
+            "semyra_test_{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()

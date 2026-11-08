@@ -1,12 +1,12 @@
 <#
 .SYNOPSIS
-    Deterministic end-to-end verification and release build script for MarkLive (Windows 11 x64).
+    Deterministic end-to-end verification and release build script for Semyra (Windows 11 x64).
 .DESCRIPTION
     1. Runs TypeScript strict typechecking (tsc --noEmit)
     2. Runs Frontend unit tests (Vitest + jsdom)
     3. Builds optimized production frontend bundle into frontend/dist (Vite)
     4. Runs Rust backend unit tests (cargo test)
-    5. Compiles standalone Release executable target\release\MarkLive.exe
+    5. Compiles standalone Release executable target\release\Semyra.exe
 #>
 $ErrorActionPreference = 'Stop'
 
@@ -33,16 +33,16 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Rust-Tests fehlgeschlagen." }
 
     Write-Host "==> [5/5] Standalone Windows 11 x64 Release bauen (cargo build --release)..." -ForegroundColor Cyan
-    $running = Get-Process -Name MarkLive -ErrorAction SilentlyContinue
+    $running = Get-Process -Name Semyra -ErrorAction SilentlyContinue
     if ($running) {
-        Write-Host "Beende laufende MarkLive-Testinstanz ($($running.Count) Prozess(e)) zur Dateifreigabe..." -ForegroundColor Yellow
+        Write-Host "Beende laufende Testinstanz ($($running.Count) Prozess(e)) zur Dateifreigabe..." -ForegroundColor Yellow
         $running | Stop-Process -Force -ErrorAction SilentlyContinue
         Start-Sleep -Milliseconds 400
     }
     & cargo build --release
     if ($LASTEXITCODE -ne 0) { throw "Cargo Release-Build fehlgeschlagen." }
 
-    $ExePath = Join-Path $RepoRoot 'target\release\MarkLive.exe'
+    $ExePath = Join-Path $RepoRoot 'target\release\Semyra.exe'
     if (-not (Test-Path $ExePath)) {
         throw "Erwartete Ausgabedatei nicht gefunden: $ExePath"
     }

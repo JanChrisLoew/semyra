@@ -51,9 +51,9 @@ fn extract_local_asset_query_path(url: &str) -> Option<&str> {
     let idx = url.find("/api/local-asset?")?;
     let prefix = &url[..idx];
     if !prefix.is_empty()
-        && prefix != "https://marklive.localhost"
-        && prefix != "http://marklive.localhost"
-        && prefix != "marklive://localhost"
+        && prefix != "https://semyra.localhost"
+        && prefix != "http://semyra.localhost"
+        && prefix != "semyra://localhost"
     {
         return None;
     }
@@ -110,20 +110,22 @@ pub fn build_standalone_html_document(title: &str, rendered_body_html: &str) -> 
     :root {{
       color-scheme: light dark;
       --bg: #ffffff;
-      --fg: #181c24;
-      --muted: #59636e;
-      --border: #d1d9e0;
-      --surface: #f6f8fa;
-      --accent: #005fb8;
+      --fg: #202934;
+      --muted: #506173;
+      --border: #d6dde4;
+      --surface: #f3f5f7;
+      --accent: #426b91;
+      --warning: #986c3d;
     }}
     @media (prefers-color-scheme: dark) {{
       :root {{
-        --bg: #0d1117;
-        --fg: #e6edf3;
-        --muted: #8b949e;
-        --border: #30363d;
-        --surface: #161b22;
-        --accent: #60cdff;
+        --bg: #12161e;
+        --fg: #edf2f5;
+        --muted: #8292a2;
+        --border: #323e4d;
+        --surface: #1a212b;
+        --accent: #83a5c6;
+        --warning: #d0a774;
       }}
     }}
     *, *::before, *::after {{ box-sizing: border-box; }}
@@ -165,17 +167,18 @@ pub fn build_standalone_html_document(title: &str, rendered_body_html: &str) -> 
       .hl-entity.hl-name.hl-function, .hl-support.hl-function {{ color: #d2a8ff; }}
       .hl-entity.hl-name.hl-type, .hl-entity.hl-name.hl-class, .hl-entity.hl-name.hl-struct {{ color: #ffa657; }}
     }}
-    blockquote, .gfm-alert {{ margin: 1.1rem 0; padding: 0.75rem 1.05rem; border-left: 4px solid var(--accent); background: var(--surface); border-radius: 0 8px 8px 0; }}
+    blockquote {{ margin: 1.1rem 0; padding: 0.75rem 1.05rem; border-left: 3.5px solid var(--border); background: var(--surface); color: var(--fg); border-radius: 0 8px 8px 0; }}
+    .gfm-alert {{ margin: 1.1rem 0; padding: 0.75rem 1.05rem; border-left: 4px solid var(--accent); background: var(--surface); border-radius: 0 8px 8px 0; }}
     blockquote > :last-child, .gfm-alert > :last-child {{ margin-bottom: 0; }}
     .gfm-alert-title {{ font-weight: 650; margin-bottom: 0.35rem; }}
-    .gfm-alert-note {{ border-left-color: #2f81f7; }}
-    .gfm-alert-note .gfm-alert-title {{ color: #2f81f7; }}
-    .gfm-alert-tip {{ border-left-color: #2da44e; }}
-    .gfm-alert-tip .gfm-alert-title {{ color: #2da44e; }}
-    .gfm-alert-important {{ border-left-color: #8250df; }}
-    .gfm-alert-important .gfm-alert-title {{ color: #8250df; }}
-    .gfm-alert-warning {{ border-left-color: #d29922; }}
-    .gfm-alert-warning .gfm-alert-title {{ color: #d29922; }}
+    .gfm-alert-note {{ border-left-color: var(--accent); }}
+    .gfm-alert-note .gfm-alert-title {{ color: var(--accent); }}
+    .gfm-alert-tip {{ border-left-color: #63b9ac; }}
+    .gfm-alert-tip .gfm-alert-title {{ color: #63b9ac; }}
+    .gfm-alert-important {{ border-left-color: #8f7ce6; }}
+    .gfm-alert-important .gfm-alert-title {{ color: #8f7ce6; }}
+    .gfm-alert-warning {{ border-left-color: var(--warning); }}
+    .gfm-alert-warning .gfm-alert-title {{ color: var(--warning); }}
     .gfm-alert-caution {{ border-left-color: #cf222e; }}
     .gfm-alert-caution .gfm-alert-title {{ color: #cf222e; }}
     .frontmatter-card {{ margin-bottom: 1.3rem; padding: 0.65rem 0.95rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 0.9rem; }}
@@ -228,7 +231,7 @@ mod tests {
 
     #[test]
     fn inlines_allowed_local_assets_and_blocks_disallowed_paths() {
-        let tmp = std::env::temp_dir().join(format!("marklive_html_inline_{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("semyra_html_inline_{}", std::process::id()));
         let _ = fs::create_dir_all(&tmp);
         let allowed_img = tmp.join("diagram.png");
         let blocked_img = tmp.join("secret.png");

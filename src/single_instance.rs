@@ -21,13 +21,10 @@ pub struct ForwardedArgs {
 }
 
 fn lock_file_path() -> PathBuf {
-    dirs::data_local_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("MarkLive")
-        .join("instance.json")
+    crate::fs_ops::app_data_dir().join("instance.json")
 }
 
-/// Attempts to forward CLI targets to an already running MarkLive instance.
+/// Attempts to forward CLI targets to an already running Semyra instance.
 /// Returns `true` if another primary instance accepted the payload so this process can exit.
 pub fn try_forward_to_running_instance(
     files: &[PathBuf],

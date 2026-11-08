@@ -1,21 +1,25 @@
-# AGENTS.md — MarkLive Engineering & Architecture Guide
+# AGENTS.md — Semyra Engineering & Architecture Guide
 
-MarkLive is a native **Windows 11 x64 Markdown editor with live preview**, compiled into a single standalone binary (`MarkLive.exe`) without Node.js or Electron runtime dependencies.
+Semyra is a native **Windows 11 x64 Markdown editor with live preview for the AI era**, compiled into a single standalone binary (`Semyra.exe`) without Node.js or Electron runtime dependencies.
+
+> [!IMPORTANT]
+> **Product Context & Design Authority (`docs/PRODUCT_CONTEXT.md`)**:  
+> The authoritative product and design specification is maintained in [`docs/PRODUCT_CONTEXT.md`](docs/PRODUCT_CONTEXT.md). For all future features, refactorings, and UI/theme adjustments, developers and AI coding agents MUST strictly consult and comply with `docs/PRODUCT_CONTEXT.md` (neutral-first Markdown typography, Steel Blue interaction accent `#83A5C6` Dark / `#426B91` Light, Amber `#D0A774` / `#986C3D` solely for unsaved changes, and preservation of the desktop-grade local performance).
 
 ## 1. Architecture Overview
 
 - **Native Rust Host (`src/`)**:
-  - `src/main.rs`: Win32 `tao` event loop, `wry` Edge WebView2 host (`https://marklive.localhost`), direct native PDF export (`ICoreWebView2_7::PrintToPdf`), opaque solid Fluent surfaces with dark/light Win32 titlebar synchronization (`window.set_theme`), multi-monitor window bounds restoration, Explorer file/image/folder drag-and-drop, and `notify` filesystem watcher.
-  - `src/ipc.rs`: Asynchronous custom-protocol router (`with_asynchronous_custom_protocol("marklive", ...)`). Serves embedded static assets via `rust-embed` (`#[folder = "frontend/dist"]`) and handles JSON RPC endpoints under `/api/*`. Heavy CPU and disk routes (`render`, `read-file`, `write-file`, `list-tree`, `workspace-files`, `search-workspace`, `drafts/save`, `/api/local-asset`) MUST run off the Win32 UI thread (`std::thread::spawn` + `responder.respond(...)`). Native `rfd` OS dialogs also run off the UI thread while `tao`/WebView2 window operations execute via `EventLoopProxy<UserEvent>`.
+  - `src/main.rs`: Win32 `tao` event loop, `wry` Edge WebView2 host (`https://semyra.localhost` / `semyra://`), direct native PDF export (`ICoreWebView2_7::PrintToPdf`), opaque solid Fluent surfaces with dark/light Win32 titlebar synchronization (`window.set_theme`), multi-monitor window bounds restoration, Explorer file/image/folder drag-and-drop, and `notify` filesystem watcher.
+  - `src/ipc.rs`: Asynchronous custom-protocol router (`with_asynchronous_custom_protocol("semyra", ...)`). Serves embedded static assets via `rust-embed` (`#[folder = "frontend/dist"]`) and handles JSON RPC endpoints under `/api/*`. Heavy CPU and disk routes (`render`, `read-file`, `write-file`, `list-tree`, `workspace-files`, `search-workspace`, `drafts/save`, `/api/local-asset`) MUST run off the Win32 UI thread (`std::thread::spawn` + `responder.respond(...)`). Native `rfd` OS dialogs also run off the UI thread while `tao`/WebView2 window operations execute via `EventLoopProxy<UserEvent>`.
   - `src/markdown.rs`: `pulldown-cmark` + `syntect` GFM pipeline (tables, task checkboxes with `data-task-line`, GitHub alerts `[!NOTE]`..`[!CAUTION]`, footnotes, YAML frontmatter cards, inline/display math placeholders, Mermaid placeholders, `data-line` scroll-sync anchors, heading outline & reading-time stats).
   - `src/fs_ops/`: Modular filesystem & export subsystem:
-    - `mod.rs`: Path canonicalization (`clean_windows_path`, `normalize_existing_path`), Markdown/image extension filters, and `explorer.exe /select,` integration.
-    - `encoding.rs`: Encoding-aware text reader (UTF-8, UTF-8 BOM, UTF-16 LE/BE BOM, Windows-1252 fallback) and atomic temp-file + rename UTF-8 writer preserving `CRLF`/`LF`.
+    - `mod.rs`: Path canonicalization (`clean_windows_path`, `normalize_existing_path`), centralized `app_data_dir()` (`%LOCALAPPDATA%\Semyra`), Markdown/image extension filters, and `explorer.exe /select,` integration.
+    - `encoding.rs`: Encoding-aware text reader (UTF-8, UTF-8 BOM, UTF-16 LE/BE BOM, Windows-1252 fallback) and atomic temp-file (`.semyra-save-*.tmp`) + rename UTF-8 writer preserving `CRLF`/`LF`.
     - `workspace.rs`: Directory tree builder, Quick-Open file indexer, safe file/subfolder creation, rename, and Windows Recycle Bin deletion (`trash`).
     - `search.rs`: Workspace full-text search across Markdown documents.
     - `assets.rs`: Clipboard (`data:image/...;base64`) and dropped image importer into `./assets/`.
     - `html_export.rs`: True 1-file dark/light standalone HTML exporter (preserving rendered MathML & Mermaid SVGs and base64-inlining allowed local images).
-  - `src/single_instance.rs`: Named Win32 mutex (`Local\MarkLive_SingleInstance_v1`) + localhost IPC handoff so Explorer file launches open as tabs in the existing window (`--new-window` bypasses single-instance to spawn an independent window with a per-PID WebView2 profile).
+  - `src/single_instance.rs`: Named Win32 mutex (`Local\Semyra_SingleInstance_v1`) + localhost IPC handoff so Explorer file launches open as tabs in the existing window (`--new-window` bypasses single-instance to spawn an independent window with a per-PID WebView2 profile).
   - `src/icon_gen.rs` & `build.rs`: Shared multi-DPI (`16, 32, 48, 256` px) procedural icon generator used for both the PE `.exe` resource (`winres`) and the runtime window icon.
 
 - **Modular TypeScript / Vite Frontend (`frontend/src/`)**:
@@ -34,7 +38,7 @@ MarkLive is a native **Windows 11 x64 Markdown editor with live preview**, compi
 
 ## 2. Mandatory Build & Verification Order
 
-Because `rust-embed` embeds `frontend/dist` into `MarkLive.exe` at Rust compile time (and `build.rs` panics on `--release` if `frontend/dist/assets` is missing), **always build the frontend before compiling Rust**:
+Because `rust-embed` embeds `frontend/dist` into `Semyra.exe` at Rust compile time (and `build.rs` panics on `--release` if `frontend/dist/assets` is missing), **always build the frontend before compiling Rust**:
 
 ```powershell
 # Full end-to-end check, test, and release build:
@@ -65,7 +69,7 @@ cargo build --release
 ## 4. UI, Localization & Modern Web Standards
 
 - **Language**: All user-facing UI labels, tooltips, dialogs, status badges, and backend error messages are written in **idiomatic German** (`<html lang="de">`). Source code identifiers and comments remain in English.
-- **Browser Baseline**: MarkLive runs inside Microsoft Edge WebView2 (evergreen Chromium on Windows 11) while keeping progressive-enhancement fallbacks (`@oddbird/popover-polyfill`, `invokers-polyfill`, `DOMPurify`) so components remain standards-compliant and testable in `jsdom`.
+- **Browser Baseline**: Semyra runs inside Microsoft Edge WebView2 (evergreen Chromium on Windows 11) while keeping progressive-enhancement fallbacks (`@oddbird/popover-polyfill`, `invokers-polyfill`, `DOMPurify`) so components remain standards-compliant and testable in `jsdom`.
 - **HTML/CSS Conventions**:
   - Use native `<dialog>` (`closedby="any"` or `closedby="none"` paired with a `cancel` event guard, resetting `dialog.returnValue = ''` on `close`) without redundant `role="dialog"` or `aria-modal`.
   - Use declarative Invoker Commands (`command="show-modal" commandfor="..."`) where static buttons open modal dialogs.

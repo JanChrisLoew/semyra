@@ -20,9 +20,7 @@ pub struct DraftSnapshot {
 }
 
 fn recovery_file_path() -> PathBuf {
-    dirs::data_local_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("MarkLive")
+    crate::fs_ops::app_data_dir()
         .join("drafts")
         .join("recovery.json")
 }

@@ -49,6 +49,71 @@
   height: 100%;
 }
 
+/* Semyra Brand Badge in Top Header */
+.brand-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 6px 2px 2px;
+  border-radius: var(--radius-sm);
+  user-select: none;
+  cursor: default;
+  flex-shrink: 0;
+}
+
+.brand-monogram {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: block;
+}
+
+.brand-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: var(--fg-primary);
+  line-height: 1;
+}
+
+.brand-title .brand-dot {
+  color: var(--color-unsaved-dot);
+  font-weight: 800;
+}
+
+@container (max-width: 620px) {
+  .brand-title {
+    display: none;
+  }
+}
+
+/* Semyra Brand Pill in Statusbar */
+.status-brand-pill {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: lowercase;
+  color: var(--accent);
+  background: var(--color-accent-subtle);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  padding: 1px 7px;
+  border-radius: 999px;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.status-brand-pill::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-unsaved-dot);
+  display: inline-block;
+  flex-shrink: 0;
+}
+
 .header-center-group {
   display: flex;
   align-items: center;
@@ -232,15 +297,15 @@ button {
   display: inline-flex;
   align-items: center;
   height: 30px;
-  max-width: 240px;
+  flex: 0 1 180px;
   min-width: 100px;
-  padding: 0 6px 0 0;
+  max-width: 220px;
+  padding: 0 4px 0 0;
   border-radius: 6px 6px 0 0;
   border: 1px solid transparent;
   border-bottom: none;
   background: transparent;
   color: var(--fg-secondary);
-  flex-shrink: 0;
   user-select: none;
   -webkit-user-select: none;
   touch-action: none;
@@ -256,10 +321,11 @@ button {
   background: var(--bg-surface);
   color: var(--fg-primary);
   border-color: var(--border-subtle);
+  border-top: 2px solid var(--accent);
   border-bottom: 1px solid var(--bg-surface);
   margin-bottom: -1px;
   z-index: 2;
-  font-weight: 500;
+  font-weight: 550;
 }
 
 .tab-slot.is-dragging {
@@ -298,10 +364,11 @@ body.is-tab-dragging * {
 .tab-select-btn {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   height: 100%;
+  flex: 1 1 auto;
   min-width: 0;
-  padding: 0 6px 0 11px;
+  padding: 0 4px 0 11px;
   border: 0;
   border-radius: 6px 0 0 0;
   background: transparent;
@@ -335,6 +402,8 @@ body.is-tab-dragging * {
 }
 
 .tab-title {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -344,8 +413,10 @@ body.is-tab-dragging * {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--color-unsaved-dot);
   flex-shrink: 0;
+  margin-left: auto;
+  margin-right: 2px;
 }
 
 .tab-close-btn {
@@ -497,7 +568,9 @@ body.is-tab-dragging * {
 
 .status-badge.is-dirty {
   background: var(--bg-active);
-  color: var(--accent);
+  color: var(--color-unsaved-dot);
+  border: 1px solid color-mix(in srgb, var(--color-unsaved-dot) 35%, transparent);
+  font-weight: 550;
 }
 
 .status-sep {

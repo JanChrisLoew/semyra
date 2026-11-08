@@ -13,8 +13,8 @@ describe('fuzzyMatch', () => {
   });
 
   it('scores contiguous prefix matches higher than scattered matches', () => {
-    const contiguous = fuzzyMatch('mark', 'MarkLive.md');
-    const scattered = fuzzyMatch('mark', 'my_archive_notes_k.md');
+    const contiguous = fuzzyMatch('semy', 'Semyra.md');
+    const scattered = fuzzyMatch('semy', 'my_system_summary_y.md');
     expect(contiguous).not.toBeNull();
     expect(scattered).not.toBeNull();
     expect(contiguous!.score).toBeGreaterThan(scattered!.score);

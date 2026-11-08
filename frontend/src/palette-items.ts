@@ -546,7 +546,7 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           {
             id: 'cmd:settings',
             kind: 'command' as const,
-            label: isEn ? 'Settings: Open MarkLive Settings…' : 'Einstellungen: MarkLive-Optionen & Einstellungen öffnen…',
+            label: isEn ? 'Settings: Open Semyra Settings…' : 'Einstellungen: Semyra-Optionen & Einstellungen öffnen…',
             shortcut: isEn ? 'Ctrl+,' : 'Strg+,',
             run: ctx.onOpenSettings,
           },

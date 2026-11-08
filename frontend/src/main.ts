@@ -66,7 +66,7 @@ interface OpenTab {
   hasExternalConflict?: boolean;
 }
 
-class MarkLiveApp {
+class SemyraApp {
   private tabs: OpenTab[] = [];
   private activeTabId = '';
   private untitledCounter = 1;
@@ -577,7 +577,7 @@ class MarkLiveApp {
     resizer?.setAttribute('aria-valuetext', formatSidebarValueText(clamped));
     if (persist) {
       try {
-        localStorage.setItem('marklive.sidebarWidth', String(clamped));
+        localStorage.setItem('semyra.sidebarWidth', String(clamped));
       } catch {
         // Storage unavailable: width simply is not persisted.
       }
@@ -586,8 +586,8 @@ class MarkLiveApp {
 
   private initLayoutPreferences(): void {
     try {
-      this.splitRatios = parseSplitRatios(localStorage.getItem('marklive.splitRatios'));
-      this.editorCentered = localStorage.getItem('marklive.editorCentered') === '1';
+      this.splitRatios = parseSplitRatios(localStorage.getItem('semyra.splitRatios'));
+      this.editorCentered = localStorage.getItem('semyra.editorCentered') === '1';
     } catch {
       // ignore
     }
@@ -609,7 +609,7 @@ class MarkLiveApp {
     this.applyEditorCentered();
     this.settingsCtrl?.syncAll();
     try {
-      localStorage.setItem('marklive.editorCentered', this.editorCentered ? '1' : '0');
+      localStorage.setItem('semyra.editorCentered', this.editorCentered ? '1' : '0');
     } catch {
       // ignore
     }
@@ -624,7 +624,7 @@ class MarkLiveApp {
 
     let stored = SIDEBAR_WIDTH_DEFAULT;
     try {
-      const raw = Number(localStorage.getItem('marklive.sidebarWidth'));
+      const raw = Number(localStorage.getItem('semyra.sidebarWidth'));
       if (raw > 0) stored = raw;
     } catch {
       // ignore
@@ -696,7 +696,7 @@ class MarkLiveApp {
 
   private saveSplitRatios(): void {
     try {
-      localStorage.setItem('marklive.splitRatios', JSON.stringify(this.splitRatios));
+      localStorage.setItem('semyra.splitRatios', JSON.stringify(this.splitRatios));
     } catch {
       // Storage unavailable: ratios are only kept for this session.
     }
@@ -1119,7 +1119,8 @@ class MarkLiveApp {
   }
 
   private async saveTab(tab: OpenTab, forceSaveAs = false): Promise<boolean> {
-    if (!tab.path || forceSaveAs) {
+    const isNewPath = !tab.path || forceSaveAs;
+    if (isNewPath) {
       const res = await backend.saveFileDialog(
         tab.currentContent,
         tab.name,
@@ -1131,18 +1132,26 @@ class MarkLiveApp {
       tab.path = res.path;
       tab.name = res.name ?? tab.name;
       tab.parentDir = res.parentDir ?? tab.parentDir;
-    } else {
+    } else if (tab.path) {
       await backend.writeFile(tab.path, tab.currentContent, tab.lineEnding);
+    } else {
+      return false;
     }
 
     tab.savedContent = tab.currentContent;
     tab.encoding = 'UTF-8';
     tab.isDirty = false;
     tab.hasExternalConflict = false;
-    this.pushRecentFile(tab.path);
+    if (tab.path) {
+      this.pushRecentFile(tab.path);
+    }
     this.explorer.invalidateFilesCache();
 
-    this.renderTabBar();
+    if (isNewPath) {
+      this.renderTabBar(false);
+    } else {
+      this.updateTabDirtyState(tab.id, false);
+    }
     this.updateStatusBar();
     this.syncWindowMetadata();
     this.scheduleDraftSync();
@@ -1160,7 +1169,7 @@ class MarkLiveApp {
     tab.lineEnding = eol;
     if (tab.path) {
       tab.isDirty = true;
-      this.renderTabBar();
+      this.updateTabDirtyState(tab.id, true);
       this.syncWindowMetadata();
       this.scheduleDraftSync();
     }
@@ -1350,7 +1359,7 @@ class MarkLiveApp {
     const nextDirty = content !== tab.savedContent;
     if (tab.isDirty !== nextDirty) {
       tab.isDirty = nextDirty;
-      this.renderTabBar();
+      this.updateTabDirtyState(tab.id, nextDirty);
       this.syncWindowMetadata();
     }
     this.updateStatusBar();
@@ -1510,7 +1519,7 @@ class MarkLiveApp {
   // Chrome, Accessible Sibling Tabs, Status Bar & Unsaved Prompt
   // ==========================================================================
 
-  private renderTabBar(): void {
+  private renderTabBar(scrollActiveIntoView = false): void {
     this.tabBarEl.replaceChildren();
     let activeTabBtn: HTMLButtonElement | null = null;
 
@@ -1538,7 +1547,7 @@ class MarkLiveApp {
       selectBtn.setAttribute('role', 'tab');
       selectBtn.setAttribute('aria-selected', String(isSelected));
       selectBtn.tabIndex = isSelected ? 0 : -1;
-      selectBtn.title = tab.path ?? `${tab.name} (Ungespeichert)`;
+      selectBtn.title = tab.path ?? `${tab.name} (${t('tab.unsavedTitle')})`;
       selectBtn.addEventListener('click', (e) => {
         if (this.suppressNextTabClick) {
           e.preventDefault();
@@ -1557,6 +1566,7 @@ class MarkLiveApp {
         const dot = document.createElement('span');
         dot.className = 'tab-dirty-dot';
         dot.title = t('tab.unsavedTitle');
+        dot.setAttribute('aria-label', t('tab.unsavedTitle'));
         selectBtn.appendChild(dot);
       }
 
@@ -1578,7 +1588,28 @@ class MarkLiveApp {
     }
 
     syncRovingTabindex(this.tabBarEl, 'button[role="tab"]', activeTabBtn);
-    activeTabBtn?.closest('.tab-slot')?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    if (scrollActiveIntoView) {
+      activeTabBtn?.closest('.tab-slot')?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
+  }
+
+  private updateTabDirtyState(tabId: string, isDirty: boolean): void {
+    const slot = this.tabBarEl.querySelector<HTMLElement>(`.tab-slot[data-tab-id="${tabId}"]`);
+    if (!slot) return;
+    const selectBtn = slot.querySelector<HTMLButtonElement>('.tab-select-btn');
+    if (!selectBtn) return;
+    const existingDot = selectBtn.querySelector('.tab-dirty-dot');
+    if (isDirty) {
+      if (!existingDot) {
+        const dot = document.createElement('span');
+        dot.className = 'tab-dirty-dot';
+        dot.title = t('tab.unsavedTitle');
+        dot.setAttribute('aria-label', t('tab.unsavedTitle'));
+        selectBtn.appendChild(dot);
+      }
+    } else {
+      existingDot?.remove();
+    }
   }
 
   private openTabContextMenu(e: MouseEvent, tabId: string): void {
@@ -1725,7 +1756,7 @@ class MarkLiveApp {
     const tab = this.activeTab;
     const anyDirty = this.tabs.some((t) => t.isDirty);
     const dirtyPrefix = tab?.isDirty ? '● ' : '';
-    const title = tab ? `${dirtyPrefix}${tab.name} — MarkLive` : 'MarkLive';
+    const title = tab ? `${dirtyPrefix}${tab.name} — Semyra` : 'Semyra';
     void backend.setWindowState({
       title,
       hasUnsavedChanges: anyDirty,
@@ -2962,5 +2993,5 @@ class MarkLiveApp {
   }
 }
 
-const app = new MarkLiveApp();
+const app = new SemyraApp();
 void app.init();

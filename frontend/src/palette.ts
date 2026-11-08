@@ -26,7 +26,7 @@ export function fuzzyMatch(query: string, candidate: string): FuzzyMatchResult |
       indices.push(i);
 
       if (i === qIdx) {
-        // Leading contiguous prefix match (e.g. "mark" -> "MarkLive.md")
+        // Leading contiguous prefix match (e.g. "semy" -> "Semyra.md")
         score += 24;
       } else if (i === 0) {
         score += 18;

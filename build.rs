@@ -33,25 +33,19 @@ fn main() {
         }
     }
 
-    // Generate crisp multi-DPI Windows 11 icon (16, 32, 48, 256 px) when missing or legacy single-frame
+    // Generate crisp multi-DPI Semyra icon (16, 32, 48, 256 px)
     let assets_dir = Path::new("assets");
     let icon_path = assets_dir.join("icon.ico");
-    let needs_regen = match fs::metadata(&icon_path) {
-        Ok(meta) => meta.len() < 30_000,
-        Err(_) => true,
-    };
-    if needs_regen {
-        let _ = fs::create_dir_all(assets_dir);
-        let ico_bytes = icon_gen::generate_multi_size_ico(&[16, 32, 48, 256]);
-        let _ = fs::write(&icon_path, ico_bytes);
-    }
+    let _ = fs::create_dir_all(assets_dir);
+    let ico_bytes = icon_gen::generate_multi_size_ico(&[16, 32, 48, 256]);
+    let _ = fs::write(&icon_path, ico_bytes);
 
     #[cfg(windows)]
     {
         let mut res = winresource::WindowsResource::new();
         res.set_icon("assets/icon.ico");
-        res.set("ProductName", "MarkLive");
-        res.set("FileDescription", "MarkLive – Windows 11 Markdown Live-Editor");
+        res.set("ProductName", "Semyra");
+        res.set("FileDescription", "Semyra – Markdown for the AI era");
         res.set("LegalCopyright", "Copyright © 2026");
         if let Err(err) = res.compile() {
             println!("cargo:warning=Could not compile Windows resource: {err}");
