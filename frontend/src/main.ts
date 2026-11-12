@@ -11,6 +11,8 @@ import {
 } from './api';
 import { FormatAction, MarkdownEditorController } from './editor';
 import { copyRichPreviewToClipboard, preparePreviewHtmlForExport } from './export-utils';
+import { formatMarkdownDocument } from './markdown-formatter';
+import { lintMarkdownDocument, type LintIssue } from './markdown-lint';
 import { bindRovingHorizontalKeyNav, syncRovingTabindex } from './navigation-a11y';
 import { CommandPaletteController } from './palette';
 import { buildPaletteCommandItems, buildPaletteFileItems } from './palette-items';
@@ -102,6 +104,10 @@ class SemyraApp {
   private toastTimer: number | undefined;
   private renderSeq = 0;
   private externalChangedPath: string | null = null;
+  private sidebarSourceMode: 'workspace' | 'ai-library' = 'workspace';
+  private lastWorkfolderPath: string | null = null;
+  private aiLibraryRootPath: string | null = null;
+  private currentLintIssues: LintIssue[] = [];
 
   // DOM References
   private appEl = document.getElementById('app')!;
@@ -121,6 +127,7 @@ class SemyraApp {
   private statusZoomBtn = document.getElementById('status-zoom') as HTMLButtonElement;
   private statusEolBtn = document.getElementById('status-eol') as HTMLButtonElement;
   private statusEncodingEl = document.getElementById('status-encoding')!;
+  private statusLintBtn = document.getElementById('status-lint-badge') as HTMLButtonElement | null;
   private statusToastEl = document.getElementById('status-toast')!;
   private formatBarVisible = true;
   private btnCopyMarkdown = document.getElementById('btn-copy-markdown') as HTMLButtonElement | null;
@@ -192,9 +199,12 @@ class SemyraApp {
       onOpenCreatedFile: (payload) => this.openTabFromPayload(payload),
       onTriggerOpenFolderDialog: () => this.triggerOpenFolderDialog(),
       onWorkspaceFolderLoaded: (folderPath, persistPrefs) => {
-        this.pushRecentFolder(folderPath);
-        if (persistPrefs) {
-          this.schedulePrefsSave();
+        if (this.sidebarSourceMode === 'workspace') {
+          this.lastWorkfolderPath = folderPath;
+          this.pushRecentFolder(folderPath);
+          if (persistPrefs) {
+            this.schedulePrefsSave();
+          }
         }
       },
       onEntryRenamed: (oldPath, newPath, newName) => {
@@ -343,6 +353,8 @@ class SemyraApp {
             onToggleZen: () => void this.toggleZen(),
             onToggleTheme: () => toggleTheme(),
             onOpenSettings: () => this.settingsCtrl.openSettings(),
+            onFormatDocument: () => this.formatCurrentTabDocument(),
+            onShowLint: () => this.openLintDialog(),
             onRevealInExplorer: () => {
               const p = this.activeTab?.path ?? this.explorer.rootPath;
               if (p) void backend.revealInExplorer(p);
@@ -918,17 +930,7 @@ class SemyraApp {
   private scheduleDraftSync(): void {
     window.clearTimeout(this.draftSyncTimer);
     this.draftSyncTimer = window.setTimeout(() => {
-      const dirtyEntries: DraftEntry[] = this.tabs
-        .filter((t) => t.isDirty)
-        .map((t) => ({
-          name: t.name,
-          path: t.path,
-          parentDir: t.parentDir,
-          content: t.currentContent,
-          savedContent: t.savedContent,
-          lineEnding: t.lineEnding,
-        }));
-      void backend.saveDrafts(dirtyEntries).catch(() => {});
+      this.flushDraftSync();
     }, 1100);
   }
 
@@ -1750,6 +1752,10 @@ class SemyraApp {
         this.statusTokensEl.textContent = `~${totalTokens.toLocaleString(locale)} Tokens`;
       }
     }
+
+    if (this.activeTab) {
+      this.updateLintStatus(this.activeTab.currentContent, this.activeTab.path);
+    }
   }
 
   private syncWindowMetadata(): void {
@@ -1786,11 +1792,11 @@ class SemyraApp {
     });
   }
 
-  private openMermaidLightbox(svgHtml: string): void {
+  private openMermaidLightbox(svgEl: SVGElement): void {
     const dialog = document.getElementById('mermaid-dialog') as HTMLDialogElement | null;
     const body = document.getElementById('mermaid-dialog-body');
     if (!dialog || !body) return;
-    body.innerHTML = svgHtml;
+    body.replaceChildren(svgEl.cloneNode(true));
     dialog.showModal();
   }
 
@@ -1883,9 +1889,134 @@ class SemyraApp {
   private async triggerOpenFolderDialog(): Promise<void> {
     const res = await backend.openFolderDialog(getLanguage());
     if (res.tree) {
+      this.setSidebarSourceMode('workspace', false);
       this.explorer.setTree(res.tree);
       this.switchSidebarPanel('files');
     }
+  }
+
+  private async setSidebarSourceMode(
+    mode: 'workspace' | 'ai-library',
+    loadTree = true,
+  ): Promise<void> {
+    if (this.sidebarSourceMode === 'workspace' && this.explorer.rootPath) {
+      this.lastWorkfolderPath = this.explorer.rootPath;
+    }
+    this.sidebarSourceMode = mode;
+
+    const wsBtn = document.getElementById('btn-source-workspace');
+    const libBtn = document.getElementById('btn-source-ai-library');
+
+    this.explorer.setAiLibraryMode(mode === 'ai-library');
+    wsBtn?.classList.toggle('is-active', mode === 'workspace');
+    wsBtn?.setAttribute('aria-pressed', mode === 'workspace' ? 'true' : 'false');
+    libBtn?.classList.toggle('is-active', mode === 'ai-library');
+    libBtn?.setAttribute('aria-pressed', mode === 'ai-library' ? 'true' : 'false');
+
+    if (!loadTree) return;
+
+    if (mode === 'ai-library') {
+      try {
+        const res = await backend.initAiLibrary();
+        this.aiLibraryRootPath = res.root;
+        this.explorer.setTree(res.tree, false);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.showToast(t('aiLib.initFailed', { err: msg }));
+      }
+    } else if (this.lastWorkfolderPath) {
+      await this.explorer.loadFolder(this.lastWorkfolderPath, false);
+    } else {
+      this.explorer.clearWorkspace(this.recentFolders, this.recentFiles);
+    }
+  }
+
+  private updateLintStatus(content: string, filePath: string | null): void {
+    const result = lintMarkdownDocument(content, filePath);
+    this.currentLintIssues = result.issues;
+    const btn = this.statusLintBtn;
+    if (!btn) return;
+
+    const errors = result.issues.filter((i) => i.severity === 'error').length;
+    const warnings = result.issues.length - errors;
+    btn.classList.remove('is-ok', 'is-warning', 'is-error');
+
+    if (errors > 0) {
+      btn.classList.add('is-error');
+      btn.textContent = t('lint.badgeErrors', { count: errors });
+    } else if (warnings > 0) {
+      btn.classList.add('is-warning');
+      btn.textContent = t('lint.badgeWarnings', { count: warnings });
+    } else {
+      btn.classList.add('is-ok');
+      btn.textContent = result.isSkillFile ? t('lint.badgeSkillOk') : t('lint.badgeOk');
+    }
+  }
+
+  private renderLintDialogList(): void {
+    const listEl = document.getElementById('lint-dialog-list');
+    const dialog = document.getElementById('lint-dialog') as HTMLDialogElement | null;
+    if (!listEl) return;
+
+    if (this.activeTab) {
+      this.updateLintStatus(this.activeTab.currentContent, this.activeTab.path);
+    }
+
+    listEl.replaceChildren();
+    if (this.currentLintIssues.length === 0) {
+      const p = document.createElement('p');
+      p.className = 'lint-empty-state';
+      p.textContent = t('lint.noIssues');
+      listEl.appendChild(p);
+      return;
+    }
+
+    for (const issue of this.currentLintIssues) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = `lint-issue-row is-${issue.severity}`;
+
+      const sev = document.createElement('span');
+      sev.className = 'lint-issue-severity';
+      sev.textContent =
+        issue.severity === 'error' ? t('lint.severityError') : t('lint.severityWarning');
+
+      const lineSpan = document.createElement('span');
+      lineSpan.className = 'lint-issue-line';
+      lineSpan.textContent = t('lint.lineLabel', { line: issue.line });
+
+      const msgSpan = document.createElement('span');
+      msgSpan.className = 'lint-issue-msg';
+      msgSpan.textContent = issue.message;
+
+      row.append(sev, lineSpan, msgSpan);
+      row.addEventListener('click', () => {
+        dialog?.close();
+        this.editor.jumpToLine(issue.line);
+        this.editor.focus();
+      });
+      listEl.appendChild(row);
+    }
+  }
+
+  private openLintDialog(): void {
+    this.renderLintDialogList();
+    const dialog = document.getElementById('lint-dialog') as HTMLDialogElement | null;
+    if (dialog && !dialog.open) {
+      dialog.showModal();
+    }
+  }
+
+  private formatCurrentTabDocument(): void {
+    const tab = this.activeTab;
+    if (!tab) return;
+    const formatted = formatMarkdownDocument(tab.currentContent);
+    if (formatted === tab.currentContent) {
+      this.showToast(t('toast.docAlreadyFormatted'));
+      return;
+    }
+    this.editor.replaceAllContent(formatted);
+    this.showToast(t('toast.docFormatted'));
   }
 
   private showToast(message: string, durationMs = 2800): void {
@@ -2091,6 +2222,19 @@ class SemyraApp {
 
     document.getElementById('btn-toggle-sidebar')!.addEventListener('click', () => {
       this.sidebarEl.classList.toggle('is-collapsed');
+    });
+
+    document.getElementById('btn-source-workspace')?.addEventListener('click', () => {
+      void this.setSidebarSourceMode('workspace');
+    });
+    document.getElementById('btn-source-ai-library')?.addEventListener('click', () => {
+      void this.setSidebarSourceMode('ai-library');
+    });
+    this.statusLintBtn?.addEventListener('click', () => {
+      this.renderLintDialogList();
+    });
+    document.getElementById('lint-dialog')?.addEventListener('close', (e) => {
+      (e.currentTarget as HTMLDialogElement).returnValue = '';
     });
 
     const newTabFn = () => this.createNewTab();
@@ -2639,7 +2783,7 @@ class SemyraApp {
         const wrapper = zoomMermaidBtn.closest('.mermaid-wrapper');
         const svgEl = wrapper?.querySelector('svg');
         if (svgEl) {
-          this.openMermaidLightbox(svgEl.outerHTML);
+          this.openMermaidLightbox(svgEl);
         }
         return;
       }
@@ -2831,6 +2975,9 @@ class SemyraApp {
         } else if (mod && !e.altKey && e.shiftKey && key === 't') {
           consume();
           void this.reopenLastClosedTab();
+        } else if (mod && !e.altKey && e.shiftKey && key === 'l') {
+          consume();
+          this.formatCurrentTabDocument();
         } else if (mod && !e.altKey && (key === 'tab' || key === 'pagedown' || key === 'next')) {
           if (key === 'tab') {
             consume();

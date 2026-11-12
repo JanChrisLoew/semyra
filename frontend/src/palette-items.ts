@@ -74,6 +74,8 @@ export interface PaletteCommandContext {
   formatBarVisible?: boolean;
   splitOrientation?: 'vertical' | 'horizontal';
   onOpenSettings?: () => void;
+  onFormatDocument?: () => void;
+  onShowLint?: () => void;
 }
 
 export async function buildPaletteFileItems(ctx: PaletteFileContext): Promise<PaletteItem[]> {
@@ -558,6 +560,27 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
       label: isEn ? 'Windows: Reveal Active File in Explorer' : 'Windows: Aktuelle Datei im Explorer anzeigen',
       run: ctx.onRevealInExplorer,
     },
+    ...(ctx.onFormatDocument
+      ? [
+          {
+            id: 'cmd:format-doc',
+            kind: 'command' as const,
+            label: isEn ? 'Editor: Format Markdown Document' : 'Editor: Markdown-Dokument formatieren',
+            shortcut: isEn ? 'Ctrl+Shift+L' : 'Strg+Umschalt+L',
+            run: ctx.onFormatDocument,
+          },
+        ]
+      : []),
+    ...(ctx.onShowLint
+      ? [
+          {
+            id: 'cmd:show-lint',
+            kind: 'command' as const,
+            label: isEn ? 'Check: Open Markdown & YAML Diagnostics' : 'Prüfung: Markdown- & YAML-Prüfung öffnen',
+            run: ctx.onShowLint,
+          },
+        ]
+      : []),
     {
       id: 'cmd:shortcuts',
       kind: 'command',

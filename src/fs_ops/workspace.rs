@@ -1,11 +1,11 @@
 use super::encoding::{read_text_file, write_text_file, FilePayload};
 use super::{
-    clean_windows_path, is_image_path, is_markdown_path, is_supported_text_path,
+    app_data_dir, clean_windows_path, is_image_path, is_markdown_path, is_supported_text_path,
     normalize_existing_path, IGNORED_DIRS,
 };
 use serde::Serialize;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -274,6 +274,58 @@ pub fn create_new_markdown_file(parent_dir: &Path, file_name: &str) -> Result<Fi
     read_text_file(&full_path)
 }
 
+/// Ensures `%LOCALAPPDATA%\Semyra\ai-library` with `prompts/` and `skills/`
+/// subdirectories exists and returns its root path and directory tree.
+pub fn ensure_ai_library_tree() -> Result<(PathBuf, FileTreeNode), String> {
+    let root = app_data_dir().join("ai-library");
+    fs::create_dir_all(root.join("prompts"))
+        .map_err(|e| format!("Prompts-Ordner konnte nicht erstellt werden: {e}"))?;
+    fs::create_dir_all(root.join("skills"))
+        .map_err(|e| format!("Skills-Ordner konnte nicht erstellt werden: {e}"))?;
+    let tree = build_directory_tree(&root, 5)?;
+    Ok((root, tree))
+}
+
+fn normalize_skill_slug(raw: &str) -> Result<String, String> {
+    let trimmed = validate_entry_name(raw)?;
+    let mut slug = String::with_capacity(trimmed.len());
+    let mut prev_hyphen = true;
+    for ch in trimmed.chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+            prev_hyphen = false;
+        } else if (ch == '-' || ch == '_' || ch == ' ') && !prev_hyphen {
+            slug.push('-');
+            prev_hyphen = true;
+        }
+    }
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+    if slug.is_empty() {
+        return Err("Skill-Name muss mindestens ein alphanumerisches Zeichen enthalten.".to_string());
+    }
+    validate_entry_name(&slug)?;
+    Ok(slug)
+}
+
+/// Creates a standard-compliant `<skill-name>/SKILL.md` folder and file.
+pub fn create_ai_skill(skills_dir: &Path, raw_skill_name: &str) -> Result<FilePayload, String> {
+    let slug = normalize_skill_slug(raw_skill_name)?;
+    let skill_dir = skills_dir.join(&slug);
+    let skill_file = skill_dir.join("SKILL.md");
+    if skill_file.exists() {
+        return Err(format!("Der Skill '{slug}' existiert bereits."));
+    }
+    fs::create_dir_all(&skill_dir)
+        .map_err(|e| format!("Skill-Ordner konnte nicht erstellt werden: {e}"))?;
+    let initial = format!(
+        "---\nname: {slug}\ndescription: Beschreibe hier präzise, was dieser Skill tut und wann er verwendet werden soll.\n---\n\n# {slug}\n\n## Ziel\n\n## Schritte\n- Schritt 1\n- Schritt 2\n"
+    );
+    write_text_file(&skill_file, &initial, true)?;
+    read_text_file(&skill_file)
+}
+
 fn validate_entry_name(name: &str) -> Result<&str, String> {
     let trimmed = name.trim();
     if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
@@ -409,6 +461,27 @@ mod tests {
         assert_eq!(cursor.name, ".cursorrules");
         assert!(cursor.content.starts_with("# Cursor & KI-Regeln\n"));
 
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn creates_agent_standard_skill_folder_and_file() {
+        let temp = std::env::temp_dir().join(format!(
+            "semyra_skill_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let skills_root = temp.join("skills");
+        fs::create_dir_all(&skills_root).unwrap();
+
+        let created = create_ai_skill(&skills_root, "Mein Neuer_Skill").unwrap();
+        assert_eq!(created.name, "SKILL.md");
+        assert!(created.path.ends_with("mein-neuer-skill\\SKILL.md"));
+        assert!(created.content.starts_with("---\nname: mein-neuer-skill\ndescription:"));
+
+        assert!(create_ai_skill(&skills_root, "mein-neuer-skill").is_err());
         let _ = fs::remove_dir_all(&temp);
     }
 }

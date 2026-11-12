@@ -124,6 +124,12 @@ export const backend = {
   createFolder: (parentDir: string, folderName: string) =>
     postJson<{ path: string }>('create-folder', { parentDir, folderName }),
 
+  initAiLibrary: () =>
+    postJson<{ root: string; tree: FileTreeNode }>('ai-library/init'),
+
+  createAiSkill: (parentDir: string, skillName: string) =>
+    postJson<FilePayload>('ai-library/create-skill', { parentDir, skillName }),
+
   renamePath: (path: string, newName: string) =>
     postJson<{ path: string; name: string }>('rename-path', { path, newName }),
 

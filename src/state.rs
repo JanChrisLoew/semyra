@@ -194,6 +194,16 @@ impl AppState {
         self.watch_path(&norm, true);
     }
 
+    /// Registers an auxiliary root (such as the persistent AI Library) for asset
+    /// access and filesystem watching without overwriting the user's active workfolder.
+    pub fn allow_and_watch_root(&self, root_path: &Path) {
+        let norm = normalize_existing_path(root_path);
+        if let Ok(mut guard) = self.inner.lock() {
+            guard.allowed_roots.insert(norm.clone());
+        }
+        self.watch_path(&norm, true);
+    }
+
     pub fn watch_path(&self, path: &Path, recursive: bool) {
         let norm = normalize_existing_path(path);
         if !norm.exists() {

@@ -1,10 +1,10 @@
 use crate::drafts::{clear_recovery_snapshot, save_recovery_snapshot, DraftEntry};
 use crate::fs_ops::{
-    build_directory_tree, build_standalone_html_document, clean_windows_path, create_new_folder,
-    create_new_markdown_file, import_dropped_image, inline_local_asset_images,
-    list_workspace_markdown_files, move_to_recycle_bin, normalize_existing_path, read_text_file,
-    rename_fs_entry, reveal_in_explorer, save_clipboard_image, search_workspace_files,
-    write_text_file,
+    app_data_dir, build_directory_tree, build_standalone_html_document, clean_windows_path,
+    create_ai_skill, create_new_folder, create_new_markdown_file, ensure_ai_library_tree,
+    import_dropped_image, inline_local_asset_images, list_workspace_markdown_files,
+    move_to_recycle_bin, normalize_existing_path, read_text_file, rename_fs_entry,
+    reveal_in_explorer, save_clipboard_image, search_workspace_files, write_text_file,
 };
 use crate::markdown::render_markdown;
 use crate::state::{AppState, UserEvent};
@@ -55,6 +55,13 @@ struct CreateFileReq {
 struct CreateFolderReq {
     parent_dir: String,
     folder_name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateSkillReq {
+    parent_dir: String,
+    skill_name: String,
 }
 
 #[derive(Deserialize)]
@@ -397,12 +404,46 @@ fn handle_api_route(
                 let folder = PathBuf::from(&req.path);
                 match build_directory_tree(&folder, 5) {
                     Ok(tree) => {
-                        state.set_workspace_folder(&folder);
+                        let ai_lib_root = normalize_existing_path(&app_data_dir().join("ai-library"));
+                        if normalize_existing_path(&folder) == ai_lib_root {
+                            state.allow_and_watch_root(&folder);
+                        } else {
+                            state.set_workspace_folder(&folder);
+                        }
                         responder.respond(ok_json(&tree));
                     }
                     Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
                 }
             });
+        }
+
+        "ai-library/init" => {
+            std::thread::spawn(move || match ensure_ai_library_tree() {
+                Ok((root, tree)) => {
+                    state.allow_and_watch_root(&root);
+                    responder.respond(ok_json(&serde_json::json!({
+                        "root": clean_windows_path(&root).to_string_lossy(),
+                        "tree": tree
+                    })));
+                }
+                Err(err) => responder.respond(err_json(StatusCode::INTERNAL_SERVER_ERROR, err)),
+            });
+        }
+
+        "ai-library/create-skill" => {
+            let Ok(req) = serde_json::from_slice::<CreateSkillReq>(&body) else {
+                responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Skill-Anfrage"));
+                return;
+            };
+            match create_ai_skill(Path::new(&req.parent_dir), &req.skill_name) {
+                Ok(payload) => {
+                    let p = Path::new(&payload.path);
+                    state.record_self_write(p);
+                    state.allow_file_parent(p);
+                    responder.respond(ok_json(&payload));
+                }
+                Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
+            }
         }
 
         "workspace-files" => {

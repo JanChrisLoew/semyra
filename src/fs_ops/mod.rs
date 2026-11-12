@@ -9,8 +9,8 @@ pub use encoding::{read_text_file, write_text_file};
 pub use html_export::{build_standalone_html_document, inline_local_asset_images};
 pub use search::search_workspace_files;
 pub use workspace::{
-    build_directory_tree, create_new_folder, create_new_markdown_file,
-    list_workspace_markdown_files, move_to_recycle_bin, rename_fs_entry,
+    build_directory_tree, create_ai_skill, create_new_folder, create_new_markdown_file,
+    ensure_ai_library_tree, list_workspace_markdown_files, move_to_recycle_bin, rename_fs_entry,
 };
 
 use std::fs;

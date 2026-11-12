@@ -112,6 +112,10 @@
 
         <!-- Explorer Panel -->
         <section id="panel-files" class="sidebar-panel" role="tabpanel" aria-labelledby="sidebar-tab-files">
+          <div id="sidebar-source-switch" class="sidebar-source-switch" role="group" aria-label="Seitenleisten-Quelle wählen" data-i18n-aria="aiLib.modeGroupAria">
+            <button type="button" id="btn-source-workspace" class="source-switch-btn is-active" aria-pressed="true" data-i18n="aiLib.modeWorkspace">Ordner</button>
+            <button type="button" id="btn-source-ai-library" class="source-switch-btn" aria-pressed="false" data-i18n="aiLib.modeLibrary">KI-Bibliothek</button>
+          </div>
           <div class="sidebar-subheader">
             <span id="workspace-title" class="workspace-name" title="Aktueller Arbeitsordner" data-i18n="sidebar.noFolder" data-i18n-title="sidebar.noFolder">Kein Ordner geöffnet</span>
             <div class="sidebar-mini-actions">
@@ -224,6 +228,8 @@
         <span id="status-save-badge" class="status-badge" data-i18n="status.draft">Entwurf</span>
       </div>
       <div class="status-right">
+        <button type="button" id="status-lint-badge" class="status-action-btn status-lint-badge is-ok" command="show-modal" commandfor="lint-dialog" title="Markdown- &amp; YAML-Prüfung öffnen" data-i18n-title="lint.badgeTitle">✓ Valide</button>
+        <span class="status-sep">·</span>
         <span id="status-cursor">Zeile 1, Spalte 1</span>
         <span class="status-sep">·</span>
         <button type="button" id="status-doc-summary" class="status-action-btn status-doc-summary" title="Detaillierte Dokument-Statistiken anzeigen (Klicken)" data-i18n-title="status.docSummaryTitle">0 Wörter · ~0 Tokens</button>
@@ -396,6 +402,10 @@
   <dialog id="new-file-dialog" closedby="any" aria-labelledby="new-file-dialog-title">
     <h2 id="new-file-dialog-title" data-i18n="newFileDialog.title">Neue Markdown-Datei erstellen</h2>
     <form id="new-file-form" method="dialog" class="dialog-form">
+      <div id="new-ai-kind-group" class="sidebar-source-switch dialog-kind-switch" role="group" aria-label="Eintragstyp wählen" data-i18n-aria="aiLib.kindGroupAria" hidden>
+        <button type="button" id="btn-ai-kind-prompt" class="source-switch-btn is-active" aria-pressed="true" data-i18n="aiLib.kindPrompt">Prompt (.md)</button>
+        <button type="button" id="btn-ai-kind-skill" class="source-switch-btn" aria-pressed="false" data-i18n="aiLib.kindSkill">Skill (SKILL.md)</button>
+      </div>
       <label id="new-file-label" for="new-file-name" data-i18n="newFileDialog.label">Dateiname</label>
       <input id="new-file-name" name="filename" type="text" placeholder="z. B. Notizen.md" data-i18n-placeholder="newFileDialog.placeholder" autocomplete="off" autofocus>
       <p id="new-file-error" class="form-error" aria-live="polite"></p>
@@ -849,6 +859,20 @@
       </div>
     </div>
   </div>
+
+  <!-- Markdown & YAML Lint Diagnostics Dialog -->
+  <dialog id="lint-dialog" class="modal-dialog lint-dialog" closedby="any" aria-labelledby="lint-dialog-title">
+    <div class="modal-card lint-card">
+      <div class="settings-header">
+        <div>
+          <h3 id="lint-dialog-title" data-i18n="lint.dialogTitle">Markdown- &amp; YAML-Prüfung</h3>
+          <p class="lint-dialog-sub" data-i18n="lint.dialogSubtitle">Klicke auf einen Eintrag, um direkt zur Zeile im Editor zu springen.</p>
+        </div>
+        <button type="button" class="mini-icon-btn" command="close" commandfor="lint-dialog" aria-label="Schließen" data-i18n-aria="settings.close">✕</button>
+      </div>
+      <div id="lint-dialog-list" class="lint-dialog-list scroller"></div>
+    </div>
+  </dialog>
 
   <script type="module" src="/src/main.ts"></script>
 </body>

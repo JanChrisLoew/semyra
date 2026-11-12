@@ -8,7 +8,7 @@ import {
   parentDirOfPath,
 } from './path-utils';
 
-type EntryDialogMode = 'new-file' | 'new-folder' | 'rename';
+type EntryDialogMode = 'new-file' | 'new-folder' | 'new-skill' | 'new-ai-item' | 'rename';
 
 interface ContextMenuTarget {
   path: string;
@@ -47,6 +47,8 @@ export class SidebarExplorerController {
   private contextTarget: ContextMenuTarget | null = null;
   private loadSeq = 0;
   private refreshDebounceTimer: number | undefined;
+  private isAiLibraryMode = false;
+  private selectedAiKind: 'prompt' | 'skill' = 'prompt';
   private entryDialogState: { mode: EntryDialogMode; targetPath: string } = {
     mode: 'new-file',
     targetPath: '',
@@ -63,6 +65,10 @@ export class SidebarExplorerController {
 
   public get hasWorkspace(): boolean {
     return this.workspaceTree !== null;
+  }
+
+  public setAiLibraryMode(active: boolean): void {
+    this.isAiLibraryMode = active;
   }
 
   public invalidateFilesCache(): void {
@@ -165,6 +171,20 @@ export class SidebarExplorerController {
       const p = (row.dataset.filepath ?? '').toLowerCase();
       row.classList.toggle('is-active', Boolean(activePath && p === activePath));
     }
+  }
+
+  public clearWorkspace(recentFolders: string[], recentFiles: string[]): void {
+    this.workspaceTree = null;
+    this.workspaceFilesCache = null;
+    this.deps.workspaceTitleEl.textContent = t('sidebar.noFolder');
+    this.deps.workspaceTitleEl.title = t('sidebar.noFolder');
+    const newFileBtn = document.getElementById('btn-new-folder-file');
+    if (newFileBtn) newFileBtn.hidden = true;
+    const newSubBtn = document.getElementById('btn-new-subfolder');
+    if (newSubBtn) newSubBtn.hidden = true;
+    const refreshBtn = document.getElementById('btn-refresh-tree');
+    if (refreshBtn) refreshBtn.hidden = true;
+    this.renderEmptyStateWithRecents(recentFolders, recentFiles);
   }
 
   public renderEmptyStateWithRecents(recentFolders: string[], recentFiles: string[]): void {
@@ -360,7 +380,10 @@ export class SidebarExplorerController {
 
     document.getElementById('btn-new-folder-file')?.addEventListener('click', () => {
       if (!this.workspaceTree) return;
-      this.openEntryDialog('new-file', this.workspaceTree.path);
+      this.openEntryDialog(
+        this.isAiLibraryMode ? 'new-ai-item' : 'new-file',
+        this.workspaceTree.path,
+      );
     });
 
     document.getElementById('btn-new-subfolder')?.addEventListener('click', () => {
@@ -444,6 +467,13 @@ export class SidebarExplorerController {
     const entryInput = document.getElementById('new-file-name') as HTMLInputElement | null;
     const entryError = document.getElementById('new-file-error');
 
+    document.getElementById('btn-ai-kind-prompt')?.addEventListener('click', () => {
+      this.setAiDialogKind('prompt');
+    });
+    document.getElementById('btn-ai-kind-skill')?.addEventListener('click', () => {
+      this.setAiDialogKind('skill');
+    });
+
     entryDialog?.addEventListener('close', () => {
       entryDialog.returnValue = '';
     });
@@ -460,6 +490,20 @@ export class SidebarExplorerController {
       try {
         if (mode === 'new-file') {
           const created = await backend.createFile(targetPath, rawName);
+          entryDialog.close();
+          await this.refresh();
+          this.deps.onOpenCreatedFile(created);
+        } else if (mode === 'new-ai-item') {
+          const sep = targetPath.includes('\\') ? '\\' : '/';
+          const created =
+            this.selectedAiKind === 'skill'
+              ? await backend.createAiSkill(`${targetPath}${sep}skills`, rawName)
+              : await backend.createFile(`${targetPath}${sep}prompts`, rawName);
+          entryDialog.close();
+          await this.refresh();
+          this.deps.onOpenCreatedFile(created);
+        } else if (mode === 'new-skill') {
+          const created = await backend.createAiSkill(targetPath, rawName);
           entryDialog.close();
           await this.refresh();
           this.deps.onOpenCreatedFile(created);
@@ -543,6 +587,36 @@ export class SidebarExplorerController {
     });
   }
 
+  public openNewSkillDialog(skillsDirPath: string): void {
+    this.openEntryDialog('new-skill', skillsDirPath);
+  }
+
+  private setAiDialogKind(kind: 'prompt' | 'skill'): void {
+    this.selectedAiKind = kind;
+    const promptBtn = document.getElementById('btn-ai-kind-prompt');
+    const skillBtn = document.getElementById('btn-ai-kind-skill');
+    promptBtn?.classList.toggle('is-active', kind === 'prompt');
+    promptBtn?.setAttribute('aria-pressed', kind === 'prompt' ? 'true' : 'false');
+    skillBtn?.classList.toggle('is-active', kind === 'skill');
+    skillBtn?.setAttribute('aria-pressed', kind === 'skill' ? 'true' : 'false');
+
+    if (this.entryDialogState.mode === 'new-ai-item') {
+      const labelEl = document.getElementById('new-file-label');
+      const inputEl = document.getElementById('new-file-name') as HTMLInputElement | null;
+      if (labelEl) {
+        labelEl.textContent =
+          kind === 'skill' ? t('aiLib.newSkillPromptLabel') : t('aiLib.newPromptLabel');
+      }
+      if (inputEl) {
+        inputEl.placeholder =
+          kind === 'skill'
+            ? t('aiLib.newSkillPromptPlaceholder')
+            : t('aiLib.newPromptPlaceholder');
+        inputEl.focus();
+      }
+    }
+  }
+
   private openEntryDialog(
     mode: EntryDialogMode,
     targetPath: string,
@@ -551,6 +625,7 @@ export class SidebarExplorerController {
     this.entryDialogState = { mode, targetPath };
 
     const dialog = document.getElementById('new-file-dialog') as HTMLDialogElement;
+    const kindGroup = document.getElementById('new-ai-kind-group');
     const titleEl = document.getElementById('new-file-dialog-title')!;
     const labelEl = document.getElementById('new-file-label')!;
     const inputEl = document.getElementById('new-file-name') as HTMLInputElement;
@@ -559,11 +634,23 @@ export class SidebarExplorerController {
 
     errorEl.textContent = '';
     errorEl.classList.remove('is-visible');
+    if (kindGroup) {
+      kindGroup.hidden = mode !== 'new-ai-item';
+    }
 
     if (mode === 'new-file') {
       titleEl.textContent = t('newFileDialog.title');
       labelEl.textContent = t('newFileDialog.label');
       inputEl.placeholder = t('newFileDialog.placeholder');
+      submitBtn.textContent = t('newFileDialog.create');
+    } else if (mode === 'new-ai-item') {
+      titleEl.textContent = t('aiLib.newPromptTitle');
+      submitBtn.textContent = t('newFileDialog.create');
+      this.setAiDialogKind(this.selectedAiKind);
+    } else if (mode === 'new-skill') {
+      titleEl.textContent = t('aiLib.newSkillPromptTitle');
+      labelEl.textContent = t('aiLib.newSkillPromptLabel');
+      inputEl.placeholder = t('aiLib.newSkillPromptPlaceholder');
       submitBtn.textContent = t('newFileDialog.create');
     } else if (mode === 'new-folder') {
       titleEl.textContent = t('newFolderDialog.title');

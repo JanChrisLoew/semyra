@@ -7,6 +7,66 @@ Dieses Dokument dient als fortlaufendes Protokoll über Entwicklungssessions, we
 
 ---
 
+## 2026-11-12 — Session 8: KI-Bibliothek (Prompts & Skills), YAML-/Markdown-Lint & eigener Markdown-Formatter
+
+### 1. Ziel & Scope
+- Persistente **KI-Bibliothek** unter `%LOCALAPPDATA%\Semyra\ai-library\` (`prompts/` und `skills/<skill-name>/SKILL.md` nach Agent-Skill-Standard) mit Umschalter `Arbeitsordner | KI-Bibliothek` in der Seitenleiste.
+- Abhängigkeitsfreier **YAML-Frontmatter-, Agent-Skill- & Markdown-Struktur-Lint** direkt in Statusleiste und Diagnose-Dialog.
+- Abhängigkeitsfreier **Markdown-Formatter** (`Strg+Umschalt+L` / Befehlspalette), der YAML-Frontmatter, Code-Fences und Math-Blöcke schützt und `markdown-table.ts` wiederverwendet.
+
+### 2. Durchgeführte Maßnahmen
+- **Sprint 1 — KI-Bibliothek (`src/fs_ops/workspace.rs`, `src/ipc.rs`, `frontend/src/api.ts`, `frontend/index.html`, `frontend/src/sidebar-explorer.ts`, `frontend/src/main.ts`, `frontend/src/styles/sidebar.css`)**:
+  - `ensure_ai_library_tree()` legt `%LOCALAPPDATA%\Semyra\ai-library\{prompts,skills}` an; `create_ai_skill()` normalisiert den Skill-Slug und erstellt `<skill-name>/SKILL.md` mit validem Agent-Skill-YAML-Frontmatter.
+  - IPC-Routen `ai-library/init` und `ai-library/create-skill` ergänzt (inkl. `state.set_workspace_folder` für sichere Datei-/Asset-Zugriffe, ohne `last_workspace` zu überschreiben).
+  - Segmented-Switch `Arbeitsordner | KI-Bibliothek` und `+ Skill`-Aktion in die Seitenleiste integriert.
+- **Sprint 2 — YAML- & Markdown-Lint (`frontend/src/markdown-lint.ts`, `frontend/src/__tests__/markdown-lint.test.ts`, `frontend/index.html`, `frontend/src/styles/dialogs-print.css`)**:
+  - Prüft YAML-Frontmatter (Tabs, fehlende `:`, ungeschlossene Quotes, doppelte Keys, ungeschlossenes `---`), `SKILL.md`-Pflichtfelder (`name` im Lowercase-Hyphen-Format, Ordnernamen-Abgleich, `description`) sowie Markdown-Struktur (ungeschlossene Code-Fences, `#` ohne Leerzeichen, leere Links, GFM-Tabellen-Spalten).
+  - Live-Status-Badge (`#status-lint-badge`) und Diagnose-Dialog (`#lint-dialog`) mit Klick-Sprung zur betroffenen Editor-Zeile (`editor.jumpToLine`).
+- **Sprint 3 — Eigener Markdown-Formatter (`frontend/src/markdown-formatter.ts`, `frontend/src/__tests__/markdown-formatter.test.ts`, `frontend/src/palette-items.ts`, `frontend/src/main.ts`)**:
+  - Schützt YAML-Frontmatter, Code-Fences, `$$`-Math-Blöcke sowie 2-Space-Hard-Breaks und formatiert Überschriften, Listen-Marker (`*`/`+` -> `-`), GFM-Tabellen (via `formatMarkdownTableLines`), Mehrfach-Leerzeilen und Dateiende unter Beibehaltung von `CRLF`/`LF`.
+- **i18n (`frontend/src/i18n.ts`)**: Vollständige DE/EN-Übersetzungen ergänzt.
+
+### 3. Testergebnisse & Build-Status
+- `npm run typecheck` (`tsc --noEmit`): 0 Fehler.
+- `npm test` (`vitest run`): 19/19 Testdateien, 110/110 Tests bestanden.
+- `npm run build` (`vite build`): erfolgreich (`frontend/dist` aktualisiert).
+- `npm run test:e2e` (`playwright test`): 6/6 E2E- & `@axe-core/playwright`-A11y-Tests bestanden.
+- `cargo test`: 13/13 Tests bestanden (0 Warnings).
+
+### 4. Entscheidungen & Nächste Schritte
+- Bewusst ohne externe Lint-/Formatter-Dependencies (wie Prettier oder `@codemirror/lint`) umgesetzt, um `Semyra.exe` schlank zu halten und Semyra-spezifische YAML-/Prompt-/Alert-Konventionen exakt zu schützen.
+
+---
+
+## 2026-11-12 — Session 7: Repo-spezifische Antigravity-Skills eingerichtet
+
+### 1. Ziel & Scope
+- Einrichtung schlanker, nachhaltiger, projektspezifischer Workspace-Skills unter `.agents/skills/` für wiederkehrende Semyra-Workflows ohne Duplizierung von `AGENTS.md`.
+- Struktur-, Pfad- und Testvalidierung der neuen Skills.
+
+### 2. Durchgeführte Maßnahmen
+- **`.agents/skills/semyra-ui-design/SKILL.md`** angelegt: Checkliste für `docs/PRODUCT_CONTEXT.md`-Design-Tokens (`tokens.css`, Steel Blue / Amber-Regel), Dual-Theme-Sync (`theme.ts`), WebView2- & A11y-Invarianten (kein `content-visibility: auto` auf `.markdown-body`, native `<dialog>`-Konventionen, `.tab-slot`-Semantik, deutsche UI-Texte).
+- **`.agents/skills/semyra-markdown-export/SKILL.md`** angelegt: End-to-End-Checkliste für gekoppelte Änderungen über `src/markdown.rs`, `frontend/src/sanitizer.ts`, `frontend/src/sync-scroll.ts`, `src/fs_ops/html_export.rs` und `frontend/src/export-utils.ts` inkl. `is_local_asset_allowed`-Sicherheitsinvariante.
+- **`.agents/skills/semyra-release/SKILL.md`** angelegt: Release- & Installer-Runbook (Versionsabgleich `Cargo.toml` / `frontend/package.json` / `installer/Semyra.iss`, `scripts/Build-Release.ps1`, `scripts/Build-Installer.ps1`).
+- **`.agents/skills/semyra-codebase-review/SKILL.md`** angelegt & erweitert: Read-Only-Audit-Skill für Kohäsion, Semyra-Invarianten, Rust/TypeScript/WebView2-Best-Practices sowie **Stabilität, Nebenläufigkeit & Fehlerbehandlung** (inkl. Dry-Run- & Stabilitäts-Check).
+- **Codebase-Review-Maßnahmen umgesetzt**:
+  - `frontend/src/main.ts` (`openMermaidLightbox`): Statt `svgEl.outerHTML` + `body.innerHTML = svgHtml` wird nun direkt das `SVGElement` übergeben und per `body.replaceChildren(svgEl.cloneNode(true))` geklont (kein rohes `.innerHTML =` mehr auf Live-DOM in `main.ts`).
+  - `frontend/src/main.ts` (`scheduleDraftSync` / `flushDraftSync`): Duplizierte `dirtyEntries`-Serialisierung und `saveDrafts`-Logik über `flushDraftSync()` dedupliziert; größere Aufteilung von `main.ts` bewusst verworfen, da Domänen-Helfer bereits sauber ausgelagert sind.
+  - `frontend/src/styles/dialogs-print.css` (`@media print`): Veralteten Akzentwert `--accent: #005fb8 !important;` auf Semyras kanonischen Light-Akzent `var(--semyra-accent-light) !important` (`#426b91`) vereinheitlicht.
+
+### 3. Testergebnisse & Build-Status
+- Frontmatter- & Pfad-Validierung (`.agents/skills/*/SKILL.md`): Alle 3 Skills mit gültigem YAML-Frontmatter und 16/16 referenzierten Repo-Pfaden verifiziert.
+- `npm run typecheck` (`tsc --noEmit`): 0 Fehler.
+- `npm test` (`vitest run`): 17/17 Testdateien, 103/103 Tests bestanden.
+- `npm run test:e2e` (`playwright test`): 6/6 E2E- & Accessibility-Tests (`@axe-core/playwright`) bestanden.
+- `npm run build` (`vite build`): Erfolgreich (`frontend/dist` aktualisiert).
+- `cargo check` & `cargo test`: 0 Warnings, 12/12 Tests bestanden.
+
+### 4. Entscheidungen & Nächste Schritte
+- Skills bewusst als On-Demand-Checklisten unter `.agents/skills/` abgelegt, während immer gültige Sicherheits- und Architekturregeln in `AGENTS.md` verbleiben.
+
+---
+
 ## 2026-11-08 — Session 6: Installer-Architektur, Windows-11-Integration & ARM64-Fähigkeit
 
 ### 1. Ziel & Scope
