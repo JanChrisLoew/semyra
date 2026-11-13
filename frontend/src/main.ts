@@ -9,6 +9,9 @@ import {
   onBackendEvent,
   UiSessionPrefs,
 } from './api';
+import { formatAiContextEntry } from './ai-bundle';
+import { openAiBundleDialogModal, openExternalDiffDialogModal } from './ai-dialogs';
+import { AiTemplateId, getAiTemplate } from './ai-templates';
 import { FormatAction, MarkdownEditorController } from './editor';
 import { copyRichPreviewToClipboard, preparePreviewHtmlForExport } from './export-utils';
 import { formatMarkdownDocument } from './markdown-formatter';
@@ -40,7 +43,7 @@ import {
 } from './layout-utils';
 import { calculateDetailedStats } from './stats-utils';
 import { SyncScrollController } from './sync-scroll';
-import { findAdjacentTabId, reorderTabList } from './tab-utils';
+import { findAdjacentTabId, reorderTabList, toggleTabPinned } from './tab-utils';
 import { bindThemeSystem, toggleTheme } from './theme';
 import { SettingsController } from './settings';
 import { getLanguage, setLanguage, onLanguageChange, t, updateDomLanguage, Language } from './i18n';
@@ -66,6 +69,7 @@ interface OpenTab {
   outline: HeadingItem[];
   stats: DocStats;
   hasExternalConflict?: boolean;
+  isPinned?: boolean;
 }
 
 class SemyraApp {
@@ -229,6 +233,8 @@ class SemyraApp {
 
     this.workspaceSearch = new WorkspaceSearchController({
       searchInputEl: document.getElementById('workspace-search-input') as HTMLInputElement,
+      replaceInputEl: document.getElementById('workspace-replace-input') as HTMLInputElement | null,
+      replaceAllBtn: document.getElementById('btn-workspace-replace-all') as HTMLButtonElement | null,
       clearBtn: document.getElementById('btn-search-clear') as HTMLButtonElement | null,
       statusBadgeEl: document.getElementById('search-status-badge'),
       caseToggleBtn: document.getElementById('btn-search-case')!,
@@ -239,6 +245,32 @@ class SemyraApp {
         requestAnimationFrame(() => {
           this.editor.jumpToLine(line);
         });
+      },
+      onFilesReplaced: async (res) => {
+        if (res.totalReplacements === 0) {
+          this.showToast(t('toast.workspaceReplaceNone'));
+          return;
+        }
+        const updatedSet = new Set(res.updatedPaths.map((p) => p.toLowerCase()));
+        for (const tab of this.tabs) {
+          if (tab.path && updatedSet.has(tab.path.toLowerCase())) {
+            if (!tab.isDirty) {
+              await this.reloadTabFromDisk(tab.path);
+            } else {
+              tab.hasExternalConflict = true;
+              if (tab.id === this.activeTabId) {
+                this.externalChangedPath = tab.path;
+                this.externalBannerEl.hidden = false;
+              }
+            }
+          }
+        }
+        this.showToast(
+          t('toast.workspaceReplaced', {
+            count: String(res.totalReplacements),
+            files: String(res.filesUpdated),
+          }),
+        );
       },
     });
 
@@ -286,6 +318,12 @@ class SemyraApp {
             },
             onCopyAiContext: () => {
               void this.copyCurrentTabAiContext();
+            },
+            onOpenAiBundle: () => {
+              this.openAiBundleDialog();
+            },
+            onCreateFromTemplate: (templateId) => {
+              this.createTabFromAiTemplate(templateId);
             },
             onExportHtml: () => {
               void this.exportCurrentTabHtml();
@@ -453,6 +491,21 @@ class SemyraApp {
       } else if (startup.uiPrefs.sessionFiles.length > 0) {
         for (const sessionPath of startup.uiPrefs.sessionFiles) {
           await this.openFileByPath(sessionPath, false);
+        }
+        const pinnedSet = new Set(
+          (startup.uiPrefs.pinnedSessionFiles ?? []).map((p) => p.toLowerCase()),
+        );
+        if (pinnedSet.size > 0) {
+          for (const tab of this.tabs) {
+            if (tab.path && pinnedSet.has(tab.path.toLowerCase())) {
+              tab.isPinned = true;
+            }
+          }
+          this.tabs = [
+            ...this.tabs.filter((t) => t.isPinned),
+            ...this.tabs.filter((t) => !t.isPinned),
+          ];
+          this.renderTabBar();
         }
         if (startup.uiPrefs.activeSessionFile) {
           const lower = startup.uiPrefs.activeSessionFile.toLowerCase();
@@ -828,6 +881,9 @@ class SemyraApp {
     const sessionFiles = this.tabs
       .map((t) => t.path)
       .filter((p): p is string => Boolean(p));
+    const pinnedSessionFiles = this.tabs
+      .filter((t) => t.isPinned && t.path)
+      .map((t) => t.path as string);
     return {
       splitRatio: this.splitRatio,
       splitOrientation: this.splitOrientation,
@@ -841,6 +897,7 @@ class SemyraApp {
       recentFiles: this.recentFiles,
       recentFolders: this.recentFolders,
       sessionFiles,
+      pinnedSessionFiles,
       activeSessionFile: this.activeTab?.path ?? null,
     };
   }
@@ -1250,7 +1307,7 @@ class SemyraApp {
   }
 
   private async closeOtherTabs(keepTabId: string): Promise<void> {
-    const toClose = this.tabs.filter((t) => t.id !== keepTabId);
+    const toClose = this.tabs.filter((t) => t.id !== keepTabId && !t.isPinned);
     for (const t of toClose) {
       const ok = await this.requestCloseTab(t.id);
       if (!ok) break;
@@ -1260,7 +1317,7 @@ class SemyraApp {
   private async closeTabsToRight(fromTabId: string): Promise<void> {
     const idx = this.tabs.findIndex((t) => t.id === fromTabId);
     if (idx === -1) return;
-    const toClose = this.tabs.slice(idx + 1);
+    const toClose = this.tabs.slice(idx + 1).filter((t) => !t.isPinned);
     for (const t of toClose) {
       const ok = await this.requestCloseTab(t.id);
       if (!ok) break;
@@ -1529,7 +1586,7 @@ class SemyraApp {
       const isSelected = tab.id === this.activeTabId;
 
       const slot = document.createElement('div');
-      slot.className = `tab-slot ${isSelected ? 'is-active' : ''}`;
+      slot.className = `tab-slot ${isSelected ? 'is-active' : ''} ${tab.isPinned ? 'is-pinned' : ''}`.trim();
       slot.setAttribute('role', 'presentation');
       slot.dataset.tabId = tab.id;
 
@@ -1562,7 +1619,17 @@ class SemyraApp {
       const titleSpan = document.createElement('span');
       titleSpan.className = 'tab-title';
       titleSpan.textContent = tab.name;
-      selectBtn.appendChild(titleSpan);
+
+      if (tab.isPinned) {
+        const pinEl = document.createElement('span');
+        pinEl.className = 'tab-pin-indicator';
+        pinEl.textContent = '📌';
+        pinEl.title = t('tab.pinnedTitle');
+        pinEl.setAttribute('aria-hidden', 'true');
+        selectBtn.append(pinEl, titleSpan);
+      } else {
+        selectBtn.appendChild(titleSpan);
+      }
 
       if (tab.isDirty) {
         const dot = document.createElement('span');
@@ -1634,6 +1701,11 @@ class SemyraApp {
     const tabIdx = this.tabs.findIndex((t) => t.id === tabId);
     if (closeOthersBtn) closeOthersBtn.disabled = this.tabs.length <= 1;
     if (closeRightBtn) closeRightBtn.disabled = tabIdx === -1 || tabIdx >= this.tabs.length - 1;
+
+    const pinLabel = document.getElementById('tab-ctx-pin-label');
+    if (pinLabel) {
+      pinLabel.textContent = tab.isPinned ? t('tabCtx.unpin') : t('tabCtx.pin');
+    }
 
     this.tabContextMenuEl.style.left = `${e.clientX}px`;
     this.tabContextMenuEl.style.top = `${e.clientY}px`;
@@ -2141,23 +2213,86 @@ class SemyraApp {
     }
   }
 
+  private async reloadTabFromDisk(targetPath: string): Promise<void> {
+    const tab = this.tabs.find(
+      (t) => t.path?.toLowerCase() === targetPath.toLowerCase(),
+    );
+    if (!tab || !tab.path) return;
+    tab.hasExternalConflict = false;
+    const payload = await backend.readFile(tab.path);
+    tab.savedContent = payload.content;
+    tab.currentContent = payload.content;
+    tab.encoding = payload.encoding || 'UTF-8';
+    tab.lineEnding = payload.lineEnding;
+    tab.isDirty = false;
+    if (tab.id === this.activeTabId) {
+      this.editor.replaceAllContent(payload.content);
+    } else {
+      tab.editorState = this.editor.createState(payload.content);
+    }
+    this.renderTabBar();
+    this.updateStatusBar();
+    this.scheduleDraftSync();
+  }
+
+  private dismissExternalConflictBanner(): void {
+    this.externalBannerEl.hidden = true;
+    if (this.activeTab) {
+      this.activeTab.hasExternalConflict = false;
+    }
+    if (this.externalChangedPath) {
+      const tab = this.tabs.find(
+        (t) => t.path?.toLowerCase() === this.externalChangedPath?.toLowerCase(),
+      );
+      if (tab) tab.hasExternalConflict = false;
+      this.externalChangedPath = null;
+    }
+  }
+
+  private async openExternalDiffDialog(): Promise<void> {
+    const targetPath = this.externalChangedPath ?? this.activeTab?.path;
+    if (!targetPath) return;
+    const tab = this.tabs.find(
+      (t) => t.path?.toLowerCase() === targetPath.toLowerCase(),
+    );
+    if (!tab || !tab.path) return;
+
+    await openExternalDiffDialogModal({
+      path: tab.path,
+      localContent: tab.currentContent,
+      onKeepLocal: () => this.dismissExternalConflictBanner(),
+      onReloadDisk: async () => {
+        this.externalBannerEl.hidden = true;
+        this.externalChangedPath = null;
+        await this.reloadTabFromDisk(targetPath);
+      },
+    });
+  }
+
   private async copyCurrentTabAiContext(): Promise<void> {
     const tab = this.activeTab;
     if (!tab) return;
     try {
-      let fence = '```';
-      while (tab.currentContent.includes(fence)) {
-        fence += '`';
-      }
-      const ext = getFileExtension(tab.name) || 'markdown';
-      const body = tab.currentContent.endsWith('\n') ? tab.currentContent : `${tab.currentContent}\n`;
-      const payload = `${fence}${ext}:${tab.name}\n${body}${fence}\n`;
+      const payload = formatAiContextEntry(tab.name, tab.currentContent);
       await navigator.clipboard.writeText(payload);
       this.showToast(t('toast.copyAiWithName', { name: tab.name }));
     } catch (err) {
       console.error('KI-Kontext konnte nicht kopiert werden:', err);
       this.showToast(t('toast.copyFailed'));
     }
+  }
+
+  private createTabFromAiTemplate(templateId: AiTemplateId): void {
+    const tpl = getAiTemplate(templateId);
+    this.createNewTab(tpl.suggestedName, tpl.content, true);
+  }
+
+  private openAiBundleDialog(): void {
+    void openAiBundleDialogModal({
+      tabs: this.tabs,
+      workspaceRootPath: this.explorer.rootPath,
+      onShowToast: (msg) => this.showToast(msg),
+    });
   }
 
   private async exportCurrentTabHtml(): Promise<void> {
@@ -2297,6 +2432,11 @@ class SemyraApp {
       void this.copyCurrentTabAiContext();
     });
 
+    document.getElementById('btn-share-bundle-ai')?.addEventListener('click', () => {
+      closeShareMenu();
+      this.openAiBundleDialog();
+    });
+
     document.getElementById('btn-share-copy-rich')?.addEventListener('click', () => {
       closeShareMenu();
       void this.copyCurrentTabRichText();
@@ -2372,6 +2512,11 @@ class SemyraApp {
         case 'close-to-right':
           await this.closeTabsToRight(tab.id);
           break;
+        case 'toggle-pin':
+          this.tabs = toggleTabPinned(this.tabs, tab.id);
+          this.renderTabBar(true);
+          this.schedulePrefsSave();
+          break;
         case 'reveal':
           if (tab.path) void backend.revealInExplorer(tab.path);
           break;
@@ -2386,13 +2531,7 @@ class SemyraApp {
           this.showToast(isMarkdownPath(tab.name) ? t('toast.copyMarkdown') : t('toast.copySource'));
           break;
         case 'copy-ai-context': {
-          let fence = '```';
-          while (tab.currentContent.includes(fence)) {
-            fence += '`';
-          }
-          const ext = getFileExtension(tab.name) || 'markdown';
-          const body = tab.currentContent.endsWith('\n') ? tab.currentContent : `${tab.currentContent}\n`;
-          const payload = `${fence}${ext}:${tab.name}\n${body}${fence}\n`;
+          const payload = formatAiContextEntry(tab.name, tab.currentContent);
           await navigator.clipboard.writeText(payload).catch(() => {});
           this.showToast(t('toast.copyAiWithName', { name: tab.name }));
           break;
@@ -2840,46 +2979,22 @@ class SemyraApp {
       this.toggleActiveTabLineEnding();
     });
 
-    // External modification reload banner
+    // External modification reload banner & diff modal
+    document.getElementById('btn-compare-external')?.addEventListener('click', () => {
+      void this.openExternalDiffDialog();
+    });
+
     document.getElementById('btn-reload-external')!.addEventListener('click', async () => {
       this.externalBannerEl.hidden = true;
       const targetPath = this.externalChangedPath;
       this.externalChangedPath = null;
-      if (!targetPath) return;
-      const tab = this.tabs.find(
-        (t) => t.path?.toLowerCase() === targetPath.toLowerCase(),
-      );
-      if (tab && tab.path) {
-        tab.hasExternalConflict = false;
-        const payload = await backend.readFile(tab.path);
-        tab.savedContent = payload.content;
-        tab.currentContent = payload.content;
-        tab.encoding = payload.encoding || 'UTF-8';
-        tab.lineEnding = payload.lineEnding;
-        tab.isDirty = false;
-        if (tab.id === this.activeTabId) {
-          this.editor.replaceAllContent(payload.content);
-        } else {
-          tab.editorState = this.editor.createState(payload.content);
-        }
-        this.renderTabBar();
-        this.updateStatusBar();
-        this.scheduleDraftSync();
+      if (targetPath) {
+        await this.reloadTabFromDisk(targetPath);
       }
     });
 
     document.getElementById('btn-dismiss-banner')!.addEventListener('click', () => {
-      this.externalBannerEl.hidden = true;
-      if (this.activeTab) {
-        this.activeTab.hasExternalConflict = false;
-      }
-      if (this.externalChangedPath) {
-        const tab = this.tabs.find(
-          (t) => t.path?.toLowerCase() === this.externalChangedPath?.toLowerCase(),
-        );
-        if (tab) tab.hasExternalConflict = false;
-        this.externalChangedPath = null;
-      }
+      this.dismissExternalConflictBanner();
     });
 
     // Application-wide keyboard shortcuts in capture phase so CodeMirror's unshifted

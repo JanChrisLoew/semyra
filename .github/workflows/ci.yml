@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
 
@@ -11,7 +12,7 @@ env:
 
 jobs:
   build-windows-x64:
-    name: Build & Test (Windows 11 x64)
+    name: Build & Test (Windows 11 x64 + ARM64 Check)
     runs-on: windows-latest
 
     steps:
@@ -27,6 +28,8 @@ jobs:
 
       - name: Install Rust stable toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-msvc
 
       - name: Rust dependency cache
         uses: Swatinem/rust-cache@v2
@@ -42,14 +45,35 @@ jobs:
           npm test
           npm run build
 
+      - name: Run Playwright E2E & Accessibility tests
+        working-directory: frontend
+        run: npm run test:e2e
+
       - name: Run Rust unit tests
         run: cargo test --locked
 
+      - name: Verify ARM64 compilation (cargo check)
+        run: cargo check --locked --target aarch64-pc-windows-msvc
+
       - name: Build standalone Semyra.exe (Release)
         run: cargo build --release --locked
+
+      - name: Build x64 Inno Setup Installer (on tag release)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & .\scripts\Build-Installer.ps1 -Architecture x64
 
       - name: Upload Semyra.exe artifact
         uses: actions/upload-artifact@v4
         with:
           name: Semyra-win11-x64
           path: target/release/Semyra.exe
+
+      - name: Upload x64 Installer artifact (on tag release)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: Semyra-Setup-x64
+          path: target/installer/Semyra-Setup-x64.exe

@@ -7,6 +7,39 @@ Dieses Dokument dient als fortlaufendes Protokoll über Entwicklungssessions, we
 
 ---
 
+## 2026-11-13 — Session 9: Produktreview & Maßnahmenpakete 1–5 (Doku-Sync, CI-Härtung, AI-Bundler & Templates, Diff & Workspace-Replace, Tab-Pinning)
+
+### 1. Ziel & Scope
+- Umfassendes Produktreview von Semyra inkl. Ableitung und schrittweiser Umsetzung von 5 konkreten Maßnahmenpaketen mit jeweiligem Review-Gate.
+
+### 2. Durchgeführte Maßnahmen
+- **Paket 1 — Doku-, Shortcut- & Token-Synchronisierung (`README.md`)**:
+  - Tastaturtabelle in `README.md` auf die realen Bindings in `frontend/src/main.ts` (`Strg+Umschalt+K` Rich-Text, `Strg+Umschalt+C` Markdown, `Strg+Umschalt+A` KI-Kontext, `Strg+Umschalt+D` PDF, `Strg+Umschalt+H` HTML, `Strg+Umschalt+L` Formatieren, `Strg+J` Seitenleiste) sowie Theme-Hex-Werte (`#12161E` / `#1A212B` / `#F3F5F7`) an `tokens.css` angeglichen.
+- **Paket 2 — CI/CD-Härtung (`.github/workflows/ci.yml`)**:
+  - Playwright-E2E-/A11y-Tests (`npm run test:e2e`), ARM64-Cross-Check (`cargo check --locked --target aarch64-pc-windows-msvc`) sowie Tag-getriggerten x64-Inno-Setup-Build (`v*`) integriert.
+- **Paket 3 — KI-Workflow-Veredelung (`frontend/src/ai-bundle.ts`, `frontend/src/ai-templates.ts`, `frontend/index.html`, `frontend/src/palette-items.ts`, `frontend/src/main.ts`, `frontend/src/styles/dialogs-print.css`)**:
+  - **Multi-File AI Context Bundler**: Dialog (`#ai-bundle-dialog`, ausgelagert nach `frontend/src/ai-dialogs.ts`) zur Auswahl geöffneter Tabs sowie ungeöffneter Markdown-Dateien aus dem Arbeitsordner mit Live-Token-Summe (`estimateTokens`) und gebündeltem Fenced-Markdown-Export.
+  - **Kuratierte KI-Vorlagen**: DE/EN-Templates für `AGENTS.md`, `system-prompt.md`, `SKILL.md` und `review-checkliste.md` über die Befehlspalette (`palette-items.ts`) abrufbar.
+- **Paket 4 — Agenten-Kollaboration & Workspace-Produktivität (`frontend/src/line-diff.ts`, `src/fs_ops/search.rs`, `src/ipc.rs`, `frontend/src/api.ts`, `frontend/src/workspace-search.ts`, `frontend/index.html`, `frontend/src/main.ts`)**:
+  - **Externe Änderungs-Diff-Ansicht**: `#external-banner` um `Vergleichen…` (`#btn-compare-external`) und `<dialog id="external-diff-dialog">` (`frontend/src/ai-dialogs.ts`) mit Zeilen-Diff (`computeLineDiff`) und `light-dark()`-Teal/Amber-Markierung erweitert.
+  - **Workspace Suchen & Ersetzen**: Atomares Multi-File-Replace (`replace_in_workspace_files` + IPC `"replace-workspace"` über gemeinsame `collect_searchable_files_recursive`-Traversierung), natives Bestätigungs-`<dialog id="workspace-replace-dialog">`, Beibehaltung von `CRLF`/`LF` und Synchronisierung geöffneter Tabs.
+- **Paket 5 — Frontend-Entkopplung & Tab-Komfort (`frontend/src/tab-utils.ts`, `frontend/src/main.ts`, `frontend/index.html`, `frontend/src/styles/chrome.css`, `frontend/src/i18n.ts`)**:
+  - **Tab-Pinning**: `toggleTabPinned()` im Tab-Kontextmenü (`Tab anheften` / `Tab lösen`), Schutz angehefteter Tabs bei „Andere/Rechts schließen“ sowie Deduplizierung von `formatAiContextEntry`.
+- **UI-/UX-Nachbesserung & Edge-Case-Härtung (`src/fs_ops/search.rs`, `frontend/src/ai-dialogs.ts`, `frontend/src/main.ts`, `frontend/src/styles/dialogs-print.css`, `frontend/src/tab-utils.ts`, `frontend/src/workspace-search.ts`)**:
+  - **Unicode-Case-Folding-Fix**: `replace_text_occurrences` in `src/fs_ops/search.rs` mit exaktem `byte_map`-Mapping statt unsicherer Byte-Offsets im Lowercase-String (`ẞ`, `İ` etc. sicher abgedeckt).
+  - **Konflikt-Banner & Dialog-Polish**: Sofortige Aktivierung von `#external-banner` bei Workspace-Replace auf aktivem Dirty-Tab (`main.ts`), `.dialog-text`-Styling (`dialogs-print.css`), Lazy-Token-Berechnung beim Anhaken ungeöffneter Workspace-Dateien im KI-Bundler (`ai-dialogs.ts`), Pin-Gruppenerhalt bei Tab-Drag (`reorderTabList`) sowie `Enter`-Taste & Disabled-State im Workspace-Ersetzen-Feld (`workspace-search.ts`).
+
+### 3. Testergebnisse & Build-Status
+- `scripts/Build-Release.ps1`:
+  - `npm run typecheck` (`tsc --noEmit`): 0 Fehler.
+  - `npm test` (`vitest run`): 22/22 Testdateien, 120/120 Tests bestanden.
+  - `npm run build` (`vite build`): erfolgreich (`frontend/dist` aktualisiert).
+  - `cargo test`: 15/15 Tests bestanden (0 Warnings).
+  - `cargo build --release`: `target\release\Semyra.exe` (10,95 MB) erfolgreich gebaut.
+- `npm run test:e2e` (`playwright test`): 6/6 E2E- & `@axe-core/playwright`-A11y-Tests bestanden.
+
+---
+
 ## 2026-11-12 — Session 8: KI-Bibliothek (Prompts & Skills), YAML-/Markdown-Lint & eigener Markdown-Formatter
 
 ### 1. Ziel & Scope

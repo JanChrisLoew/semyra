@@ -1,14 +1,17 @@
-import { backend, SearchFileResult } from './api';
+import { backend, SearchFileResult, WorkspaceReplaceResult } from './api';
 import { t } from './i18n';
 
 export interface WorkspaceSearchDeps {
   searchInputEl: HTMLInputElement;
+  replaceInputEl?: HTMLInputElement | null;
+  replaceAllBtn?: HTMLButtonElement | null;
   clearBtn?: HTMLButtonElement | null;
   statusBadgeEl?: HTMLElement | null;
   caseToggleBtn: HTMLElement;
   resultsContainerEl: HTMLElement;
   getWorkspaceRootPath: () => string | null;
   onOpenMatch: (filePath: string, line: number) => Promise<void> | void;
+  onFilesReplaced?: (res: WorkspaceReplaceResult) => Promise<void> | void;
 }
 
 /**
@@ -76,6 +79,9 @@ export class WorkspaceSearchController {
     if (this.deps.clearBtn) {
       this.deps.clearBtn.hidden = !this.deps.searchInputEl.value;
     }
+    if (this.deps.replaceAllBtn) {
+      this.deps.replaceAllBtn.disabled = !this.deps.searchInputEl.value.trim();
+    }
   }
 
   public clearSearch(): void {
@@ -123,6 +129,67 @@ export class WorkspaceSearchController {
       if (this.deps.searchInputEl.value.trim()) {
         void this.runSearch();
       }
+    });
+
+    this.deps.replaceAllBtn?.addEventListener('click', () => {
+      void this.runReplaceAll();
+    });
+
+    this.deps.replaceInputEl?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && this.deps.searchInputEl.value.trim()) {
+        e.preventDefault();
+        void this.runReplaceAll();
+      }
+    });
+
+    this.updateClearBtnState();
+  }
+
+  public async runReplaceAll(): Promise<void> {
+    const query = this.deps.searchInputEl.value;
+    const replacement = this.deps.replaceInputEl?.value ?? '';
+    const rootPath = this.deps.getWorkspaceRootPath();
+    if (!rootPath || !query.trim()) return;
+
+    const confirmed = await this.confirmReplace(
+      t('search.replaceConfirm', { query, replacement }),
+    );
+    if (!confirmed) return;
+
+    try {
+      const res = await backend.replaceWorkspace(
+        rootPath,
+        query,
+        replacement,
+        this.caseSensitive,
+      );
+      if (this.deps.onFilesReplaced) {
+        await this.deps.onFilesReplaced(res);
+      }
+      await this.runSearch();
+    } catch (err) {
+      console.error('Ordner-Ersetzen fehlgeschlagen:', err);
+    }
+  }
+
+  private confirmReplace(message: string): Promise<boolean> {
+    const dialog = document.getElementById('workspace-replace-dialog') as HTMLDialogElement | null;
+    const msgEl = document.getElementById('workspace-replace-dialog-msg');
+    if (!dialog || !msgEl || typeof dialog.showModal !== 'function') {
+      return Promise.resolve(window.confirm(message));
+    }
+
+    msgEl.textContent = message;
+    dialog.returnValue = '';
+    return new Promise<boolean>((resolve) => {
+      const onClose = () => {
+        dialog.removeEventListener('close', onClose);
+        const confirmed = dialog.returnValue === 'confirm';
+        dialog.returnValue = '';
+        resolve(confirmed);
+      };
+      dialog.addEventListener('close', onClose);
+      dialog.showModal();
     });
   }
 

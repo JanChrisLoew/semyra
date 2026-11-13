@@ -56,6 +56,12 @@ export interface SearchMatchItem {
   preview: string;
 }
 
+export interface WorkspaceReplaceResult {
+  filesUpdated: number;
+  totalReplacements: number;
+  updatedPaths: string[];
+}
+
 export interface SearchFileResult {
   path: string;
   name: string;
@@ -76,6 +82,7 @@ export interface UiSessionPrefs {
   recentFiles: string[];
   recentFolders: string[];
   sessionFiles: string[];
+  pinnedSessionFiles?: string[];
   activeSessionFile: string | null;
 }
 
@@ -162,6 +169,19 @@ export const backend = {
     postJson<{ results: SearchFileResult[] }>('search-workspace', {
       root,
       query,
+      caseSensitive,
+    }),
+
+  replaceWorkspace: (
+    root: string,
+    query: string,
+    replacement: string,
+    caseSensitive: boolean,
+  ) =>
+    postJson<WorkspaceReplaceResult>('replace-workspace', {
+      root,
+      query,
+      replacement,
       caseSensitive,
     }),
 

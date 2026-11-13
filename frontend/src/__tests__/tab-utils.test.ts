@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findAdjacentTabId, reorderTabList } from '../tab-utils';
+import { findAdjacentTabId, reorderTabList, toggleTabPinned } from '../tab-utils';
 
 describe('reorderTabList', () => {
   const tabs = [
@@ -83,5 +83,33 @@ describe('findAdjacentTabId', () => {
     expect(findAdjacentTabId([], 'tab-1', 1)).toBeNull();
     expect(findAdjacentTabId([{ id: 'solo' }], 'solo', 1)).toBeNull();
     expect(findAdjacentTabId(tabs, 'unknown', 1)).toBeNull();
+  });
+});
+
+describe('toggleTabPinned', () => {
+  it('pins a tab and moves it to the pinned group at the start', () => {
+    const initial = [
+      { id: 'a', isPinned: false },
+      { id: 'b', isPinned: false },
+      { id: 'c', isPinned: false },
+    ];
+    const once = toggleTabPinned(initial, 'c');
+    expect(once.map((t) => `${t.id}:${!!t.isPinned}`)).toEqual(['c:true', 'a:false', 'b:false']);
+
+    const twice = toggleTabPinned(once, 'c');
+    expect(twice.map((t) => `${t.id}:${!!t.isPinned}`)).toEqual(['c:false', 'a:false', 'b:false']);
+  });
+
+  it('preserves pinned-first grouping when dragging tabs across the pin boundary', () => {
+    const initial = [
+      { id: 'p1', isPinned: true },
+      { id: 'u1', isPinned: false },
+      { id: 'u2', isPinned: false },
+    ];
+    const draggedBeforePinned = reorderTabList(initial, 'u2', 'p1', false);
+    expect(draggedBeforePinned.map((t) => t.id)).toEqual(['p1', 'u2', 'u1']);
+
+    const draggedPinnedAfterUnpinned = reorderTabList(initial, 'p1', 'u2', true);
+    expect(draggedPinnedAfterUnpinned.map((t) => t.id)).toEqual(['p1', 'u1', 'u2']);
   });
 });

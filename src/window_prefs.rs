@@ -50,6 +50,8 @@ pub struct UiSessionPrefs {
     #[serde(default)]
     pub session_files: Vec<String>,
     #[serde(default)]
+    pub pinned_session_files: Vec<String>,
+    #[serde(default)]
     pub active_session_file: Option<String>,
 }
 
@@ -68,6 +70,7 @@ impl Default for UiSessionPrefs {
             recent_files: Vec::new(),
             recent_folders: Vec::new(),
             session_files: Vec::new(),
+            pinned_session_files: Vec::new(),
             active_session_file: None,
         }
     }

@@ -1,11 +1,11 @@
-use super::encoding::decode_text_bytes;
+use super::encoding::{decode_text_bytes, write_text_file};
 use super::{
     clean_windows_path, is_markdown_path, is_supported_text_path, normalize_existing_path,
     IGNORED_DIRS,
 };
 use serde::Serialize;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +29,9 @@ pub fn search_workspace_files(
     query: &str,
     case_sensitive: bool,
 ) -> Result<Vec<SearchFileResult>, String> {
+    const MAX_TOTAL_MATCHES: usize = 300;
+    const MAX_MATCHES_PER_FILE: usize = 40;
+
     let trimmed_q = query.trim();
     if trimmed_q.is_empty() {
         return Ok(Vec::new());
@@ -44,45 +47,100 @@ pub fn search_workspace_files(
         trimmed_q.to_lowercase()
     };
 
+    let mut files = Vec::new();
+    collect_searchable_files_recursive(&norm_root, 0, 6, &mut files);
+
     let mut results = Vec::new();
     let mut total_matches = 0usize;
-    search_dir_recursive(
-        &norm_root,
-        &norm_root,
-        &needle,
-        case_sensitive,
-        0,
-        6,
-        &mut total_matches,
-        &mut results,
-    );
+
+    for file_path in files {
+        if total_matches >= MAX_TOTAL_MATCHES {
+            break;
+        }
+        if let Ok(meta) = fs::metadata(&file_path) {
+            if meta.len() > 5 * 1024 * 1024 {
+                continue;
+            }
+        }
+        let Ok(bytes) = fs::read(&file_path) else {
+            continue;
+        };
+        let (content, _) = decode_text_bytes(&bytes);
+
+        let mut file_matches = Vec::new();
+        for (idx, raw_line) in content.lines().enumerate() {
+            let found_col = if case_sensitive {
+                raw_line
+                    .find(&needle)
+                    .map(|byte_pos| raw_line[..byte_pos].chars().count() + 1)
+            } else {
+                let h_lower = raw_line.to_lowercase();
+                h_lower
+                    .find(&needle)
+                    .map(|byte_pos| h_lower[..byte_pos].chars().count() + 1)
+            };
+
+            if let Some(col) = found_col {
+                let trimmed_preview: String = raw_line.trim().chars().take(140).collect();
+                file_matches.push(SearchMatchItem {
+                    line: idx + 1,
+                    column: col,
+                    preview: trimmed_preview,
+                });
+                total_matches += 1;
+                if file_matches.len() >= MAX_MATCHES_PER_FILE || total_matches >= MAX_TOTAL_MATCHES
+                {
+                    break;
+                }
+            }
+        }
+
+        if !file_matches.is_empty() {
+            let norm = clean_windows_path(&file_path);
+            let rel_path = norm
+                .strip_prefix(&norm_root)
+                .unwrap_or(&norm)
+                .to_string_lossy()
+                .into_owned();
+            let name = norm
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("Datei.md")
+                .to_string();
+            results.push(SearchFileResult {
+                path: norm.to_string_lossy().into_owned(),
+                name,
+                rel_path,
+                matches: file_matches,
+            });
+        }
+    }
+
     Ok(results)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn search_dir_recursive(
-    root: &Path,
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceReplaceResult {
+    pub files_updated: usize,
+    pub total_replacements: usize,
+    pub updated_paths: Vec<String>,
+}
+
+fn collect_searchable_files_recursive(
     dir: &Path,
-    needle: &str,
-    case_sensitive: bool,
     depth: usize,
     max_depth: usize,
-    total_matches: &mut usize,
-    results: &mut Vec<SearchFileResult>,
+    out: &mut Vec<PathBuf>,
 ) {
-    const MAX_TOTAL_MATCHES: usize = 300;
-    const MAX_MATCHES_PER_FILE: usize = 40;
-    if depth >= max_depth || *total_matches >= MAX_TOTAL_MATCHES {
+    if depth >= max_depth {
         return;
     }
-
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
-
     let mut subdirs = Vec::new();
     let mut files = Vec::new();
-
     for entry in entries.flatten() {
         let path = entry.path();
         let Some(name_str) = path.file_name().and_then(|n| n.to_str()) else {
@@ -105,14 +163,38 @@ fn search_dir_recursive(
             files.push(path);
         }
     }
-
     subdirs.sort();
     files.sort();
+    out.extend(files);
+    for sub in subdirs {
+        collect_searchable_files_recursive(&sub, depth + 1, max_depth, out);
+    }
+}
+
+/// Replaces all occurrences of `query` with `replacement` across Markdown/text files in `root`.
+/// Preserves each file's detected line-ending style via atomic `write_text_file`.
+pub fn replace_in_workspace_files(
+    root: &Path,
+    query: &str,
+    replacement: &str,
+    case_sensitive: bool,
+) -> Result<WorkspaceReplaceResult, String> {
+    if query.is_empty() {
+        return Err("Suchbegriff darf nicht leer sein.".to_string());
+    }
+    let norm_root = normalize_existing_path(root);
+    if !norm_root.is_dir() {
+        return Err("Ungültiger Arbeitsordner.".to_string());
+    }
+
+    let mut files = Vec::new();
+    collect_searchable_files_recursive(&norm_root, 0, 6, &mut files);
+
+    let mut files_updated = 0usize;
+    let mut total_replacements = 0usize;
+    let mut updated_paths = Vec::new();
 
     for file_path in files {
-        if *total_matches >= MAX_TOTAL_MATCHES {
-            break;
-        }
         if let Ok(meta) = fs::metadata(&file_path) {
             if meta.len() > 5 * 1024 * 1024 {
                 continue;
@@ -122,69 +204,165 @@ fn search_dir_recursive(
             continue;
         };
         let (content, _) = decode_text_bytes(&bytes);
+        let prefer_crlf = content.contains("\r\n");
 
-        let mut file_matches = Vec::new();
-        for (idx, raw_line) in content.lines().enumerate() {
-            let found_col = if case_sensitive {
-                raw_line
-                    .find(needle)
-                    .map(|byte_pos| raw_line[..byte_pos].chars().count() + 1)
-            } else {
-                let h_lower = raw_line.to_lowercase();
-                h_lower
-                    .find(needle)
-                    .map(|byte_pos| h_lower[..byte_pos].chars().count() + 1)
-            };
-
-            if let Some(col) = found_col {
-                let trimmed_preview: String = raw_line.trim().chars().take(140).collect();
-                file_matches.push(SearchMatchItem {
-                    line: idx + 1,
-                    column: col,
-                    preview: trimmed_preview,
-                });
-                *total_matches += 1;
-                if file_matches.len() >= MAX_MATCHES_PER_FILE || *total_matches >= MAX_TOTAL_MATCHES
-                {
-                    break;
-                }
-            }
-        }
-
-        if !file_matches.is_empty() {
-            let norm = clean_windows_path(&file_path);
-            let rel_path = norm
-                .strip_prefix(root)
-                .unwrap_or(&norm)
-                .to_string_lossy()
-                .into_owned();
-            let name = norm
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("Datei.md")
-                .to_string();
-            results.push(SearchFileResult {
-                path: norm.to_string_lossy().into_owned(),
-                name,
-                rel_path,
-                matches: file_matches,
-            });
+        let (updated, count) = replace_text_occurrences(&content, query, replacement, case_sensitive);
+        if count > 0 && updated != content {
+            write_text_file(&file_path, &updated, prefer_crlf)?;
+            files_updated += 1;
+            total_replacements += count;
+            updated_paths.push(clean_windows_path(&file_path).to_string_lossy().into_owned());
         }
     }
 
-    for sub in subdirs {
-        if *total_matches >= MAX_TOTAL_MATCHES {
-            break;
+    Ok(WorkspaceReplaceResult {
+        files_updated,
+        total_replacements,
+        updated_paths,
+    })
+}
+
+fn replace_text_occurrences(
+    haystack: &str,
+    query: &str,
+    replacement: &str,
+    case_sensitive: bool,
+) -> (String, usize) {
+    if case_sensitive {
+        let count = haystack.matches(query).count();
+        if count == 0 {
+            return (String::new(), 0);
         }
-        search_dir_recursive(
-            root,
-            &sub,
-            needle,
-            case_sensitive,
-            depth + 1,
-            max_depth,
-            total_matches,
-            results,
-        );
+        return (haystack.replace(query, replacement), count);
+    }
+
+    if query.is_empty() {
+        return (String::new(), 0);
+    }
+
+    let query_lower = query.to_lowercase();
+    if query_lower.is_empty() {
+        return (String::new(), 0);
+    }
+
+    // Fast path for pure ASCII: byte offsets in `to_ascii_lowercase()` match `haystack` 1:1.
+    if haystack.is_ascii() && query.is_ascii() {
+        let hay_lower = haystack.to_ascii_lowercase();
+        let mut out = String::with_capacity(haystack.len());
+        let mut last = 0usize;
+        let mut count = 0usize;
+        for (idx, _) in hay_lower.match_indices(&query_lower) {
+            if idx < last {
+                continue;
+            }
+            out.push_str(&haystack[last..idx]);
+            out.push_str(replacement);
+            last = idx + query_lower.len();
+            count += 1;
+        }
+        if count == 0 {
+            return (String::new(), 0);
+        }
+        out.push_str(&haystack[last..]);
+        return (out, count);
+    }
+
+    // Unicode-safe case-insensitive matching: map each byte of `hay_lower` back to
+    // the original `(char_start, char_end)` byte span in `haystack`.
+    let mut hay_lower = String::with_capacity(haystack.len());
+    let mut byte_map: Vec<(usize, usize)> = Vec::with_capacity(haystack.len());
+    let mut utf8_buf = [0u8; 4];
+    for (orig_start, ch) in haystack.char_indices() {
+        let orig_end = orig_start + ch.len_utf8();
+        for lc in ch.to_lowercase() {
+            let encoded = lc.encode_utf8(&mut utf8_buf);
+            hay_lower.push_str(encoded);
+            for _ in 0..encoded.len() {
+                byte_map.push((orig_start, orig_end));
+            }
+        }
+    }
+
+    let mut out = String::with_capacity(haystack.len());
+    let mut last_orig = 0usize;
+    let mut last_lower = 0usize;
+    let mut count = 0usize;
+
+    for (l_start, matched) in hay_lower.match_indices(&query_lower) {
+        if l_start < last_lower {
+            continue;
+        }
+        let l_end = l_start + matched.len();
+        if l_end == l_start {
+            continue;
+        }
+        // Ensure we do not split a single original character's multi-char lowercase expansion.
+        if l_start > 0 && byte_map[l_start].0 == byte_map[l_start - 1].0 {
+            continue;
+        }
+        if l_end < byte_map.len() && byte_map[l_end].1 == byte_map[l_end - 1].1 {
+            continue;
+        }
+
+        let orig_start = byte_map[l_start].0;
+        let orig_end = byte_map[l_end - 1].1;
+        if orig_start < last_orig {
+            continue;
+        }
+
+        out.push_str(&haystack[last_orig..orig_start]);
+        out.push_str(replacement);
+        last_orig = orig_end;
+        last_lower = l_end;
+        count += 1;
+    }
+
+    if count == 0 {
+        return (String::new(), 0);
+    }
+    out.push_str(&haystack[last_orig..]);
+    (out, count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replaces_across_files_preserving_crlf() {
+        let dir = std::env::temp_dir().join(format!(
+            "semyra_replace_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let file_a = dir.join("a.md");
+        fs::write(&file_a, "Hello MarkLive\r\nmarklive rocks\r\n").unwrap();
+
+        let res = replace_in_workspace_files(&dir, "MarkLive", "Semyra", false).unwrap();
+        assert_eq!(res.files_updated, 1);
+        assert_eq!(res.total_replacements, 2);
+
+        let after = fs::read_to_string(&file_a).unwrap();
+        assert_eq!(after, "Hello Semyra\r\nSemyra rocks\r\n");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn replaces_unicode_case_folding_safely() {
+        // Capital sharp S ('ẞ', 3 bytes -> "ss", 2 bytes) and Turkish dotted I ('İ', 2 bytes -> 3 bytes)
+        // must not panic or corrupt subsequent match byte offsets.
+        let input = "GROẞE Straße İSTANBUL MarkLive und marklive Ende";
+        let (out, count) = replace_text_occurrences(input, "marklive", "Semyra", false);
+        assert_eq!(count, 2);
+        assert_eq!(out, "GROẞE Straße İSTANBUL Semyra und Semyra Ende");
+
+        // Case-insensitive match spanning 'ẞ' -> "ss"
+        let (out2, count2) = replace_text_occurrences("GROẞE Straße", "große", "kleine", false);
+        assert_eq!(count2, 1);
+        assert_eq!(out2, "kleine Straße");
     }
 }

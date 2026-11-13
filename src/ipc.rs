@@ -4,7 +4,8 @@ use crate::fs_ops::{
     create_ai_skill, create_new_folder, create_new_markdown_file, ensure_ai_library_tree,
     import_dropped_image, inline_local_asset_images, list_workspace_markdown_files,
     move_to_recycle_bin, normalize_existing_path, read_text_file, rename_fs_entry,
-    reveal_in_explorer, save_clipboard_image, search_workspace_files, write_text_file,
+    reveal_in_explorer, save_clipboard_image, replace_in_workspace_files,
+    search_workspace_files, write_text_file,
 };
 use crate::markdown::render_markdown;
 use crate::state::{AppState, UserEvent};
@@ -91,6 +92,16 @@ struct ImportDroppedImageReq {
 struct SearchWorkspaceReq {
     root: String,
     query: String,
+    #[serde(default)]
+    case_sensitive: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplaceWorkspaceReq {
+    root: String,
+    query: String,
+    replacement: String,
     #[serde(default)]
     case_sensitive: bool,
 }
@@ -515,6 +526,24 @@ fn handle_api_route(
                     Ok(results) => {
                         responder.respond(ok_json(&serde_json::json!({ "results": results })))
                     }
+                    Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
+                }
+            });
+        }
+
+        "replace-workspace" => {
+            let Ok(req) = serde_json::from_slice::<ReplaceWorkspaceReq>(&body) else {
+                responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Ersetzen-Anfrage"));
+                return;
+            };
+            std::thread::spawn(move || {
+                match replace_in_workspace_files(
+                    Path::new(&req.root),
+                    &req.query,
+                    &req.replacement,
+                    req.case_sensitive,
+                ) {
+                    Ok(res) => responder.respond(ok_json(&res)),
                     Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
                 }
             });

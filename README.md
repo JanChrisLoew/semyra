@@ -34,8 +34,8 @@ Entwickelt für den täglichen Workflow von Software-Ingenieuren, Prompt-Designe
 
 ### 🎨 2. Semyra Fluent Design System
 - **Konsequenter Dark & Light Mode**: Perfekt abgestimmt auf Windows 11 mit synchronisierter Win32-Titelleiste.
-  - **Dark Mode**: *Midnight* (`#12161A`) & *Slate* (`#1B222A`) Hintergründe mit kontrastreichem Text (`#EDF2F5`).
-  - **Light Mode**: *Pure White* (`#FFFFFF`) & *Cloud Mist* (`#F1F5F8`) mit tiefem Slate-Text (`#202934`).
+  - **Dark Mode**: *Midnight* (`#12161E`) & *Slate* (`#1A212B`) Hintergründe mit kontrastreichem Text (`#EDF2F5`).
+  - **Light Mode**: *Pure White* (`#FFFFFF`) & *Chrome Mist* (`#F3F5F7`) mit tiefem Slate-Text (`#202934`).
 - **Neutrale Markdown-Typografie**: Dokumenteninhalte bleiben bewusst ruhig und ermüdungsfrei lesbar. Fett- und Kursivtext differenzieren über Schnitt und Stärke – ohne störende Buntheit.
 - **Präzise Interaktionsfarben**:
   - **Steel Blue** (`#83A5C6` Dark / `#426B91` Light): Fokus-Ringe, aktive Tabs, Befehlspalette, Schalter und Tastatur-Highlights.
@@ -67,7 +67,7 @@ Entwickelt für den täglichen Workflow von Software-Ingenieuren, Prompt-Designe
 ### 📤 6. Universeller Export
 - **1-Datei Standalone-HTML**: Exportiert das vollständige Dokument inklusive integriertem Stylesheet, Dark/Light-Theme, gerendertem MathML, Mermaid-Vektor-SVGs und Base64-eingebetteten lokalen Bildern.
 - **Nativer Windows PDF-Druck (`Strg+P`)**: Direkter, verlustfreier PDF-Export über Microsoft Edge WebView2 (`ICoreWebView2_7::PrintToPdf`).
-- **Rich-Text für Office & Teams (`Strg+Umschalt+C`)**: Kopiert formatierte Dokumente mit Inline-Styling für Microsoft Word, Outlook, Teams oder E-Mails.
+- **Rich-Text für Office & Teams (`Strg+Umschalt+K`)**: Kopiert formatierte Dokumente mit Inline-Styling für Microsoft Word, Outlook, Teams oder E-Mails.
 
 ---
 
@@ -82,13 +82,18 @@ Entwickelt für den täglichen Workflow von Software-Ingenieuren, Prompt-Designe
 | `Strg + E` | Quick-Open Dateiauswahl |
 | `Strg + Umschalt + P` | Befehlspalette öffnen |
 | `Strg + Umschalt + F` | Workspace-Volltextsuche öffnen / fokussieren |
-| `Strg + P` | Dokument drucken / als PDF exportieren |
-| `Strg + Umschalt + C` | Als Rich-Text (für Word/Teams/Outlook) in die Zwischenablage kopieren |
+| `Strg + P` | Dokument drucken |
+| `Strg + Umschalt + D` | Als PDF exportieren |
+| `Strg + Umschalt + H` | Als Standalone-HTML exportieren |
+| `Strg + Umschalt + K` | Als Rich-Text (für Word/Teams/Outlook) in die Zwischenablage kopieren |
+| `Strg + Umschalt + C` | Markdown-Quelltext in die Zwischenablage kopieren |
+| `Strg + Umschalt + A` | Für KI (mit Dateikontext) kopieren |
+| `Strg + Umschalt + L` | Markdown-Dokument formatieren |
 | `Alt + 1` | Nur-Editor-Modus |
 | `Alt + 2` | Geteilte Ansicht (Editor & Live-Vorschau) |
 | `Alt + 3` | Nur-Vorschau-Modus (Lesemodus) |
 | `F11` | Zen-Modus (Ablenkungsfreie Vollbild-Ansicht) |
-| `Strg + B` | Seitenleiste ein-/ausblenden |
+| `Strg + J` | Seitenleiste ein-/ausblenden |
 | `Strg + +` / `Strg + -` / `Strg + 0` | Dokument-Zoom vergrößern, verkleinern, zurücksetzen |
 | `Strg + W` | Aktiven Tab schließen |
 
@@ -172,9 +177,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\Build-Release.ps1
 ```
 *Ablauf:*
 1. Frontend-Typprüfung (`tsc --noEmit`)
-2. Frontend-Unit-Tests (`vitest run` — 103 Tests)
+2. Frontend-Unit-Tests (`vitest run` — 110 Tests)
 3. Vite-Frontend-Produktionsbundle (`frontend/dist`)
-4. Rust-Unit-Tests (`cargo test` — 12 Tests)
+4. Rust-Unit-Tests (`cargo test` — 13 Tests)
 5. Rust-Release-Build (`cargo build --release` -> `target\release\Semyra.exe`)
 
 ### Manuelle Einzelschritte während der Entwicklung

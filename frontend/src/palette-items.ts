@@ -2,6 +2,7 @@ import { WorkspaceFileEntry } from './api';
 import { PaletteItem } from './palette';
 import { baseNameOfPath } from './path-utils';
 import { getLanguage } from './i18n';
+import { AiTemplateId, listAiTemplates } from './ai-templates';
 
 export interface PaletteTabSummary {
   id: string;
@@ -59,6 +60,8 @@ export interface PaletteCommandContext {
   onToggleTask?: () => void;
   onCopyMarkdown?: () => void;
   onCopyAiContext?: () => void;
+  onOpenAiBundle?: () => void;
+  onCreateFromTemplate?: (templateId: AiTemplateId) => void;
   onInsertTableRowAbove?: () => void;
   onInsertTableRowBelow?: () => void;
   onDeleteTableRow?: () => void;
@@ -271,6 +274,25 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
       shortcut: isEn ? 'Alt+Shift+F' : 'Alt+Umschalt+F',
       run: ctx.onAlignTable,
     },
+    ...(ctx.onOpenAiBundle
+      ? [
+          {
+            id: 'cmd:bundle-ai-context',
+            kind: 'command' as const,
+            label: isEn ? 'Share: Bundle Multiple Tabs for AI…' : 'Teilen: Mehrere Tabs für KI bündeln…',
+            run: ctx.onOpenAiBundle,
+          },
+        ]
+      : []),
+    ...(ctx.onCreateFromTemplate
+      ? listAiTemplates().map((tpl) => ({
+          id: `cmd:template-${tpl.id}`,
+          kind: 'command' as const,
+          label: isEn ? `Template: New ${tpl.title}` : `Vorlage: ${tpl.title}`,
+          subtitle: tpl.description,
+          run: () => ctx.onCreateFromTemplate?.(tpl.id),
+        }))
+      : []),
     ...(ctx.onInsertTableRowAbove
       ? [
           {

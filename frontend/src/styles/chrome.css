@@ -409,6 +409,13 @@ body.is-tab-dragging * {
   white-space: nowrap;
 }
 
+.tab-pin-indicator {
+  font-size: 10px;
+  color: var(--accent);
+  flex-shrink: 0;
+  line-height: 1;
+}
+
 .tab-dirty-dot {
   width: 7px;
   height: 7px;
