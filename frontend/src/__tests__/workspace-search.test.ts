@@ -4,8 +4,11 @@ import { WorkspaceSearchController } from '../workspace-search';
 
 describe('WorkspaceSearchController', () => {
   let searchInputEl: HTMLInputElement;
+  let replaceInputEl: HTMLInputElement;
+  let replaceAllBtn: HTMLButtonElement;
   let clearBtn: HTMLButtonElement;
   let statusBadgeEl: HTMLElement;
+  let searchRowEl: HTMLElement;
   let caseToggleBtn: HTMLButtonElement;
   let resultsContainerEl: HTMLElement;
   let getWorkspaceRootPath: Mock<() => string | null>;
@@ -14,10 +17,14 @@ describe('WorkspaceSearchController', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     searchInputEl = document.createElement('input');
+    replaceInputEl = document.createElement('input');
+    replaceAllBtn = document.createElement('button');
     clearBtn = document.createElement('button');
     clearBtn.hidden = true;
     statusBadgeEl = document.createElement('span');
+    searchRowEl = document.createElement('div');
     caseToggleBtn = document.createElement('button');
+    searchRowEl.appendChild(caseToggleBtn);
     resultsContainerEl = document.createElement('div');
     getWorkspaceRootPath = vi.fn<() => string | null>().mockReturnValue('C:\\Projekte\\Notes');
     onOpenMatch = vi.fn<(filePath: string, line: number) => void>();
@@ -31,6 +38,8 @@ describe('WorkspaceSearchController', () => {
   function createController(): WorkspaceSearchController {
     return new WorkspaceSearchController({
       searchInputEl,
+      replaceInputEl,
+      replaceAllBtn,
       clearBtn,
       statusBadgeEl,
       caseToggleBtn,
@@ -84,7 +93,7 @@ describe('WorkspaceSearchController', () => {
     // Fast forward debounce timer (180ms)
     await vi.advanceTimersByTimeAsync(200);
 
-    expect(searchSpy).toHaveBeenCalledWith('C:\\Projekte\\Notes', 'Semyra', false);
+    expect(searchSpy).toHaveBeenCalledWith('C:\\Projekte\\Notes', 'Semyra', false, false, false);
     expect(statusBadgeEl.textContent).toBe('3');
     expect(statusBadgeEl.title).toBe('3 Treffer in 2 Dateien');
 
@@ -130,14 +139,14 @@ describe('WorkspaceSearchController', () => {
 
     searchInputEl.value = 'Rust';
     await controller.runSearch();
-    expect(searchSpy).toHaveBeenLastCalledWith('C:\\Projekte\\Notes', 'Rust', false);
+    expect(searchSpy).toHaveBeenLastCalledWith('C:\\Projekte\\Notes', 'Rust', false, false, false);
 
     caseToggleBtn.click();
     expect(caseToggleBtn.classList.contains('is-active')).toBe(true);
     expect(caseToggleBtn.getAttribute('aria-pressed')).toBe('true');
 
     await vi.runAllTimersAsync();
-    expect(searchSpy).toHaveBeenLastCalledWith('C:\\Projekte\\Notes', 'Rust', true);
+    expect(searchSpy).toHaveBeenLastCalledWith('C:\\Projekte\\Notes', 'Rust', true, false, false);
   });
 
   it('discards stale search responses arriving out of order (sequence guard)', async () => {
@@ -200,5 +209,98 @@ describe('WorkspaceSearchController', () => {
     expect(resultsContainerEl.textContent).toContain('AB match');
     expect(resultsContainerEl.textContent).not.toContain('A stale match');
     expect(searchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('toggles whole-word and regex modes and surfaces invalid regex errors', async () => {
+    const searchSpy = vi.spyOn(backend, 'searchWorkspace').mockResolvedValue({ results: [] });
+    const controller = createController();
+
+    const wholeWordBtn = searchRowEl.querySelector<HTMLButtonElement>('#btn-search-whole-word')!;
+    const regexBtn = searchRowEl.querySelector<HTMLButtonElement>('#btn-search-regex')!;
+    expect(wholeWordBtn.textContent).toBe('\\b');
+    expect(regexBtn.textContent).toBe('.*');
+
+    searchInputEl.value = 'foo.*bar';
+    wholeWordBtn.click();
+    expect(wholeWordBtn.classList.contains('is-active')).toBe(true);
+    expect(wholeWordBtn.getAttribute('aria-pressed')).toBe('true');
+    await vi.runAllTimersAsync();
+    expect(searchSpy).toHaveBeenLastCalledWith('C:\\Projekte\\Notes', 'foo.*bar', false, false, true);
+
+    regexBtn.click();
+    expect(regexBtn.classList.contains('is-active')).toBe(true);
+    expect(regexBtn.getAttribute('aria-pressed')).toBe('true');
+    await vi.runAllTimersAsync();
+    expect(searchSpy).toHaveBeenLastCalledWith('C:\\Projekte\\Notes', 'foo.*bar', false, true, true);
+
+    searchSpy.mockRejectedValueOnce(new Error('Ungültiger regulärer Ausdruck: unclosed group'));
+    searchInputEl.value = '(unclosed';
+    await controller.runSearch();
+    expect(resultsContainerEl.textContent).toContain('Ungültiger regulärer Ausdruck');
+    expect(statusBadgeEl.textContent).toBe('');
+  });
+
+  it('supports per-file checkboxes, Select All/None, and selective replaceWorkspace', async () => {
+    const mockResults: SearchFileResult[] = [
+      {
+        path: 'C:\\Projekte\\Notes\\A.md',
+        relPath: 'A.md',
+        name: 'A.md',
+        matches: [{ line: 1, column: 1, preview: 'old text' }],
+      },
+      {
+        path: 'C:\\Projekte\\Notes\\B.md',
+        relPath: 'B.md',
+        name: 'B.md',
+        matches: [{ line: 2, column: 1, preview: 'old text' }],
+      },
+    ];
+    vi.spyOn(backend, 'searchWorkspace').mockResolvedValue({ results: mockResults });
+    const replaceSpy = vi.spyOn(backend, 'replaceWorkspace').mockResolvedValue({
+      filesUpdated: 1,
+      totalReplacements: 1,
+      updatedPaths: ['C:\\Projekte\\Notes\\A.md'],
+      failures: [],
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    const controller = createController();
+    searchInputEl.value = 'old';
+    replaceInputEl.value = 'new';
+    await controller.runSearch();
+
+    const checkboxes = resultsContainerEl.querySelectorAll<HTMLInputElement>('.search-file-checkbox');
+    expect(checkboxes.length).toBe(2);
+    expect(checkboxes[0].checked).toBe(true);
+    expect(checkboxes[1].checked).toBe(true);
+    expect(replaceAllBtn.disabled).toBe(false);
+
+    const toggleAllBtn = resultsContainerEl.querySelector<HTMLButtonElement>('.search-select-toggle-btn')!;
+    expect(toggleAllBtn.textContent).toBe('Keine');
+    toggleAllBtn.click();
+    expect(checkboxes[0].checked).toBe(false);
+    expect(checkboxes[1].checked).toBe(false);
+    expect(replaceAllBtn.disabled).toBe(true);
+    expect(toggleAllBtn.textContent).toBe('Alle');
+
+    toggleAllBtn.click();
+    expect(checkboxes[0].checked).toBe(true);
+    expect(checkboxes[1].checked).toBe(true);
+    expect(replaceAllBtn.disabled).toBe(false);
+
+    // Uncheck B.md so only A.md is included
+    checkboxes[1].checked = false;
+    checkboxes[1].dispatchEvent(new Event('change'));
+    await controller.runReplaceAll();
+
+    expect(replaceSpy).toHaveBeenCalledWith(
+      'C:\\Projekte\\Notes',
+      'old',
+      'new',
+      false,
+      false,
+      false,
+      ['C:\\Projekte\\Notes\\A.md'],
+    );
   });
 });

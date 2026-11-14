@@ -12,6 +12,15 @@ use syntect::util::LinesWithEndings;
 
 static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
 
+const PROMPT_TAGS: &[&str] = &[
+    "role",
+    "context",
+    "instructions",
+    "output_format",
+    "constraints",
+    "examples",
+];
+
 fn syntax_set() -> &'static SyntaxSet {
     SYNTAX_SET.get_or_init(SyntaxSet::load_defaults_newlines)
 }
@@ -207,6 +216,186 @@ fn heading_level_num(level: HeadingLevel) -> u8 {
     }
 }
 
+/// Parses top-level scalar `key: value` pairs from YAML frontmatter.
+fn parse_frontmatter_chips(yaml: &str) -> Vec<(String, String)> {
+    let mut chips = Vec::new();
+    for line in yaml.lines() {
+        if line.starts_with(' ') || line.starts_with('\t') {
+            continue;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed == "---"
+            || trimmed == "..."
+            || trimmed == "-"
+            || trimmed.starts_with("- ")
+        {
+            continue;
+        }
+        let Some((raw_key, raw_val)) = trimmed.split_once(':') else {
+            continue;
+        };
+        if !raw_val.is_empty() && !raw_val.starts_with(' ') && !raw_val.starts_with('\t') {
+            continue;
+        }
+        let key = raw_key.trim();
+        if key.is_empty() || key.starts_with('{') || key.starts_with('[') {
+            continue;
+        }
+        let mut val = raw_val.trim();
+        if val.is_empty()
+            || matches!(val, "|" | "|-" | "|+" | ">" | ">-" | ">+")
+            || val.starts_with('[')
+            || val.starts_with('{')
+        {
+            continue;
+        }
+        if (val.starts_with('"') && val.ends_with('"') && val.len() >= 2)
+            || (val.starts_with('\'') && val.ends_with('\'') && val.len() >= 2)
+        {
+            val = &val[1..val.len() - 1];
+        } else if let Some(comment_idx) = val.find(" #").or_else(|| val.find("\t#")) {
+            val = val[..comment_idx].trim_end();
+        }
+        if val.is_empty() {
+            continue;
+        }
+        chips.push((key.to_string(), val.to_string()));
+    }
+    chips
+}
+
+struct LineSpan<'a> {
+    line_num: usize,
+    start: usize,
+    end: usize,
+    text: &'a str,
+}
+
+fn split_line_spans(src: &str) -> Vec<LineSpan<'_>> {
+    let mut spans = Vec::new();
+    let mut start = 0usize;
+    let mut line_num = 1usize;
+    for (idx, b) in src.bytes().enumerate() {
+        if b == b'\n' {
+            let end = idx + 1;
+            let raw = &src[start..idx];
+            let text = raw.strip_suffix('\r').unwrap_or(raw);
+            spans.push(LineSpan {
+                line_num,
+                start,
+                end,
+                text,
+            });
+            start = end;
+            line_num += 1;
+        }
+    }
+    if start < src.len() {
+        let raw = &src[start..];
+        let text = raw.strip_suffix('\r').unwrap_or(raw);
+        spans.push(LineSpan {
+            line_num,
+            start,
+            end: src.len(),
+            text,
+        });
+    }
+    spans
+}
+
+fn update_fence_state(line: &str, fence: &mut Option<(char, usize)>) {
+    let trimmed = line.trim_start();
+    if let Some((fence_char, fence_len)) = *fence {
+        let count = trimmed.bytes().take_while(|&b| b as char == fence_char).count();
+        if count >= fence_len && trimmed[count..].trim().is_empty() {
+            *fence = None;
+        }
+        return;
+    }
+
+    let leading_spaces = line.len() - trimmed.len();
+    if leading_spaces >= 4 || line.starts_with('\t') {
+        return;
+    }
+    if let Some(first) = trimmed.chars().next() {
+        if first == '`' || first == '~' {
+            let count = trimmed.bytes().take_while(|&b| b as char == first).count();
+            if count >= 3 {
+                let info = &trimmed[count..];
+                if first == '`' && info.contains('`') {
+                    return;
+                }
+                *fence = Some((first, count));
+            }
+        }
+    }
+}
+
+fn match_prompt_tag_open(line: &str) -> Option<(&'static str, Option<&str>)> {
+    if line.starts_with('\t') {
+        return None;
+    }
+    let leading_spaces = line.len() - line.trim_start_matches(' ').len();
+    if leading_spaces >= 4 {
+        return None;
+    }
+    let trimmed = line.trim();
+    for &tag in PROMPT_TAGS {
+        if let Some(after_open) = trimmed
+            .strip_prefix('<')
+            .and_then(|s| s.strip_prefix(tag))
+            .and_then(|s| s.strip_prefix('>'))
+        {
+            if after_open.is_empty() {
+                return Some((tag, None));
+            }
+            if let Some(inner) = after_open
+                .strip_suffix('>')
+                .and_then(|s| s.strip_suffix(tag))
+                .and_then(|s| s.strip_suffix("</"))
+            {
+                return Some((tag, Some(inner)));
+            }
+        }
+    }
+    None
+}
+
+fn find_closing_prompt_tag(lines: &[LineSpan<'_>], open_idx: usize, tag: &str) -> Option<usize> {
+    let mut fence: Option<(char, usize)> = None;
+    let mut depth = 1usize;
+    for (j, line) in lines.iter().enumerate().skip(open_idx + 1) {
+        let was_in_fence = fence.is_some();
+        update_fence_state(line.text, &mut fence);
+        if was_in_fence || fence.is_some() {
+            continue;
+        }
+        if line.text.starts_with('\t') || (line.text.len() - line.text.trim_start_matches(' ').len()) >= 4 {
+            continue;
+        }
+        let trimmed = line.text.trim();
+        if trimmed.len() == tag.len() + 2
+            && trimmed.starts_with('<')
+            && trimmed.ends_with('>')
+            && &trimmed[1..trimmed.len() - 1] == tag
+        {
+            depth += 1;
+        } else if trimmed.len() == tag.len() + 3
+            && trimmed.starts_with("</")
+            && trimmed.ends_with('>')
+            && &trimmed[2..trimmed.len() - 1] == tag
+        {
+            depth -= 1;
+            if depth == 0 {
+                return Some(j);
+            }
+        }
+    }
+    None
+}
+
 pub fn render_markdown(markdown: &str, base_dir: Option<&Path>) -> RenderResult {
     let line_index = LineIndex::new(markdown);
 
@@ -220,6 +409,182 @@ pub fn render_markdown(markdown: &str, base_dir: Option<&Path>) -> RenderResult 
         ((words as f64 / 220.0) * 60.0).ceil() as usize
     };
 
+    let mut html = String::with_capacity(markdown.len() * 2 + 256);
+    let mut outline: Vec<HeadingItem> = Vec::new();
+    let mut slug_counts: HashMap<String, usize> = HashMap::new();
+
+    render_markdown_fragment(
+        markdown,
+        base_dir,
+        0,
+        true,
+        &mut outline,
+        &mut slug_counts,
+        &mut html,
+    );
+
+    RenderResult {
+        html,
+        outline,
+        stats: DocStats {
+            words,
+            chars,
+            lines,
+            reading_time_sec,
+        },
+    }
+}
+
+fn render_markdown_fragment(
+    src: &str,
+    base_dir: Option<&Path>,
+    line_offset: usize,
+    is_document_start: bool,
+    outline: &mut Vec<HeadingItem>,
+    slug_counts: &mut HashMap<String, usize>,
+    html: &mut String,
+) {
+    if src.is_empty() {
+        return;
+    }
+
+    let lines = split_line_spans(src);
+    let mut i = 0usize;
+    let mut slice_start = 0usize;
+    let mut slice_line_offset = line_offset;
+    let mut slice_is_doc_start = is_document_start;
+
+    // Skip YAML frontmatter at document start so prompt tags inside comments/values aren't split
+    if is_document_start && !lines.is_empty() && lines[0].text.trim() == "---" {
+        if let Some(end_idx) = lines
+            .iter()
+            .enumerate()
+            .skip(1)
+            .find(|(_, l)| {
+                let t = l.text.trim();
+                t == "---" || t == "..."
+            })
+            .map(|(idx, _)| idx)
+        {
+            i = end_idx + 1;
+        }
+    }
+
+    let mut fence: Option<(char, usize)> = None;
+    while i < lines.len() {
+        let was_in_fence = fence.is_some();
+        update_fence_state(lines[i].text, &mut fence);
+        if was_in_fence || fence.is_some() {
+            i += 1;
+            continue;
+        }
+
+        if let Some((tag, inline_inner)) = match_prompt_tag_open(lines[i].text) {
+            if let Some(inner) = inline_inner {
+                let before = &src[slice_start..lines[i].start];
+                if !before.is_empty() {
+                    render_markdown_pulldown(
+                        before,
+                        base_dir,
+                        slice_line_offset,
+                        slice_is_doc_start,
+                        outline,
+                        slug_counts,
+                        html,
+                    );
+                }
+                let abs_line = line_offset + lines[i].line_num;
+                html.push_str(&format!(
+                    "<section class=\"prompt-tag-block\" data-prompt-tag=\"{tag}\" data-line=\"{abs_line}\"><div class=\"prompt-tag-label\">&lt;{tag}&gt;</div><div class=\"prompt-tag-body\">"
+                ));
+                let trimmed_inner = inner.trim();
+                if !trimmed_inner.is_empty() {
+                    render_markdown_fragment(
+                        trimmed_inner,
+                        base_dir,
+                        abs_line - 1,
+                        false,
+                        outline,
+                        slug_counts,
+                        html,
+                    );
+                }
+                html.push_str("</div></section>\n");
+                slice_start = lines[i].end;
+                slice_line_offset = line_offset + lines[i].line_num;
+                slice_is_doc_start = false;
+                i += 1;
+                continue;
+            }
+
+            if let Some(close_idx) = find_closing_prompt_tag(&lines, i, tag) {
+                let before = &src[slice_start..lines[i].start];
+                if !before.is_empty() {
+                    render_markdown_pulldown(
+                        before,
+                        base_dir,
+                        slice_line_offset,
+                        slice_is_doc_start,
+                        outline,
+                        slug_counts,
+                        html,
+                    );
+                }
+                let abs_line = line_offset + lines[i].line_num;
+                html.push_str(&format!(
+                    "<section class=\"prompt-tag-block\" data-prompt-tag=\"{tag}\" data-line=\"{abs_line}\"><div class=\"prompt-tag-label\">&lt;{tag}&gt;</div><div class=\"prompt-tag-body\">"
+                ));
+                if i + 1 < close_idx {
+                    let inner_slice = &src[lines[i + 1].start..lines[close_idx].start];
+                    if !inner_slice.trim().is_empty() {
+                        render_markdown_fragment(
+                            inner_slice,
+                            base_dir,
+                            line_offset + lines[i + 1].line_num - 1,
+                            false,
+                            outline,
+                            slug_counts,
+                            html,
+                        );
+                    }
+                }
+                html.push_str("</div></section>\n");
+                slice_start = lines[close_idx].end;
+                slice_line_offset = line_offset + lines[close_idx].line_num;
+                slice_is_doc_start = false;
+                i = close_idx + 1;
+                continue;
+            }
+        }
+
+        i += 1;
+    }
+
+    let rest = &src[slice_start..];
+    if !rest.is_empty() {
+        render_markdown_pulldown(
+            rest,
+            base_dir,
+            slice_line_offset,
+            slice_is_doc_start,
+            outline,
+            slug_counts,
+            html,
+        );
+    }
+}
+
+fn render_markdown_pulldown(
+    markdown: &str,
+    base_dir: Option<&Path>,
+    line_offset: usize,
+    allow_yaml_frontmatter: bool,
+    outline: &mut Vec<HeadingItem>,
+    mut slug_counts: &mut HashMap<String, usize>,
+    mut html: &mut String,
+) {
+    let line_index = LineIndex::new(markdown);
+
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_FOOTNOTES);
@@ -228,13 +593,11 @@ pub fn render_markdown(markdown: &str, base_dir: Option<&Path>) -> RenderResult 
     options.insert(Options::ENABLE_GFM);
     options.insert(Options::ENABLE_MATH);
     options.insert(Options::ENABLE_HEADING_ATTRIBUTES);
-    options.insert(Options::ENABLE_YAML_STYLE_METADATA_BLOCKS);
+    if allow_yaml_frontmatter {
+        options.insert(Options::ENABLE_YAML_STYLE_METADATA_BLOCKS);
+    }
 
     let parser = Parser::new_ext(markdown, options).into_offset_iter();
-
-    let mut html = String::with_capacity(markdown.len() * 2 + 256);
-    let mut outline: Vec<HeadingItem> = Vec::new();
-    let mut slug_counts: HashMap<String, usize> = HashMap::new();
 
     // State tracking during event traversal
     let mut in_heading: Option<(u8, usize, Option<String>, String, String)> = None; // (level, line, custom_id, plain_text, inner_html)
@@ -244,17 +607,34 @@ pub fn render_markdown(markdown: &str, base_dir: Option<&Path>) -> RenderResult 
     let mut table_alignments: Vec<Alignment> = Vec::new();
     let mut in_table_head = false;
     let mut current_cell_idx = 0usize;
-    let mut current_item_line = 1usize;
+    let mut current_item_line = 1usize + line_offset;
 
     for (event, range) in parser {
-        let line = line_index.line_of(range.start);
+        let line = line_index.line_of(range.start) + line_offset;
 
         if let Some((meta_line, ref mut yaml_buf)) = in_metadata {
             match event {
                 Event::End(TagEnd::MetadataBlock(_)) => {
+                    let chips = parse_frontmatter_chips(yaml_buf);
                     let highlighted = highlight_code("yaml", yaml_buf.trim_end());
                     html.push_str(&format!(
-                        "<details class=\"frontmatter-card\" data-line=\"{meta_line}\"><summary>Frontmatter (YAML)</summary><pre tabindex=\"0\"><code class=\"hl-code\">{highlighted}</code></pre></details>\n"
+                        "<div class=\"frontmatter-card\" data-line=\"{meta_line}\">"
+                    ));
+                    if !chips.is_empty() {
+                        html.push_str("<div class=\"frontmatter-chips\">");
+                        for (k, v) in &chips {
+                            html.push_str(
+                                "<span class=\"frontmatter-chip\"><span class=\"frontmatter-chip-key\">",
+                            );
+                            escape_html(html, k);
+                            html.push_str("</span><span class=\"frontmatter-chip-val\">");
+                            escape_html(html, v);
+                            html.push_str("</span></span>");
+                        }
+                        html.push_str("</div>");
+                    }
+                    html.push_str(&format!(
+                        "<details><summary>Frontmatter (YAML)</summary><pre tabindex=\"0\"><code class=\"hl-code\">{highlighted}</code></pre></details></div>\n"
                     ));
                     in_metadata = None;
                 }
@@ -693,17 +1073,6 @@ pub fn render_markdown(markdown: &str, base_dir: Option<&Path>) -> RenderResult 
             }
         }
     }
-
-    RenderResult {
-        html,
-        outline,
-        stats: DocStats {
-            words,
-            chars,
-            lines,
-            reading_time_sec,
-        },
-    }
 }
 
 #[cfg(test)]
@@ -756,5 +1125,48 @@ mod tests {
         let res = render_markdown(md, None);
         assert!(res.html.contains("/api/local-asset?path="));
         assert_eq!(res.html.matches("/api/local-asset?path=").count(), 3);
+    }
+
+    #[test]
+    fn renders_frontmatter_chips_above_details_with_escaping() {
+        let md = "---\ntitle: \"Prompt <v1> & Demo\"\nmodel: gpt-5 # primary\ntags: [ai, rust]\nnested:\n  key: ignored\n---\n\n# Body\n";
+        let res = render_markdown(md, None);
+        assert!(res.html.contains("<div class=\"frontmatter-card\" data-line=\"1\">"));
+        assert!(res.html.contains("<div class=\"frontmatter-chips\">"));
+        assert!(res.html.contains("<span class=\"frontmatter-chip-key\">title</span><span class=\"frontmatter-chip-val\">Prompt &lt;v1&gt; &amp; Demo</span>"));
+        assert!(res.html.contains("<span class=\"frontmatter-chip-key\">model</span><span class=\"frontmatter-chip-val\">gpt-5</span>"));
+        assert!(!res.html.contains("<span class=\"frontmatter-chip-key\">tags</span>"));
+        assert!(!res.html.contains("<span class=\"frontmatter-chip-key\">nested</span>"));
+        let chips_pos = res.html.find("class=\"frontmatter-chips\"").unwrap();
+        let details_pos = res.html.find("<details><summary>Frontmatter (YAML)</summary>").unwrap();
+        assert!(chips_pos < details_pos);
+    }
+
+    #[test]
+    fn renders_prompt_tag_blocks_and_preserves_fenced_code_blocks() {
+        let md = "# Intro\n\n<role>\nYou are a **Rust** assistant.\n- Follow rules\n</role>\n\n<output_format>JSON only</output_format>\n\n```xml\n<context>Should stay code</context>\n```\n";
+        let res = render_markdown(md, None);
+        assert!(res.html.contains("<section class=\"prompt-tag-block\" data-prompt-tag=\"role\" data-line=\"3\">"));
+        assert!(res.html.contains("<div class=\"prompt-tag-label\">&lt;role&gt;</div>"));
+        assert!(res.html.contains("<p data-line=\"4\">You are a <strong>Rust</strong> assistant.</p>"));
+        assert!(res.html.contains("<li data-line=\"5\">Follow rules</li>"));
+        assert!(res.html.contains("<section class=\"prompt-tag-block\" data-prompt-tag=\"output_format\" data-line=\"8\">"));
+        assert!(res.html.contains("<p data-line=\"8\">JSON only</p>"));
+        assert!(!res.html.contains("data-prompt-tag=\"context\""));
+        assert!(res.html.contains("data-lang=\"xml\""));
+    }
+
+    #[test]
+    fn match_prompt_tag_open_handles_multibyte_utf8_safely() {
+        assert_eq!(match_prompt_tag_open("<role>🦀äöü>"), None);
+        assert_eq!(match_prompt_tag_open("<role>🦀aaa>"), None);
+        assert_eq!(
+            match_prompt_tag_open("<role>🦀äöü</role>"),
+            Some(("role", Some("🦀äöü")))
+        );
+
+        let res = render_markdown("<role>🦀äöü>\n\n<role>🦀äöü</role>\n", None);
+        assert!(res.html.contains("data-prompt-tag=\"role\""));
+        assert!(res.html.contains("🦀äöü"));
     }
 }

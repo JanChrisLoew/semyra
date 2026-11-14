@@ -9,14 +9,24 @@ import {
   onBackendEvent,
   UiSessionPrefs,
 } from './api';
-import { formatAiContextEntry } from './ai-bundle';
-import { openAiBundleDialogModal, openExternalDiffDialogModal } from './ai-dialogs';
+import { extractTemplateVariables, formatAiContextEntry, toWorkspaceRelativeLabel } from './ai-bundle';
+import {
+  openAiBundleDialogModal,
+  openCompareDiffDialogModal,
+  openExternalDiffDialogModal,
+  openPromptVariablesDialogModal,
+} from './ai-dialogs';
 import { AiTemplateId, getAiTemplate } from './ai-templates';
-import { FormatAction, MarkdownEditorController } from './editor';
+import {
+  CODEBLOCK_LANGUAGES,
+  FormatAction,
+  GITHUB_ALERT_TYPES,
+  MarkdownEditorController,
+} from './editor';
 import { DocumentExportController, type DocumentSnapshot } from './document-export';
 import { renderDocument } from './export-utils';
 import { formatMarkdownDocument } from './markdown-formatter';
-import { lintMarkdownDocument, type LintIssue } from './markdown-lint';
+import { lintMarkdownDocument, type LintIssue, type LintOptions } from './markdown-lint';
 import { MermaidViewer } from './mermaid-viewer';
 import { bindRovingHorizontalKeyNav, syncRovingTabindex } from './navigation-a11y';
 import { CommandPaletteController } from './palette';
@@ -42,7 +52,11 @@ import {
   snapSplitRatio,
   splitRatioFromPointer,
 } from './layout-utils';
-import { calculateDetailedStats } from './stats-utils';
+import {
+  calculateDetailedStats,
+  computeHeadingTokenCounts,
+  extractMarkdownSection,
+} from './stats-utils';
 import { SyncScrollController } from './sync-scroll';
 import { findAdjacentTabId, reorderTabList, toggleTabPinned } from './tab-utils';
 import { bindThemeSystem, toggleTheme } from './theme';
@@ -124,6 +138,15 @@ class SemyraApp {
   private lastWorkfolderPath: string | null = null;
   private aiLibraryRootPath: string | null = null;
   private currentLintIssues: LintIssue[] = [];
+  private cachedWorkspaceRootForLint: string | null = null;
+  private cachedWorkspaceRelPaths: string[] | null = null;
+  private lintWorkspaceRefreshInFlight: string | null = null;
+  private navHistory: Array<{ tabId: string; path: string | null }> = [];
+  private navHistoryIndex = -1;
+  private navigatingHistoryDepth = 0;
+  private navHistorySeq = 0;
+  private previewFindMatches: HTMLElement[] = [];
+  private previewFindActiveIdx = -1;
 
   // DOM References
   private appEl = document.getElementById('app')!;
@@ -131,6 +154,9 @@ class SemyraApp {
   private tabBarEl = document.getElementById('tab-bar')!;
   private previewPaneEl = document.getElementById('preview-pane')!;
   private previewContentEl = document.getElementById('preview-content')!;
+  private previewFindBarEl = document.getElementById('preview-find-bar')!;
+  private previewFindInputEl = document.getElementById('preview-find-input') as HTMLInputElement;
+  private previewFindCountEl = document.getElementById('preview-find-count')!;
   private readonly mermaidViewer = new MermaidViewer();
   private documentExport = new DocumentExportController(
     () => this.snapshotActiveDocument(),
@@ -164,6 +190,7 @@ class SemyraApp {
     hidePopover?: () => void;
   };
   private tabContextTargetId: string | null = null;
+  private gotoLineReturnFocusEl: HTMLElement | null = null;
   private tabDragState: {
     tabId: string;
     startX: number;
@@ -189,6 +216,7 @@ class SemyraApp {
       onPasteImage: (mimeType, dataUrl) => {
         void this.handlePasteImage(mimeType, dataUrl);
       },
+      onPickImage: () => this.pickImageFromDisk(),
       onCopyRichText: () => {
         void this.documentExport.copyRichText();
       },
@@ -217,10 +245,16 @@ class SemyraApp {
       workspaceTitleEl: document.getElementById('workspace-title')!,
       contextPopoverEl: document.getElementById('tree-context-menu') as HTMLElement,
       getActiveFilePath: () => this.activeTab?.path ?? null,
-      onOpenFilePath: (filePath) => this.openFileByPath(filePath),
-      onOpenCreatedFile: (payload) => this.openTabFromPayload(payload),
+      onOpenFilePath: async (filePath) => {
+        await this.openFileByPath(filePath);
+      },
+      onOpenCreatedFile: (payload) => {
+        this.invalidateLintWorkspaceCache();
+        this.openTabFromPayload(payload);
+      },
       onTriggerOpenFolderDialog: () => this.triggerOpenFolderDialog(),
       onWorkspaceFolderLoaded: (folderPath, persistPrefs) => {
+        this.invalidateLintWorkspaceCache();
         if (this.sidebarSourceMode === 'workspace') {
           this.lastWorkfolderPath = folderPath;
           this.pushRecentFolder(folderPath);
@@ -246,6 +280,15 @@ class SemyraApp {
         this.schedulePrefsSave();
         this.explorer.renderEmptyStateWithRecents(this.recentFolders, this.recentFiles);
         this.showToast(t('toast.recentFileRemoved'));
+      },
+      onCopyAtPath: async (entryPath) => {
+        await this.copyAtPathForTarget(entryPath, baseNameOfPath(entryPath));
+      },
+      onScaffoldAgents: async (targetDir) => {
+        await this.scaffoldWorkspaceAgents(targetDir);
+      },
+      onScaffoldSkill: (targetDir) => {
+        this.scaffoldWorkspaceSkill(targetDir);
       },
     });
 
@@ -300,7 +343,9 @@ class SemyraApp {
             recentFiles: this.recentFiles,
             recentFolders: this.recentFolders,
             onActivateTab: (tabId) => this.activateTab(tabId),
-            onOpenFile: (filePath) => this.openFileByPath(filePath),
+            onOpenFile: async (filePath) => {
+              await this.openFileByPath(filePath);
+            },
             onOpenFolder: async (folderPath) => {
               await this.explorer.loadFolder(folderPath, true);
               this.switchSidebarPanel('files');
@@ -331,17 +376,41 @@ class SemyraApp {
             onCopyAiContext: () => {
               void this.copyCurrentTabAiContext();
             },
+            onCopyAtPath: () => {
+              void this.copyAtPath();
+            },
             onOpenAiBundle: () => {
               this.openAiBundleDialog();
+            },
+            onFillPromptVariables: () => {
+              this.openPromptVariablesDialog();
             },
             onCreateFromTemplate: (templateId) => {
               this.createTabFromAiTemplate(templateId);
             },
+            onScaffoldWorkspaceAgents: () => {
+              void this.scaffoldWorkspaceAgents();
+            },
+            onScaffoldWorkspaceSkill: () => {
+              this.scaffoldWorkspaceSkill();
+            },
             onExportHtml: () => {
               void this.documentExport.exportHtml();
             },
+            onExportHtmlLight: () => {
+              void this.documentExport.exportHtml('light');
+            },
+            onExportHtmlDark: () => {
+              void this.documentExport.exportHtml('dark');
+            },
             onExportPdf: () => {
               void this.documentExport.exportPdf();
+            },
+            onDiffWithSaved: () => {
+              void this.openDiffWithSavedDialog();
+            },
+            onCompareOpenTabs: () => {
+              this.openCompareOpenTabsDialog();
             },
             onPrint: () => {
               void this.documentExport.print();
@@ -396,7 +465,13 @@ class SemyraApp {
             onToggleLineEnding: () => this.toggleActiveTabLineEnding(),
             onZoomDelta: (delta) => this.setZoomPercent(this.zoomPercent + delta),
             onZoomReset: () => this.setZoomPercent(100),
-            onOpenEditorSearch: () => this.openEditorSearchPanel(),
+            onOpenEditorSearch: () => {
+              if (this.appEl.getAttribute('data-view') === 'preview') {
+                this.openPreviewFind();
+              } else {
+                this.openEditorSearchPanel();
+              }
+            },
             onOpenEditorReplace: () => this.openEditorReplacePanel(),
             onOpenSearchPanel: () => this.switchSidebarPanel('search'),
             onOpenOutlinePanel: () => this.switchSidebarPanel('outline'),
@@ -419,6 +494,22 @@ class SemyraApp {
             onPrevTab: () => this.cycleActiveTab(-1),
             onToggleTask: () => this.editor.toggleCurrentTask(),
           }),
+        getHeadings: () =>
+          (this.activeTab?.outline ?? []).map((h) => ({
+            level: h.level,
+            text: h.text,
+            line: h.line,
+          })),
+        onJumpToLine: (line) => {
+          this.syncScroll.lockScrollForNavigation('editor', 500);
+          this.editor.jumpToLine(line);
+          if (this.appEl.getAttribute('data-view') === 'preview') {
+            const targetEl = this.previewContentEl.querySelector<HTMLElement>(
+              `[data-line="${line}"]`,
+            );
+            targetEl?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        },
       },
     );
 
@@ -1040,6 +1131,75 @@ class SemyraApp {
     }, 1100);
   }
 
+  private pickImageFromDisk(): Promise<string | null> {
+    return new Promise((resolve) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/png,image/jpeg,image/gif,image/webp,image/bmp,image/svg+xml,image/*';
+      input.className = 'visually-hidden';
+      let settled = false;
+
+      const finish = (result: string | null) => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener('focus', onWindowFocus);
+        input.remove();
+        resolve(result);
+      };
+
+      const onWindowFocus = () => {
+        window.setTimeout(() => {
+          if (!settled && (!input.files || input.files.length === 0)) {
+            finish(null);
+          }
+        }, 300);
+      };
+
+      input.addEventListener('cancel', () => finish(null), { once: true });
+      input.addEventListener(
+        'change',
+        () => {
+          const file = input.files?.[0];
+          if (!file) {
+            finish(null);
+            return;
+          }
+          const reader = new FileReader();
+          reader.onload = async () => {
+            if (typeof reader.result !== 'string') {
+              finish(null);
+              return;
+            }
+            const tab = this.activeTab;
+            const targetBaseDir = tab?.parentDir ?? this.explorer.rootPath;
+            try {
+              const res = await backend.savePastedImage(
+                targetBaseDir,
+                file.type || 'image/png',
+                reader.result,
+              );
+              if (this.explorer.hasWorkspace) {
+                this.explorer.scheduleRefresh();
+              }
+              const match = /\(([^)]+)\)$/.exec(res.markdownSnippet.trim());
+              finish(match ? match[1] : null);
+            } catch (err) {
+              console.error('Bild konnte nicht gespeichert werden:', err);
+              finish(null);
+            }
+          };
+          reader.onerror = () => finish(null);
+          reader.readAsDataURL(file);
+        },
+        { once: true },
+      );
+
+      document.body.append(input);
+      window.addEventListener('focus', onWindowFocus, { once: true });
+      input.click();
+    });
+  }
+
   private async handlePasteImage(mimeType: string, dataUrl: string): Promise<void> {
     const tab = this.activeTab;
     if (!tab) return;
@@ -1048,6 +1208,7 @@ class SemyraApp {
       const res = await backend.savePastedImage(targetBaseDir, mimeType, dataUrl);
       this.editor.insertSnippet(res.markdownSnippet);
       if (this.explorer.hasWorkspace) {
+        this.invalidateLintWorkspaceCache();
         this.explorer.scheduleRefresh();
       }
     } catch (err) {
@@ -1073,6 +1234,7 @@ class SemyraApp {
     if (snippets.length > 0) {
       this.editor.insertSnippet(snippets.join('\n'));
       if (this.explorer.hasWorkspace) {
+        this.invalidateLintWorkspaceCache();
         this.explorer.scheduleRefresh();
       }
     }
@@ -1131,6 +1293,9 @@ class SemyraApp {
     window.clearTimeout(this.renderDebounceTimer);
     this.renderDebounceTimer = undefined;
     this.activeTabId = tabId;
+    if (this.navigatingHistoryDepth === 0) {
+      this.recordNavigationHistory(target.id, target.path);
+    }
     if (target.hasExternalConflict && target.path) {
       this.externalChangedPath = target.path;
       this.externalBannerEl.hidden = false;
@@ -1154,17 +1319,18 @@ class SemyraApp {
     );
   }
 
-  private async openFileByPath(path: string, persistPrefs = true): Promise<void> {
+  private async openFileByPath(path: string, persistPrefs = true): Promise<boolean> {
     const normLower = path.toLowerCase();
     const existing = this.tabs.find((t) => t.path?.toLowerCase() === normLower);
     if (existing) {
       this.activateTab(existing.id);
-      return;
+      return true;
     }
 
     try {
       const payload = await backend.readFile(path);
       this.openTabFromPayload(payload, persistPrefs);
+      return true;
     } catch (err) {
       console.error('Datei konnte nicht geöffnet werden:', err);
       const fileName = baseNameOfPath(path);
@@ -1179,6 +1345,7 @@ class SemyraApp {
         }
         this.schedulePrefsSave();
       }
+      return false;
     }
   }
 
@@ -1289,6 +1456,16 @@ class SemyraApp {
       this.pushRecentFile(tab.path);
     }
     this.explorer.invalidateFilesCache();
+    this.invalidateLintWorkspaceCache();
+
+    if (isNewPath && tab.path) {
+      const prevLower = path?.toLowerCase() ?? null;
+      for (const entry of this.navHistory) {
+        if (entry.tabId === tab.id || (prevLower && entry.path?.toLowerCase() === prevLower)) {
+          entry.path = tab.path;
+        }
+      }
+    }
 
     if (isNewPath) {
       this.renderTabBar(false);
@@ -1458,6 +1635,12 @@ class SemyraApp {
     };
     this.recentFiles = this.recentFiles.map(remapPath);
     this.recentFolders = this.recentFolders.map(remapPath);
+    for (const entry of this.navHistory) {
+      if (entry.path) {
+        entry.path = remapPath(entry.path);
+      }
+    }
+    this.invalidateLintWorkspaceCache();
     if (!this.explorer.hasWorkspace) {
       this.explorer.renderEmptyStateWithRecents(this.recentFolders, this.recentFiles);
     }
@@ -1470,6 +1653,7 @@ class SemyraApp {
   }
 
   private handleExplorerEntryDeleted(deletedPath: string): void {
+    this.invalidateLintWorkspaceCache();
     const lowerTarget = deletedPath.toLowerCase();
     const prefix = `${lowerTarget}\\`;
 
@@ -1566,8 +1750,8 @@ class SemyraApp {
     const isCurrent = () => seq === this.renderSeq;
     try {
       const tab = this.activeTab;
-      const res = await renderDocument(tab?.name ?? 'Untitled.md', markdown, baseDir);
-      if (seq !== this.renderSeq) return;
+      const res = await renderDocument(tab?.name ?? 'Untitled.md', markdown, baseDir, 'live');
+      if (seq !== this.renderSeq || res.superseded) return;
 
       const applied = await safeSetMarkdownHTML(this.previewContentEl, res.html, { isCurrent });
       if (!applied || !isCurrent()) return;
@@ -1582,6 +1766,9 @@ class SemyraApp {
         this.previewPaneEl.scrollTop = restoreScrollTop;
       }
       this.syncScroll.updateActiveHeadingFromViewport();
+      if (!this.previewFindBarEl.hidden && this.previewFindInputEl.value) {
+        this.updatePreviewFindMatches(false);
+      }
     } catch (err) {
       console.error('Markdown-Rendering fehlgeschlagen:', err);
     }
@@ -1633,13 +1820,39 @@ class SemyraApp {
       return;
     }
 
+    const tokenByLine = new Map<number, number>();
+    if (this.activeTab) {
+      for (const tc of computeHeadingTokenCounts(this.activeTab.currentContent)) {
+        tokenByLine.set(tc.line, tc.tokens);
+      }
+    }
+
     for (const item of outline) {
+      const row = document.createElement('div');
+      row.className = 'outline-row';
+
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = `outline-item outline-lvl-${item.level}`;
       btn.dataset.headingSlug = item.slug;
-      btn.textContent = item.text || t('outline.untitledHeading');
-      btn.title = t('outline.lineTooltip', { line: item.line, text: item.text });
+      const headingLabel = item.text || t('outline.untitledHeading');
+      const tok = tokenByLine.get(item.line);
+      btn.title = tok && tok > 0
+        ? `${t('outline.lineTooltip', { line: item.line, text: item.text })} (${t('outline.tokensTooltip', { tokens: tok })})`
+        : t('outline.lineTooltip', { line: item.line, text: item.text });
+
+      const textSpan = document.createElement('span');
+      textSpan.className = 'outline-item-text';
+      textSpan.textContent = headingLabel;
+      btn.appendChild(textSpan);
+
+      if (tok && tok > 0) {
+        const tokSpan = document.createElement('span');
+        tokSpan.className = 'outline-item-tokens';
+        tokSpan.textContent = `~${tok} tok`;
+        btn.appendChild(tokSpan);
+      }
+
       btn.addEventListener('click', () => {
         this.syncScroll.lockScrollForNavigation('editor', 500);
         this.editor.jumpToLine(item.line);
@@ -1648,7 +1861,22 @@ class SemyraApp {
         );
         headingEl?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
-      this.outlineEl.appendChild(btn);
+
+      const copyBtn = document.createElement('button');
+      copyBtn.type = 'button';
+      copyBtn.className = 'mini-icon-btn outline-copy-btn';
+      copyBtn.title = t('outline.copySection');
+      copyBtn.setAttribute('aria-label', t('outline.copySection'));
+      copyBtn.innerHTML =
+        '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="4" width="7" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M4 11H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v1" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>';
+      copyBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        void this.copyOutlineSectionAiContext(item.line, item.slug);
+      });
+
+      row.appendChild(btn);
+      row.appendChild(copyBtn);
+      this.outlineEl.appendChild(row);
     }
     this.highlightCurrentHeadingInOutline();
   }
@@ -1660,6 +1888,11 @@ class SemyraApp {
         this.activeHeadingSlug && btn.dataset.headingSlug === this.activeHeadingSlug,
       );
       btn.classList.toggle('is-current', isCurrent);
+      if (isCurrent) {
+        btn.setAttribute('aria-current', 'location');
+      } else {
+        btn.removeAttribute('aria-current');
+      }
     }
   }
 
@@ -1778,8 +2011,14 @@ class SemyraApp {
 
     const revealBtn = document.getElementById('tab-ctx-reveal') as HTMLButtonElement;
     const copyPathBtn = document.getElementById('tab-ctx-copy-path') as HTMLButtonElement;
+    const copyAtPathBtn = document.getElementById('tab-ctx-copy-at-path') as HTMLButtonElement | null;
+    const diffSavedBtn = document.getElementById('tab-ctx-diff-saved') as HTMLButtonElement | null;
+    const compareTabsBtn = document.getElementById('tab-ctx-compare-tabs') as HTMLButtonElement | null;
     if (revealBtn) revealBtn.disabled = !tab.path;
     if (copyPathBtn) copyPathBtn.disabled = !tab.path;
+    if (copyAtPathBtn) copyAtPathBtn.disabled = !tab.path;
+    if (diffSavedBtn) diffSavedBtn.disabled = !tab.path;
+    if (compareTabsBtn) compareTabsBtn.disabled = this.tabs.length < 2;
 
     const closeOthersBtn = this.tabContextMenuEl.querySelector<HTMLButtonElement>(
       '[data-tab-ctx="close-others"]',
@@ -1877,7 +2116,7 @@ class SemyraApp {
       if (this.lastSelection.chars > 0) {
         const selW = this.lastSelection.words;
         const selC = this.lastSelection.chars;
-        const selTokens = Math.ceil(Math.max(selC / 3.7, selW * 1.25));
+        const selTokens = estimateTokens(this.editor?.getSelectedText() ?? '');
         this.statusDocSummaryBtn.textContent = isEn
           ? `${selW} of ${words.toLocaleString(locale)} words · ~${selTokens.toLocaleString(locale)} tokens`
           : `${selW} von ${words.toLocaleString(locale)} Wörtern · ~${selTokens.toLocaleString(locale)} Tokens`;
@@ -1885,7 +2124,8 @@ class SemyraApp {
           ? `Selection: ${selW.toLocaleString(locale)} words (${selC.toLocaleString(locale)} ch.), ~${selTokens.toLocaleString(locale)} tokens · Document: ${words.toLocaleString(locale)} words (~${totalTokens.toLocaleString(locale)} tokens, ${readingTimeStr}) · Click for details`
           : `Auswahl: ${selW.toLocaleString(locale)} Wörter (${selC.toLocaleString(locale)} Z.), ~${selTokens.toLocaleString(locale)} Tokens · Dokument: ${words.toLocaleString(locale)} Wörter (~${totalTokens.toLocaleString(locale)} Tokens, ${readingTimeStr}) · Klicken für Details`;
       } else {
-        this.statusDocSummaryBtn.textContent = `${words.toLocaleString(locale)} ${wordLabel} · ~${totalTokens.toLocaleString(locale)} tokens`;
+        const tokenLabel = isEn ? 'tokens' : 'Tokens';
+        this.statusDocSummaryBtn.textContent = `${words.toLocaleString(locale)} ${wordLabel} · ~${totalTokens.toLocaleString(locale)} ${tokenLabel}`;
         this.statusDocSummaryBtn.title = isEn
           ? `Document statistics: ${words.toLocaleString(locale)} words · ~${totalTokens.toLocaleString(locale)} tokens · ${readingTimeStr} · Click for details`
           : `Dokument-Statistiken: ${words.toLocaleString(locale)} Wörter · ~${totalTokens.toLocaleString(locale)} Tokens · ${readingTimeStr} · Klicken für Details`;
@@ -1907,7 +2147,7 @@ class SemyraApp {
       if (this.lastSelection.chars > 0) {
         const selW = this.lastSelection.words;
         const selC = this.lastSelection.chars;
-        const selTokens = Math.ceil(Math.max(selC / 3.7, selW * 1.25));
+        const selTokens = estimateTokens(this.editor?.getSelectedText() ?? '');
         this.statusTokensEl.textContent = `~${selTokens.toLocaleString(locale)} Tokens (~${totalTokens.toLocaleString(locale)})`;
       } else {
         this.statusTokensEl.textContent = `~${totalTokens.toLocaleString(locale)} Tokens`;
@@ -1955,6 +2195,9 @@ class SemyraApp {
   // ==========================================================================
 
   private setViewMode(mode: 'editor' | 'split' | 'preview'): void {
+    if (mode !== 'preview' && !this.previewFindBarEl.hidden) {
+      this.closePreviewFind(false);
+    }
     this.appEl.setAttribute('data-view', mode);
     for (const b of document.querySelectorAll<HTMLButtonElement>('[data-set-view]')) {
       b.classList.toggle('is-active', b.dataset.setView === mode);
@@ -2056,6 +2299,7 @@ class SemyraApp {
       this.lastWorkfolderPath = this.explorer.rootPath;
     }
     this.sidebarSourceMode = mode;
+    this.invalidateLintWorkspaceCache();
 
     const wsBtn = document.getElementById('btn-source-workspace');
     const libBtn = document.getElementById('btn-source-ai-library');
@@ -2084,8 +2328,55 @@ class SemyraApp {
     }
   }
 
+  private invalidateLintWorkspaceCache(): void {
+    this.cachedWorkspaceRootForLint = null;
+    this.cachedWorkspaceRelPaths = null;
+  }
+
+  private async refreshLintWorkspaceFiles(workspaceRoot: string): Promise<void> {
+    if (this.sidebarSourceMode !== 'workspace' || this.explorer.rootPath !== workspaceRoot) return;
+    if (this.lintWorkspaceRefreshInFlight === workspaceRoot) return;
+    this.lintWorkspaceRefreshInFlight = workspaceRoot;
+    try {
+      const files = await this.explorer.getWorkspaceFiles();
+      if (this.sidebarSourceMode !== 'workspace' || this.explorer.rootPath !== workspaceRoot) return;
+      this.cachedWorkspaceRootForLint = workspaceRoot;
+      this.cachedWorkspaceRelPaths = files.map((f) => f.relPath);
+      if (this.activeTab) {
+        this.updateLintStatus(this.activeTab.currentContent, this.activeTab.path);
+        const dialog = document.getElementById('lint-dialog') as HTMLDialogElement | null;
+        if (dialog?.open) {
+          this.renderLintDialogList();
+        }
+      }
+    } finally {
+      if (this.lintWorkspaceRefreshInFlight === workspaceRoot) {
+        this.lintWorkspaceRefreshInFlight = null;
+      }
+    }
+  }
+
   private updateLintStatus(content: string, filePath: string | null): void {
-    const result = lintMarkdownDocument(content, filePath);
+    const workspaceRoot = this.sidebarSourceMode === 'workspace' ? this.explorer.rootPath : null;
+    let lintOptions: LintOptions | undefined;
+
+    if (workspaceRoot) {
+      if (this.cachedWorkspaceRootForLint !== workspaceRoot || this.cachedWorkspaceRelPaths === null) {
+        void this.refreshLintWorkspaceFiles(workspaceRoot);
+      } else if (filePath) {
+        const rel = toWorkspaceRelativeLabel(filePath, workspaceRoot, '');
+        const isInsideWorkspace =
+          rel.length > 0 && !/^[A-Za-z]:[\\/]/.test(rel) && !rel.startsWith('/');
+        if (isInsideWorkspace) {
+          lintOptions = {
+            knownWorkspaceFiles: this.cachedWorkspaceRelPaths,
+            currentFileRelPath: rel,
+          };
+        }
+      }
+    }
+
+    const result = lintMarkdownDocument(content, filePath, lintOptions);
     this.currentLintIssues = result.issues;
     const btn = this.statusLintBtn;
     if (!btn) return;
@@ -2339,17 +2630,187 @@ class SemyraApp {
     });
   }
 
-  private async copyCurrentTabAiContext(): Promise<void> {
-    const tab = this.activeTab;
-    if (!tab) return;
+  private async openDiffWithSavedDialog(tab: OpenTab | undefined = this.activeTab): Promise<void> {
+    if (!tab || !tab.path) {
+      this.showToast(t('toast.diffNoSavedFile'));
+      return;
+    }
     try {
-      const payload = formatAiContextEntry(tab.name, tab.currentContent);
+      const payload = await backend.readFile(tab.path);
+      openCompareDiffDialogModal({
+        title: t('diff.withSavedTitle'),
+        subtitle: t('diff.withSavedSubtitle'),
+        leftLabel: t('diff.savedLabel', { name: tab.name }),
+        rightLabel: t('diff.editorLabel', { name: tab.name }),
+        leftContent: payload.content,
+        rightContent: tab.currentContent,
+        readOnly: true,
+      });
+    } catch (err) {
+      console.error('Gespeicherter Stand konnte nicht gelesen werden:', err);
+      this.showToast(t('toast.diffReadFailed'));
+    }
+  }
+
+  private openCompareOpenTabsDialog(baseTab: OpenTab | undefined = this.activeTab): void {
+    if (this.tabs.length < 2) {
+      this.showToast(t('toast.diffNeedTwoTabs'));
+      return;
+    }
+    const rightTab = baseTab ?? this.activeTab ?? this.tabs[0];
+    const otherTabs = this.tabs.filter((tab) => tab.id !== rightTab.id);
+    if (otherTabs.length === 0) {
+      this.showToast(t('toast.diffNeedTwoTabs'));
+      return;
+    }
+
+    const openDiff = (leftTab: OpenTab) => {
+      openCompareDiffDialogModal({
+        title: t('diff.compareTabsTitle'),
+        subtitle: t('diff.compareTabsSubtitle', { left: leftTab.name, right: rightTab.name }),
+        leftLabel: leftTab.name,
+        rightLabel: rightTab.name,
+        leftContent: leftTab.currentContent,
+        rightContent: rightTab.currentContent,
+        readOnly: true,
+      });
+    };
+
+    if (otherTabs.length === 1) {
+      openDiff(otherTabs[0]);
+      return;
+    }
+
+    const isEn = getLanguage() === 'en';
+    const existing = document.getElementById('compare-tab-picker-dialog') as HTMLDialogElement | null;
+    existing?.remove();
+
+    const dialog = document.createElement('dialog');
+    dialog.id = 'compare-tab-picker-dialog';
+    dialog.className = 'modal-dialog lint-dialog';
+    dialog.setAttribute('closedby', 'any');
+    dialog.setAttribute('aria-labelledby', 'compare-tab-picker-title');
+
+    const card = document.createElement('div');
+    card.className = 'modal-card lint-card';
+
+    const header = document.createElement('div');
+    header.className = 'settings-header';
+
+    const titleWrap = document.createElement('div');
+    const titleEl = document.createElement('h3');
+    titleEl.id = 'compare-tab-picker-title';
+    titleEl.textContent = t('diff.compareTabsTitle');
+    const subEl = document.createElement('p');
+    subEl.className = 'lint-dialog-sub';
+    subEl.textContent = isEn
+      ? `Select a tab to compare with "${rightTab.name}":`
+      : `Tab zum Vergleichen mit „${rightTab.name}“ auswählen:`;
+    titleWrap.append(titleEl, subEl);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'mini-icon-btn';
+    closeBtn.textContent = '✕';
+    closeBtn.setAttribute('aria-label', isEn ? 'Close' : 'Schließen');
+    closeBtn.addEventListener('click', () => dialog.close());
+    header.append(titleWrap, closeBtn);
+
+    const list = document.createElement('div');
+    list.className = 'lint-issues-list scroller';
+    let firstBtn: HTMLButtonElement | null = null;
+    for (const candidate of otherTabs) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'lint-issue-row';
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'lint-issue-msg';
+      nameSpan.textContent = candidate.name;
+      const pathSpan = document.createElement('span');
+      pathSpan.className = 'lint-issue-line';
+      pathSpan.textContent = toWorkspaceRelativeLabel(
+        candidate.path,
+        this.explorer.rootPath,
+        isEn ? 'Unsaved' : 'Ungespeichert',
+      );
+      btn.append(nameSpan, pathSpan);
+      btn.addEventListener('click', () => {
+        dialog.returnValue = 'picked';
+        dialog.close();
+        openDiff(candidate);
+      });
+      if (!firstBtn) firstBtn = btn;
+      list.append(btn);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'modal-actions';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn';
+    cancelBtn.textContent = isEn ? 'Cancel' : 'Abbrechen';
+    cancelBtn.addEventListener('click', () => dialog.close());
+    actions.append(cancelBtn);
+
+    card.append(header, list, actions);
+    dialog.append(card);
+    dialog.addEventListener('close', () => {
+      dialog.returnValue = '';
+      dialog.remove();
+    });
+    document.body.append(dialog);
+    dialog.showModal();
+    firstBtn?.focus();
+  }
+
+  private async copyCurrentTabAiContext(): Promise<void> {
+    if (!this.activeTab) return;
+    await this.copyTabAiContext(this.activeTab);
+  }
+
+  private async copyTabAiContext(tab: OpenTab): Promise<void> {
+    try {
+      const label = toWorkspaceRelativeLabel(tab.path, this.explorer.rootPath, tab.name);
+      const payload = formatAiContextEntry(label, tab.currentContent);
       await navigator.clipboard.writeText(payload);
-      this.showToast(t('toast.copyAiWithName', { name: tab.name }));
+      this.showToast(t('toast.copyAiWithName', { name: label }));
     } catch (err) {
       console.error('KI-Kontext konnte nicht kopiert werden:', err);
       this.showToast(t('toast.copyFailed'));
     }
+  }
+
+  private async copyOutlineSectionAiContext(headingLine: number, slug: string): Promise<void> {
+    const tab = this.activeTab;
+    if (!tab) return;
+    const section = extractMarkdownSection(tab.currentContent, headingLine);
+    if (!section) return;
+    const relLabel = toWorkspaceRelativeLabel(tab.path, this.explorer.rootPath, tab.name);
+    const payload = formatAiContextEntry(`${relLabel}#${slug}`, section.content);
+    try {
+      await navigator.clipboard.writeText(payload);
+      this.showToast(t('toast.copySectionAi', { heading: section.heading }));
+    } catch (err) {
+      console.error('Abschnitt konnte nicht kopiert werden:', err);
+      this.showToast(t('toast.copyFailed'));
+    }
+  }
+
+  private async copyAtPathForTarget(targetPath: string | null, fallbackName: string): Promise<void> {
+    const relPath = toWorkspaceRelativeLabel(targetPath, this.explorer.rootPath, fallbackName);
+    const atPath = `@${relPath}`;
+    try {
+      await navigator.clipboard.writeText(atPath);
+      this.showToast(t('toast.copyAtPath', { path: atPath }));
+    } catch (err) {
+      console.error('@-Pfad konnte nicht kopiert werden:', err);
+      this.showToast(t('toast.copyFailed'));
+    }
+  }
+
+  private async copyAtPath(tab: OpenTab | undefined = this.activeTab): Promise<void> {
+    if (!tab) return;
+    await this.copyAtPathForTarget(tab.path, tab.name);
   }
 
   private createTabFromAiTemplate(templateId: AiTemplateId): void {
@@ -2357,11 +2818,111 @@ class SemyraApp {
     this.createNewTab(tpl.suggestedName, tpl.content, true);
   }
 
+  private getActiveWorkspaceRoot(): string | null {
+    return this.sidebarSourceMode === 'workspace'
+      ? this.explorer.rootPath
+      : this.lastWorkfolderPath;
+  }
+
+  private async scaffoldWorkspaceAgents(targetDir?: string): Promise<void> {
+    const rootPath = targetDir ?? this.getActiveWorkspaceRoot();
+    if (!rootPath) {
+      this.showToast(t('toast.noWorkspaceOpen'));
+      return;
+    }
+
+    const sep = rootPath.includes('\\') ? '\\' : '/';
+    const cleanRoot = rootPath.replace(/[\\/]+$/, '');
+    const agentsPath = `${cleanRoot}${sep}AGENTS.md`;
+
+    try {
+      const existing = await backend.readFile(agentsPath);
+      this.openTabFromPayload(existing);
+      this.showToast(t('toast.workspaceAgentsExists'));
+      return;
+    } catch {
+      // AGENTS.md does not exist yet — create it below.
+    }
+
+    try {
+      const tpl = getAiTemplate('agents', getLanguage());
+      const created = await backend.createFile(cleanRoot, 'AGENTS.md');
+      await backend.writeFile(
+        created.path,
+        tpl.content,
+        created.lineEnding,
+        created.content,
+        created.lineEnding,
+      );
+      if (this.sidebarSourceMode === 'workspace') {
+        await this.explorer.refresh();
+      }
+      this.openTabFromPayload({ ...created, content: tpl.content });
+      this.showToast(t('toast.workspaceAgentsCreated'));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.showToast(t('toast.workspaceAgentsFailed', { err: msg }));
+    }
+  }
+
+  private scaffoldWorkspaceSkill(targetDir?: string): void {
+    const rootPath = targetDir ?? this.getActiveWorkspaceRoot();
+    if (!rootPath) {
+      this.showToast(t('toast.noWorkspaceOpen'));
+      return;
+    }
+
+    const sep = rootPath.includes('\\') ? '\\' : '/';
+    const cleanRoot = rootPath.replace(/[\\/]+$/, '');
+    this.explorer.openNewSkillDialog(`${cleanRoot}${sep}.agents${sep}skills`);
+  }
+
   private openAiBundleDialog(): void {
     void openAiBundleDialogModal({
       tabs: this.tabs,
       workspaceRootPath: this.explorer.rootPath,
       onShowToast: (msg) => this.showToast(msg),
+      onSaveBundle: async (bundleText) => {
+        try {
+          const res = await backend.saveFileDialog(
+            bundleText,
+            'ai-context.md',
+            this.explorer.rootPath,
+            this.activeTab?.lineEnding ?? 'LF',
+            getLanguage(),
+          );
+          if (res.saved && res.path) {
+            this.showToast(
+              t('toast.aiBundleSaved', { name: res.name ?? baseNameOfPath(res.path) }),
+            );
+          }
+        } catch (err) {
+          console.error('KI-Kontext-Bündel konnte nicht gespeichert werden:', err);
+          this.showToast(t('toast.saveFailed'));
+        }
+      },
+    });
+  }
+
+  private openPromptVariablesDialog(): void {
+    const tab = this.activeTab;
+    if (!tab) return;
+    const vars = extractTemplateVariables(tab.currentContent);
+    if (vars.length === 0) {
+      this.showToast(t('toast.noTemplateVars'));
+      return;
+    }
+    void openPromptVariablesDialogModal({
+      title: tab.name,
+      content: tab.currentContent,
+      onCopy: async (rendered) => {
+        try {
+          await navigator.clipboard.writeText(rendered);
+          this.showToast(t('toast.copyAiWithName', { name: tab.name }));
+        } catch {
+          this.showToast(t('toast.copyFailed'));
+        }
+      },
     });
   }
 
@@ -2462,6 +3023,21 @@ class SemyraApp {
       void this.documentExport.exportHtml();
     });
 
+    document.getElementById('btn-share-html-light')?.addEventListener('click', () => {
+      closeShareMenu();
+      void this.documentExport.exportHtml('light');
+    });
+
+    document.getElementById('btn-share-html-dark')?.addEventListener('click', () => {
+      closeShareMenu();
+      void this.documentExport.exportHtml('dark');
+    });
+
+    document.getElementById('btn-share-fill-prompt-vars')?.addEventListener('click', () => {
+      closeShareMenu();
+      this.openPromptVariablesDialog();
+    });
+
     document.getElementById('btn-share-export-pdf')?.addEventListener('click', () => {
       closeShareMenu();
       void this.documentExport.exportPdf();
@@ -2541,16 +3117,22 @@ class SemyraApp {
             this.showToast(t('toast.copyPath'));
           }
           break;
+        case 'copy-at-path':
+          await this.copyAtPath(tab);
+          break;
         case 'copy-markdown':
           await navigator.clipboard.writeText(tab.currentContent).catch(() => {});
           this.showToast(isMarkdownPath(tab.name) ? t('toast.copyMarkdown') : t('toast.copySource'));
           break;
-        case 'copy-ai-context': {
-          const payload = formatAiContextEntry(tab.name, tab.currentContent);
-          await navigator.clipboard.writeText(payload).catch(() => {});
-          this.showToast(t('toast.copyAiWithName', { name: tab.name }));
+        case 'copy-ai-context':
+          await this.copyTabAiContext(tab);
           break;
-        }
+        case 'diff-saved':
+          await this.openDiffWithSavedDialog(tab);
+          break;
+        case 'compare-tabs':
+          this.openCompareOpenTabsDialog(tab);
+          break;
       }
     });
 
@@ -2756,6 +3338,8 @@ class SemyraApp {
       const fmt = btn.dataset.fmt as FormatAction;
       if (fmt === 'align-table') {
         this.alignActiveMarkdownTables();
+      } else if (fmt === 'codeblock' || fmt === 'alert') {
+        this.openFormatOptionPopover(btn, fmt);
       } else {
         this.editor.applyFormat(fmt);
       }
@@ -2979,10 +3563,111 @@ class SemyraApp {
       }
     });
 
+    // Split-Preview double-click to source line
+    this.previewContentEl.addEventListener('dblclick', (e) => {
+      if (this.appEl.getAttribute('data-view') !== 'split') return;
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest('button, a[href], input, .mermaid-wrapper')) return;
+      const lineEl = target.closest<HTMLElement>('[data-line]');
+      if (!lineEl) return;
+      const lineNum = Number.parseInt(lineEl.dataset.line ?? '', 10);
+      if (!Number.isFinite(lineNum) || lineNum < 1) return;
+      this.syncScroll.lockScrollForNavigation('editor', 500);
+      this.editor.jumpToLine(lineNum);
+    });
+
     // Status bar interactive buttons
     this.statusPathBtn.addEventListener('click', () => {
       const p = this.activeTab?.path ?? this.explorer.rootPath;
       if (p) void backend.revealInExplorer(p);
+    });
+
+    this.statusCursorEl.addEventListener('click', () => {
+      this.openGoToLineDialog();
+    });
+
+    // Go-to-Line native <dialog>
+    const gotoDialog = document.getElementById('goto-line-dialog') as HTMLDialogElement | null;
+    const gotoForm = document.getElementById('goto-line-form') as HTMLFormElement | null;
+    const gotoInput = document.getElementById('goto-line-input') as HTMLInputElement | null;
+    if (gotoDialog && gotoForm && gotoInput) {
+      gotoInput.addEventListener('input', () => {
+        gotoInput.setCustomValidity('');
+      });
+      gotoDialog.addEventListener('close', () => {
+        const val = gotoDialog.returnValue;
+        gotoDialog.returnValue = '';
+        if (val !== 'confirm') {
+          const returnEl = this.gotoLineReturnFocusEl;
+          this.gotoLineReturnFocusEl = null;
+          if (returnEl && returnEl.isConnected) {
+            returnEl.focus();
+          } else if (this.appEl.getAttribute('data-view') === 'preview') {
+            if (!this.previewContentEl.hasAttribute('tabindex')) {
+              this.previewContentEl.tabIndex = -1;
+            }
+            this.previewContentEl.focus({ preventScroll: true });
+          } else {
+            this.editor.view.focus();
+          }
+          return;
+        }
+        this.gotoLineReturnFocusEl = null;
+        const match = /^\s*(\d+)(?::(\d+))?\s*$/.exec(gotoInput.value);
+        if (!match) return;
+        const requestedLine = Number.parseInt(match[1], 10);
+        const requestedCol = match[2] ? Number.parseInt(match[2], 10) : 1;
+        if (this.appEl.getAttribute('data-view') === 'preview') {
+          this.setViewMode('split');
+        }
+        const totalLines = this.editor.view.state.doc.lines;
+        const clampedLine = Math.max(1, Math.min(totalLines, requestedLine));
+        this.syncScroll.lockScrollForNavigation('editor', 500);
+        this.editor.jumpToLine(clampedLine);
+        if (requestedCol > 1) {
+          const lineObj = this.editor.view.state.doc.line(clampedLine);
+          const offset = Math.min(requestedCol - 1, lineObj.length);
+          this.editor.view.dispatch({
+            selection: { anchor: lineObj.from + offset },
+            scrollIntoView: true,
+          });
+        }
+        this.editor.view.focus();
+      });
+      gotoForm.addEventListener('submit', (e) => {
+        const submitter = (e as SubmitEvent).submitter as HTMLButtonElement | null;
+        if (submitter?.value === 'cancel') return;
+        if (!/^\s*(\d+)(?::(\d+))?\s*$/.test(gotoInput.value)) {
+          e.preventDefault();
+          gotoInput.setCustomValidity(t('gotoLine.invalid'));
+          gotoInput.reportValidity();
+        }
+      });
+    }
+
+    // Inline Preview Find-in-Page bar
+    this.previewFindInputEl.addEventListener('input', () => {
+      this.updatePreviewFindMatches(true);
+    });
+    this.previewFindInputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this.stepPreviewFind(e.shiftKey ? -1 : 1);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        this.closePreviewFind();
+      }
+    });
+    document.getElementById('preview-find-prev')?.addEventListener('click', () => {
+      this.stepPreviewFind(-1);
+    });
+    document.getElementById('preview-find-next')?.addEventListener('click', () => {
+      this.stepPreviewFind(1);
+    });
+    document.getElementById('preview-find-close')?.addEventListener('click', () => {
+      this.closePreviewFind();
     });
 
     this.statusZoomBtn.addEventListener('click', () => {
@@ -3036,8 +3721,14 @@ class SemyraApp {
         };
 
         if (e.key === 'Escape' && !mod && !e.altKey && !e.shiftKey) {
+          if (!this.previewFindBarEl.hidden) {
+            consume();
+            this.closePreviewFind();
+            return;
+          }
           const hasOpenPopover = !!document.querySelector(':popover-open');
-          if (this.appEl.classList.contains('is-zen') && !hasOpenPopover) {
+          const hasOpenCmSearch = !!document.querySelector('.cm-search');
+          if (this.appEl.classList.contains('is-zen') && !hasOpenPopover && !hasOpenCmSearch) {
             consume();
             void this.toggleZen(false);
             return;
@@ -3053,9 +3744,16 @@ class SemyraApp {
         } else if (mod && !e.altKey && e.shiftKey && key === 'p') {
           consume();
           this.palette.open('commands');
+        } else if (mod && !e.altKey && !e.shiftKey && key === 'g') {
+          consume();
+          this.openGoToLineDialog();
         } else if (mod && !e.altKey && !e.shiftKey && key === 'f') {
           consume();
-          this.openEditorSearchPanel();
+          if (this.appEl.getAttribute('data-view') === 'preview') {
+            this.openPreviewFind();
+          } else {
+            this.openEditorSearchPanel();
+          }
         } else if (mod && !e.altKey && !e.shiftKey && key === 'h') {
           consume();
           this.openEditorReplacePanel();
@@ -3127,6 +3825,12 @@ class SemyraApp {
         } else if (mod && !e.altKey && e.key === '0') {
           consume();
           this.setZoomPercent(100);
+        } else if (e.altKey && !mod && !e.shiftKey && e.key === 'ArrowLeft') {
+          consume();
+          void this.navigateHistory(-1);
+        } else if (e.altKey && !mod && !e.shiftKey && e.key === 'ArrowRight') {
+          consume();
+          void this.navigateHistory(1);
         } else if (e.altKey && !mod && !e.shiftKey && key === 'z') {
           consume();
           this.toggleWordWrap();
@@ -3169,6 +3873,340 @@ class SemyraApp {
     );
   }
 
+  private recordNavigationHistory(tabId: string, path: string | null): void {
+    const current = this.navHistory[this.navHistoryIndex];
+    if (current && current.tabId === tabId && current.path === path) return;
+    if (this.navHistoryIndex < this.navHistory.length - 1) {
+      this.navHistory = this.navHistory.slice(0, this.navHistoryIndex + 1);
+    }
+    this.navHistory.push({ tabId, path });
+    if (this.navHistory.length > 100) {
+      this.navHistory.shift();
+    }
+    this.navHistoryIndex = this.navHistory.length - 1;
+  }
+
+  private async navigateHistory(delta: -1 | 1): Promise<void> {
+    const navSeq = ++this.navHistorySeq;
+    let idx = this.navHistoryIndex + delta;
+    while (idx >= 0 && idx < this.navHistory.length) {
+      if (navSeq !== this.navHistorySeq) return;
+      const entry = this.navHistory[idx];
+      const existing = this.tabs.find((t) => t.id === entry.tabId);
+      if (existing) {
+        this.navHistoryIndex = idx;
+        this.navigatingHistoryDepth++;
+        try {
+          this.activateTab(existing.id);
+        } finally {
+          this.navigatingHistoryDepth--;
+        }
+        return;
+      }
+      if (entry.path) {
+        this.navigatingHistoryDepth++;
+        let opened = false;
+        try {
+          opened = await this.openFileByPath(entry.path);
+        } finally {
+          this.navigatingHistoryDepth--;
+        }
+        if (navSeq !== this.navHistorySeq) return;
+        if (opened) {
+          this.navHistoryIndex = idx;
+          if (this.activeTab) {
+            entry.tabId = this.activeTab.id;
+          }
+          return;
+        }
+      }
+      idx += delta;
+    }
+  }
+
+  private openFormatOptionPopover(
+    anchorBtn: HTMLButtonElement,
+    fmt: 'codeblock' | 'alert',
+  ): void {
+    const syncExpandedFalse = () => {
+      for (const btn of document.querySelectorAll<HTMLButtonElement>(
+        '[data-fmt="alert"], [data-fmt="codeblock"]',
+      )) {
+        btn.setAttribute('aria-expanded', 'false');
+      }
+    };
+
+    const existing = document.getElementById('format-option-popover');
+    if (existing) {
+      const wasSameTrigger = existing.dataset.triggerFmt === fmt && existing.matches(':popover-open');
+      try {
+        existing.hidePopover?.();
+      } catch {
+        /* ignore */
+      }
+      existing.remove();
+      syncExpandedFalse();
+      if (wasSameTrigger) {
+        return;
+      }
+    }
+
+    const popover = document.createElement('div');
+    popover.id = 'format-option-popover';
+    popover.className = 'context-popover';
+    popover.setAttribute('popover', 'auto');
+    popover.setAttribute('role', 'menu');
+    popover.setAttribute('focusgroup', 'menu');
+    popover.dataset.triggerFmt = fmt;
+    popover.setAttribute(
+      'aria-label',
+      fmt === 'codeblock' ? t('format.codeblockPicker') : t('format.alertPicker'),
+    );
+
+    const titleEl = document.createElement('div');
+    titleEl.className = 'context-popover-title';
+    titleEl.textContent =
+      fmt === 'codeblock' ? t('format.codeblockPicker') : t('format.alertPicker');
+    popover.append(titleEl);
+
+    const options = fmt === 'codeblock' ? CODEBLOCK_LANGUAGES : GITHUB_ALERT_TYPES;
+    const buttons: HTMLButtonElement[] = [];
+
+    const closePopover = (restoreAnchorFocus = false) => {
+      try {
+        popover.hidePopover?.();
+      } catch {
+        /* ignore */
+      }
+      popover.remove();
+      anchorBtn.setAttribute('aria-expanded', 'false');
+      if (restoreAnchorFocus) anchorBtn.focus();
+    };
+
+    for (const opt of options) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'menu-item';
+      item.setAttribute('role', 'menuitem');
+      item.tabIndex = buttons.length === 0 ? 0 : -1;
+
+      const labelSpan = document.createElement('span');
+      labelSpan.className = 'menu-item-text';
+      labelSpan.textContent = fmt === 'alert' ? `[!${opt}]` : opt;
+      item.append(labelSpan);
+
+      item.addEventListener('click', () => {
+        closePopover(false);
+        this.editor.applyFormat(fmt, opt);
+      });
+
+      buttons.push(item);
+      popover.append(item);
+    }
+
+    popover.addEventListener('keydown', (e) => {
+      const idx = buttons.indexOf(document.activeElement as HTMLButtonElement);
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const next = buttons[(idx + 1) % buttons.length];
+        buttons.forEach((b) => (b.tabIndex = -1));
+        next.tabIndex = 0;
+        next.focus();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        const prev = buttons[(idx - 1 + buttons.length) % buttons.length];
+        buttons.forEach((b) => (b.tabIndex = -1));
+        prev.tabIndex = 0;
+        prev.focus();
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        buttons.forEach((b) => (b.tabIndex = -1));
+        buttons[0].tabIndex = 0;
+        buttons[0].focus();
+      } else if (e.key === 'End') {
+        e.preventDefault();
+        buttons.forEach((b) => (b.tabIndex = -1));
+        buttons[buttons.length - 1].tabIndex = 0;
+        buttons[buttons.length - 1].focus();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        closePopover(true);
+      }
+    });
+
+    popover.addEventListener('toggle', (e) => {
+      if ((e as ToggleEvent).newState === 'closed') {
+        anchorBtn.setAttribute('aria-expanded', 'false');
+        popover.remove();
+      }
+    });
+
+    document.body.append(popover);
+    const anchorRect = anchorBtn.getBoundingClientRect();
+    popover.style.left = `${anchorRect.left}px`;
+    popover.style.top = `${anchorRect.bottom + 4}px`;
+    anchorBtn.setAttribute('aria-expanded', 'true');
+
+    try {
+      popover.showPopover?.();
+    } catch {
+      popover.style.display = 'block';
+    }
+
+    const popRect = popover.getBoundingClientRect();
+    const clampedLeft = Math.max(8, Math.min(anchorRect.left, window.innerWidth - popRect.width - 8));
+    let clampedTop = anchorRect.bottom + 4;
+    if (clampedTop + popRect.height > window.innerHeight - 8) {
+      const aboveTop = anchorRect.top - popRect.height - 4;
+      clampedTop = aboveTop >= 8 ? aboveTop : Math.max(8, window.innerHeight - popRect.height - 8);
+    }
+    popover.style.left = `${clampedLeft}px`;
+    popover.style.top = `${clampedTop}px`;
+    buttons[0]?.focus();
+  }
+
+  private openGoToLineDialog(): void {
+    const dialog = document.getElementById('goto-line-dialog') as HTMLDialogElement | null;
+    const input = document.getElementById('goto-line-input') as HTMLInputElement | null;
+    if (!dialog || !input || dialog.open) return;
+    this.gotoLineReturnFocusEl =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const head = this.editor.view.state.selection.main.head;
+    const lineNum = this.editor.view.state.doc.lineAt(head).number;
+    input.setCustomValidity('');
+    input.value = String(lineNum);
+    dialog.showModal();
+    input.focus();
+    input.select();
+  }
+
+  private openPreviewFind(): void {
+    this.previewFindBarEl.hidden = false;
+    this.previewFindInputEl.focus();
+    this.previewFindInputEl.select();
+    if (this.previewFindInputEl.value) {
+      this.updatePreviewFindMatches(false);
+    } else {
+      this.previewFindCountEl.textContent = '0/0';
+    }
+  }
+
+  private closePreviewFind(restoreFocus = true): void {
+    const wasOpen = !this.previewFindBarEl.hidden;
+    this.previewFindBarEl.hidden = true;
+    this.clearPreviewFindHighlights();
+    this.previewFindCountEl.textContent = '0/0';
+    if (!restoreFocus || !wasOpen) return;
+    if (this.appEl.getAttribute('data-view') === 'preview') {
+      if (!this.previewContentEl.hasAttribute('tabindex')) {
+        this.previewContentEl.tabIndex = -1;
+      }
+      this.previewContentEl.focus({ preventScroll: true });
+    } else {
+      this.editor.view.focus();
+    }
+  }
+
+  private clearPreviewFindHighlights(): void {
+    const marks = this.previewContentEl.querySelectorAll<HTMLElement>('mark.preview-find-match');
+    const parents = new Set<Node>();
+    for (const mark of marks) {
+      const parent = mark.parentNode;
+      if (!parent) continue;
+      parents.add(parent);
+      const text = document.createTextNode(mark.textContent ?? '');
+      parent.replaceChild(text, mark);
+    }
+    for (const parent of parents) {
+      parent.normalize();
+    }
+    this.previewFindMatches = [];
+    this.previewFindActiveIdx = -1;
+  }
+
+  private updatePreviewFindMatches(scrollToFirst: boolean): void {
+    this.clearPreviewFindHighlights();
+    const query = this.previewFindInputEl.value;
+    if (!query) {
+      this.previewFindCountEl.textContent = '0/0';
+      return;
+    }
+    const lowerQuery = query.toLowerCase();
+    const walker = document.createTreeWalker(this.previewContentEl, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => {
+        const parent = node.parentElement;
+        if (!parent) return NodeFilter.FILTER_REJECT;
+        if (parent.closest('script, style, .katex-mathml, .mermaid, svg')) return NodeFilter.FILTER_REJECT;
+        return node.nodeValue && node.nodeValue.length > 0
+          ? NodeFilter.FILTER_ACCEPT
+          : NodeFilter.FILTER_SKIP;
+      },
+    });
+    const textNodes: Text[] = [];
+    let current = walker.nextNode();
+    while (current) {
+      textNodes.push(current as Text);
+      current = walker.nextNode();
+    }
+
+    const matches: HTMLElement[] = [];
+    for (const textNode of textNodes) {
+      const text = textNode.nodeValue ?? '';
+      const lowerText = text.toLowerCase();
+      let startIdx = 0;
+      let idx = lowerText.indexOf(lowerQuery, startIdx);
+      if (idx === -1) continue;
+
+      const frag = document.createDocumentFragment();
+      while (idx !== -1) {
+        if (idx > startIdx) {
+          frag.appendChild(document.createTextNode(text.slice(startIdx, idx)));
+        }
+        const mark = document.createElement('mark');
+        mark.className = 'preview-find-match';
+        mark.textContent = text.slice(idx, idx + query.length);
+        frag.appendChild(mark);
+        matches.push(mark);
+        startIdx = idx + query.length;
+        idx = lowerText.indexOf(lowerQuery, startIdx);
+      }
+      if (startIdx < text.length) {
+        frag.appendChild(document.createTextNode(text.slice(startIdx)));
+      }
+      textNode.parentNode?.replaceChild(frag, textNode);
+    }
+
+    this.previewFindMatches = matches;
+    if (matches.length === 0) {
+      this.previewFindActiveIdx = -1;
+      this.previewFindCountEl.textContent = '0/0';
+      return;
+    }
+    this.previewFindActiveIdx = 0;
+    this.activatePreviewFindMatch(0, scrollToFirst);
+  }
+
+  private stepPreviewFind(delta: -1 | 1): void {
+    const count = this.previewFindMatches.length;
+    if (count === 0) return;
+    const nextIdx = (this.previewFindActiveIdx + delta + count) % count;
+    this.activatePreviewFindMatch(nextIdx, true);
+  }
+
+  private activatePreviewFindMatch(index: number, scrollIntoView: boolean): void {
+    for (const m of this.previewFindMatches) {
+      m.classList.remove('is-current');
+    }
+    const target = this.previewFindMatches[index];
+    if (!target) return;
+    this.previewFindActiveIdx = index;
+    target.classList.add('is-current');
+    this.previewFindCountEl.textContent = `${index + 1}/${this.previewFindMatches.length}`;
+    if (scrollIntoView) {
+      target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }
+
   private bindBackendEvents(): void {
     onBackendEvent('drag-enter', () => {
       this.dropOverlayEl.hidden = false;
@@ -3200,6 +4238,7 @@ class SemyraApp {
         .map((tab) => this.syncTabFromDisk(tab)));
 
       if (this.explorer.hasWorkspace) {
+        this.invalidateLintWorkspaceCache();
         this.explorer.scheduleRefresh();
       }
     });

@@ -4,7 +4,7 @@ import { getLanguage } from './i18n';
 
 const SAFE_ELEMENTS = [
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-  'p', 'br', 'hr', 'div', 'span', 'blockquote',
+  'p', 'br', 'hr', 'div', 'span', 'section', 'blockquote',
   'ul', 'ol', 'li', 'dl', 'dt', 'dd',
   'strong', 'b', 'em', 'i', 'del', 's', 'u', 'mark', 'sub', 'sup', 'small', 'kbd',
   'code', 'pre',
@@ -18,6 +18,7 @@ const SAFE_ATTRIBUTES = [
   'type', 'checked', 'disabled', 'start', 'scope', 'colspan', 'rowspan', 'open',
   'tabindex', 'role', 'aria-label', 'aria-labelledby',
   'data-line', 'data-task-line', 'data-math', 'data-mermaid', 'data-lang',
+  'data-prompt-tag',
   'data-i18n', 'data-i18n-title', 'data-i18n-aria',
 ];
 
@@ -110,7 +111,9 @@ function isDarkColorSchemeActive(): boolean {
     ?.getAttribute('content');
   if (metaContent === 'dark') return true;
   if (metaContent === 'light') return false;
-  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  return typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-color-scheme: dark)').matches
+    : false;
 }
 
 /**
@@ -174,7 +177,7 @@ export async function safeSetMarkdownHTML(
   }
 
   // Lazy-load and cache Mermaid diagrams offscreen before reconciling into live DOM
-  const mermaidNodes = staging.querySelectorAll<HTMLElement>('.mermaid-wrapper[data-mermaid]');
+  const mermaidNodes = staging.querySelectorAll<HTMLElement>('.mermaid-wrapper');
   if (mermaidNodes.length > 0) {
     await renderMermaidBlocksCached(mermaidNodes, Boolean(options?.forceLightTheme));
   }
@@ -204,6 +207,65 @@ function wrapMermaidHtml(svg: string): string {
   return `<div class="mermaid-actions"><button type="button" class="mermaid-action-btn copy-mermaid-btn" title="${copyTitle}" aria-label="${copyLabel}">${copyLabel}</button><button type="button" class="mermaid-action-btn zoom-mermaid-btn" title="${zoomTitle}" aria-label="${zoomLabel}">${zoomLabel}</button></div>${svg}`;
 }
 
+function formatMermaidErrorMessage(error: unknown): string {
+  const raw =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : '';
+  const firstLine =
+    raw
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line.length > 0) ?? '';
+  if (!firstLine) {
+    return getLanguage() === 'en'
+      ? 'Unable to render Mermaid diagram.'
+      : 'Mermaid-Diagramm konnte nicht gerendert werden.';
+  }
+  return firstLine.length > 220 ? `${firstLine.slice(0, 217)}…` : firstLine;
+}
+
+function renderMermaidErrorFallback(
+  wrapper: HTMLElement,
+  definition: string,
+  error: unknown,
+): void {
+  wrapper.classList.add('has-mermaid-error');
+
+  let sourcePre = wrapper.querySelector<HTMLPreElement>('pre.mermaid-source');
+  if (!sourcePre) {
+    sourcePre = document.createElement('pre');
+    sourcePre.className = 'mermaid-source';
+    const code = document.createElement('code');
+    code.textContent = definition;
+    sourcePre.appendChild(code);
+  }
+
+  const hint = document.createElement('div');
+  hint.className = 'mermaid-error-hint';
+  hint.setAttribute('role', 'status');
+
+  const title = document.createElement('span');
+  title.className = 'mermaid-error-title';
+  title.textContent =
+    getLanguage() === 'en' ? 'Mermaid syntax notice' : 'Mermaid-Syntaxhinweis';
+
+  const message = document.createElement('span');
+  message.className = 'mermaid-error-message';
+  message.textContent = formatMermaidErrorMessage(error);
+
+  hint.append(title, message);
+  wrapper.replaceChildren(hint, sourcePre);
+}
+
+function getMermaidDefinition(wrapper: HTMLElement): string {
+  const attr = wrapper.getAttribute('data-mermaid');
+  if (attr && attr.trim()) return attr.trim();
+  return (wrapper.querySelector('pre.mermaid-source code')?.textContent ?? '').trim();
+}
+
 async function renderMermaidBlocksCached(
   nodes: NodeListOf<HTMLElement>,
   forceLightTheme = false,
@@ -214,10 +276,11 @@ async function renderMermaidBlocksCached(
   // Fast-path: check if every Mermaid diagram in this document is already cached
   let hasUncached = false;
   for (const wrapper of nodes) {
-    const def = (wrapper.getAttribute('data-mermaid') ?? '').trim();
+    const def = getMermaidDefinition(wrapper);
     if (!def) continue;
     const cachedSvg = mermaidCache.get(`${theme}::${def}`);
     if (cachedSvg !== undefined) {
+      wrapper.classList.remove('has-mermaid-error');
       wrapper.innerHTML = forceLightTheme ? cachedSvg : wrapMermaidHtml(cachedSvg);
     } else {
       hasUncached = true;
@@ -231,11 +294,12 @@ async function renderMermaidBlocksCached(
     const mermaid = await mermaidModulePromise;
 
     for (const wrapper of nodes) {
-      const definition = (wrapper.getAttribute('data-mermaid') ?? '').trim();
+      const definition = getMermaidDefinition(wrapper);
       if (!definition) continue;
       const cacheKey = `${theme}::${definition}`;
       const existing = mermaidCache.get(cacheKey);
       if (existing !== undefined) {
+        wrapper.classList.remove('has-mermaid-error');
         wrapper.innerHTML = forceLightTheme ? existing : wrapMermaidHtml(existing);
         continue;
       }
@@ -248,15 +312,23 @@ async function renderMermaidBlocksCached(
           if (oldest !== undefined) mermaidCache.delete(oldest);
         }
         mermaidCache.set(cacheKey, svg);
+        wrapper.classList.remove('has-mermaid-error');
         wrapper.innerHTML = forceLightTheme ? svg : wrapMermaidHtml(svg);
-      } catch {
+      } catch (err) {
         // Clean up any orphaned temporary error element Mermaid might have appended
         document.getElementById(`d${id}`)?.remove();
         document.getElementById(id)?.remove();
+        renderMermaidErrorFallback(wrapper, definition, err);
       }
     }
-  } catch {
-    // Keep readable fallback code block
+  } catch (err) {
+    for (const wrapper of nodes) {
+      const definition = getMermaidDefinition(wrapper);
+      if (!definition) continue;
+      if (!wrapper.querySelector('svg') && !wrapper.querySelector('.mermaid-error-hint')) {
+        renderMermaidErrorFallback(wrapper, definition, err);
+      }
+    }
   }
 }
 
@@ -336,13 +408,16 @@ function reconcileChildren(container: HTMLElement, staging: HTMLElement): void {
           continue;
         }
 
-        // Recurse into compound block wrappers (lists, blockquotes, alerts, tables)
+        // Recurse into compound block wrappers (lists, blockquotes, alerts, tables, frontmatter, prompt tags)
         if (
           curEl.tagName === 'UL' ||
           curEl.tagName === 'OL' ||
           curEl.tagName === 'BLOCKQUOTE' ||
           curEl.classList.contains('gfm-alert') ||
-          curEl.classList.contains('table-wrapper')
+          curEl.classList.contains('table-wrapper') ||
+          curEl.classList.contains('frontmatter-card') ||
+          curEl.classList.contains('prompt-tag-block') ||
+          curEl.classList.contains('prompt-tag-body')
         ) {
           syncElementAttributes(curEl, nextEl);
           reconcileChildren(curEl, nextEl);

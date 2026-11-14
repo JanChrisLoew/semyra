@@ -7,6 +7,72 @@ export interface DiffLine {
   diskLine: number | null;
 }
 
+export interface DiffLineItem {
+  kind: 'line';
+  line: DiffLine;
+  index: number;
+}
+
+export interface CollapsedDiffPlaceholder {
+  kind: 'collapsed';
+  startIdx: number;
+  endIdx: number;
+  count: number;
+}
+
+export type CollapsedDiffItem = DiffLineItem | CollapsedDiffPlaceholder;
+
+/**
+ * Collapses long runs of unchanged `context` lines into expandable
+ * `{ kind: 'collapsed', startIdx, endIdx, count }` placeholders while keeping
+ * `added`/`removed` hunks and `contextLines` surrounding lines visible.
+ */
+export function buildCollapsedDiffItems(
+  lines: DiffLine[],
+  contextLines = 3
+): CollapsedDiffItem[] {
+  if (lines.length === 0) return [];
+
+  const ctx = Math.max(0, Math.floor(contextLines));
+  const visible = new Uint8Array(lines.length);
+
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].kind !== 'context') {
+      const from = Math.max(0, i - ctx);
+      const to = Math.min(lines.length - 1, i + ctx);
+      for (let j = from; j <= to; j++) {
+        visible[j] = 1;
+      }
+    }
+  }
+
+  const items: CollapsedDiffItem[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (visible[i] === 1) {
+      items.push({ kind: 'line', line: lines[i], index: i });
+      i++;
+      continue;
+    }
+
+    const startIdx = i;
+    while (i < lines.length && visible[i] === 0) {
+      i++;
+    }
+    const endIdx = i - 1;
+    const count = endIdx - startIdx + 1;
+
+    // Avoid replacing a single line with a 1-line placeholder button.
+    if (count === 1) {
+      items.push({ kind: 'line', line: lines[startIdx], index: startIdx });
+    } else {
+      items.push({ kind: 'collapsed', startIdx, endIdx, count });
+    }
+  }
+
+  return items;
+}
+
 /**
  * Computes a compact line-by-line diff between local editor content and disk content.
  * Falls back to a coarse prefix/suffix diff for very large files to stay O(1) responsive.

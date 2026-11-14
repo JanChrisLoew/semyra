@@ -7,7 +7,9 @@ pub mod workspace;
 pub use assets::{import_dropped_image, save_clipboard_image};
 pub use encoding::{read_text_file, write_text_file};
 pub use html_export::{build_standalone_html_document, inline_local_asset_images};
-pub use search::{replace_in_workspace_files, search_workspace_files};
+#[cfg(test)]
+pub use search::search_workspace_files;
+pub use search::{replace_in_workspace_with_options, search_workspace_with_options};
 pub use workspace::{
     build_directory_tree, create_ai_skill, create_new_folder, create_new_markdown_file,
     ensure_ai_library_tree, list_workspace_markdown_files, move_to_recycle_bin, rename_fs_entry,
@@ -28,6 +30,28 @@ pub(crate) const IGNORED_DIRS: &[&str] = &[
     "__pycache__",
     ".next",
 ];
+
+pub(crate) const ALLOWED_DOT_DIRS: &[&str] = &[".github", ".agents"];
+
+pub(crate) const ALLOWED_DOT_FILES: &[&str] = &[
+    ".cursorrules",
+    ".gitignore",
+    ".gitattributes",
+    ".editorconfig",
+    ".prettierignore",
+];
+
+/// Returns `true` if `name` is either not a dot-entry or is in the unified allowlist
+/// (`.github`, `.agents`, `.cursorrules`, `.env*`, `.gitignore`, `.gitattributes`, `.editorconfig`, `.prettierignore`).
+pub(crate) fn is_allowed_dot_entry(name: &str) -> bool {
+    if !name.starts_with('.') {
+        return true;
+    }
+    let lower = name.to_ascii_lowercase();
+    lower.starts_with(".env")
+        || ALLOWED_DOT_DIRS.contains(&lower.as_str())
+        || ALLOWED_DOT_FILES.contains(&lower.as_str())
+}
 
 /// Strips the `\\?\` verbatim prefix produced by `fs::canonicalize` on Windows.
 pub fn clean_windows_path(path: &Path) -> PathBuf {
@@ -76,11 +100,9 @@ pub fn is_supported_text_path(path: &Path) -> bool {
         .map(|s| s.to_ascii_lowercase())
         .unwrap_or_default();
     if file_name.starts_with(".env")
-        || file_name == ".gitignore"
-        || file_name == ".editorconfig"
+        || ALLOWED_DOT_FILES.contains(&file_name.as_str())
         || file_name == "dockerfile"
         || file_name == "license"
-        || file_name == ".cursorrules"
     {
         return true;
     }

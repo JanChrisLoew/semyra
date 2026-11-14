@@ -121,3 +121,136 @@ export function calculateDetailedStats(
     tokensEstimate,
   };
 }
+
+export interface HeadingTokenCount {
+  /** 1-based line number of the heading. */
+  line: number;
+  /** Heading level (1-6). */
+  level: number;
+  /** Cleaned heading text without `#` markers. */
+  text: string;
+  /** Estimated LLM tokens for this section up to the next heading of same/higher level or EOF. */
+  tokens: number;
+}
+
+export interface MarkdownSection {
+  /** Cleaned heading text without `#` markers. */
+  heading: string;
+  /** Extracted Markdown section starting at the heading line through the end of the section. */
+  content: string;
+}
+
+interface ParsedHeading {
+  line: number;
+  level: number;
+  text: string;
+}
+
+function parseMarkdownHeadings(lines: string[]): ParsedHeading[] {
+  let startIdx = 0;
+  if (lines.length >= 2 && /^(?:\uFEFF)?---[ \t]*$/.test(lines[0])) {
+    for (let j = 1; j < lines.length; j++) {
+      if (/^---[ \t]*$/.test(lines[j])) {
+        startIdx = j + 1;
+        break;
+      }
+    }
+  }
+
+  const headings: ParsedHeading[] = [];
+  let inFence = false;
+  let fenceChar = '';
+  let fenceLen = 0;
+
+  for (let i = startIdx; i < lines.length; i++) {
+    const line = lines[i];
+    if (!inFence) {
+      const openMatch = line.match(/^[ ]{0,3}(`{3,}|~{3,})(.*)$/);
+      if (openMatch && !(openMatch[1][0] === '`' && openMatch[2].includes('`'))) {
+        inFence = true;
+        fenceChar = openMatch[1][0];
+        fenceLen = openMatch[1].length;
+        continue;
+      }
+
+      const headingMatch = line.match(/^[ ]{0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/);
+      if (headingMatch) {
+        const rawText = headingMatch[2] ?? '';
+        const text = rawText.replace(/(?:^|[ \t]+)#+[ \t]*$/, '').trim();
+        headings.push({
+          line: i + 1,
+          level: headingMatch[1].length,
+          text,
+        });
+      }
+    } else {
+      const closeMatch = line.match(/^[ ]{0,3}(`{3,}|~{3,})[ \t]*$/);
+      if (closeMatch && closeMatch[1][0] === fenceChar && closeMatch[1].length >= fenceLen) {
+        inFence = false;
+        fenceChar = '';
+        fenceLen = 0;
+      }
+    }
+  }
+
+  return headings;
+}
+
+function findSectionEndIndex(
+  headings: ParsedHeading[],
+  headingIdx: number,
+  totalLines: number,
+): number {
+  const currentLevel = headings[headingIdx].level;
+  for (let m = headingIdx + 1; m < headings.length; m++) {
+    if (headings[m].level <= currentLevel) {
+      return headings[m].line - 1;
+    }
+  }
+  return totalLines;
+}
+
+/**
+ * Computes estimated LLM token counts for each Markdown heading's section
+ * (running up to the next heading of the same or higher level, or EOF).
+ */
+export function computeHeadingTokenCounts(content: string): HeadingTokenCount[] {
+  if (!content) return [];
+  const lines = content.split(/\r?\n/);
+  const headings = parseMarkdownHeadings(lines);
+
+  return headings.map((h, idx) => {
+    const endIdx = findSectionEndIndex(headings, idx, lines.length);
+    const sectionText = lines.slice(h.line - 1, endIdx).join('\n');
+    return {
+      line: h.line,
+      level: h.level,
+      text: h.text,
+      tokens: estimateTokens(sectionText),
+    };
+  });
+}
+
+/**
+ * Extracts a single Markdown section starting at the given 1-based `headingLine`
+ * up to the next heading of the same or higher level, or EOF.
+ */
+export function extractMarkdownSection(
+  content: string,
+  headingLine: number,
+): MarkdownSection | null {
+  if (!content || headingLine < 1) return null;
+  const lines = content.split(/\r?\n/);
+  const headings = parseMarkdownHeadings(lines);
+  const idx = headings.findIndex((h) => h.line === headingLine);
+  if (idx === -1) return null;
+
+  const target = headings[idx];
+  const endIdx = findSectionEndIndex(headings, idx, lines.length);
+  const sectionContent = lines.slice(target.line - 1, endIdx).join('\n').trimEnd();
+
+  return {
+    heading: target.text,
+    content: sectionContent,
+  };
+}

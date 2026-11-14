@@ -63,8 +63,19 @@ pub fn decode_text_bytes(bytes: &[u8]) -> (String, &'static str) {
     (decoded, "Windows-1252")
 }
 
+pub const MAX_TEXT_FILE_BYTES: u64 = 25 * 1024 * 1024;
+
 pub fn read_text_file(path: &Path) -> Result<FilePayload, String> {
     let norm = normalize_existing_path(path);
+    let meta = fs::metadata(&norm)
+        .map_err(|e| format!("Datei konnte nicht gelesen werden: {e}"))?;
+    if meta.len() > MAX_TEXT_FILE_BYTES {
+        let size_mb = meta.len() as f64 / (1024.0 * 1024.0);
+        let limit_mb = MAX_TEXT_FILE_BYTES / (1024 * 1024);
+        return Err(format!(
+            "Datei ist zu groß ({size_mb:.1} MB). Maximal erlaubte Dateigröße: {limit_mb} MB."
+        ));
+    }
     let bytes = fs::read(&norm).map_err(|e| format!("Datei konnte nicht gelesen werden: {e}"))?;
 
     let (raw_text, detected_encoding) = decode_text_bytes(&bytes);
@@ -237,6 +248,20 @@ mod tests {
         let result = write_text_file_if_unchanged(&path, "Local\n", true, "External\n", Some("CRLF")).unwrap();
         assert!(result.is_some());
         assert_eq!(fs::read_to_string(&path).unwrap(), "Local\r\n");
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn rejects_files_exceeding_max_size() {
+        let path = std::env::temp_dir().join(format!("semyra-oversize-{}.log", std::process::id()));
+        let file = fs::File::create(&path).unwrap();
+        file.set_len(MAX_TEXT_FILE_BYTES + 1).unwrap();
+        drop(file);
+
+        let err = read_text_file(&path).unwrap_err();
+        assert!(err.contains("zu groß"), "unexpected error: {err}");
+        assert!(err.contains("25 MB"), "unexpected error: {err}");
+
         fs::remove_file(path).unwrap();
     }
 }

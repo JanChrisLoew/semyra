@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { setLanguage } from '../i18n';
-import { buildPaletteCommandItems, buildPaletteFileItems } from '../palette-items';
+import { buildPaletteCommandItems, buildPaletteFileItems, buildPaletteHeadingItems } from '../palette-items';
 
 describe('palette-items', () => {
   it('deduplicates open tabs, workspace files, recent files, and active workspace folder', async () => {
@@ -277,5 +277,198 @@ describe('palette-items', () => {
     expect(saveCmd.label).toBe('File: Save');
 
     setLanguage('de', false);
+  });
+
+  it('builds localized heading-jump items and invokes onJumpToLine', () => {
+    const onJumpToLine = vi.fn();
+    setLanguage('de', false);
+    const deItems = buildPaletteHeadingItems({
+      headings: [
+        { level: 1, text: 'Überblick', line: 3 },
+        { level: 2, text: 'Architektur', line: 24 },
+      ],
+      onJumpToLine,
+    });
+
+    expect(deItems).toHaveLength(2);
+    expect(deItems[0]).toMatchObject({
+      id: 'heading:3:0',
+      kind: 'heading',
+      label: 'Überblick',
+      subtitle: 'Zeile 3',
+      badge: 'H1',
+    });
+    deItems[1].run();
+    expect(onJumpToLine).toHaveBeenCalledWith(24);
+
+    setLanguage('en', false);
+    const enItems = buildPaletteHeadingItems({
+      headings: [{ level: 3, text: 'Details', line: 42 }],
+      onJumpToLine,
+    });
+    expect(enItems[0].subtitle).toBe('Line 42');
+    expect(enItems[0].badge).toBe('H3');
+
+    setLanguage('de', false);
+  });
+
+  it('includes workspace scaffolding commands when callbacks are provided', () => {
+    const noop = vi.fn();
+    const onScaffoldAgents = vi.fn();
+    const onScaffoldSkill = vi.fn();
+
+    setLanguage('de', false);
+    const deCmds = buildPaletteCommandItems({
+      wordWrapActive: false,
+      spellcheckActive: false,
+      syncScrollActive: false,
+      autoSaveActive: false,
+      currentLineEnding: 'CRLF',
+      onNewTab: noop,
+      onOpenFileDialog: noop,
+      onOpenFolderDialog: noop,
+      onSave: noop,
+      onSaveAs: noop,
+      onCopyRichText: noop,
+      onExportHtml: noop,
+      onExportPdf: noop,
+      onPrint: noop,
+      onAlignTable: noop,
+      onSetViewMode: noop,
+      onToggleWordWrap: noop,
+      onToggleSpellcheck: noop,
+      onToggleSyncScroll: noop,
+      onToggleAutoSave: noop,
+      onToggleLineEnding: noop,
+      onZoomDelta: noop,
+      onZoomReset: noop,
+      onOpenSearchPanel: noop,
+      onOpenOutlinePanel: noop,
+      onToggleZen: noop,
+      onToggleTheme: noop,
+      onRevealInExplorer: noop,
+      onShowShortcuts: noop,
+      onScaffoldWorkspaceAgents: onScaffoldAgents,
+      onScaffoldWorkspaceSkill: onScaffoldSkill,
+    });
+
+    const agentsDe = deCmds.find((c) => c.id === 'cmd:scaffold-workspace-agents')!;
+    const skillDe = deCmds.find((c) => c.id === 'cmd:scaffold-workspace-skill')!;
+    expect(agentsDe).toBeDefined();
+    expect(agentsDe.label).toContain('AGENTS.md');
+    expect(skillDe).toBeDefined();
+    expect(skillDe.label).toContain('Workspace-Skill');
+
+    agentsDe.run();
+    skillDe.run();
+    expect(onScaffoldAgents).toHaveBeenCalledTimes(1);
+    expect(onScaffoldSkill).toHaveBeenCalledTimes(1);
+
+    setLanguage('en', false);
+    const enCmds = buildPaletteCommandItems({
+      wordWrapActive: false,
+      spellcheckActive: false,
+      syncScrollActive: false,
+      autoSaveActive: false,
+      currentLineEnding: 'CRLF',
+      onNewTab: noop,
+      onOpenFileDialog: noop,
+      onOpenFolderDialog: noop,
+      onSave: noop,
+      onSaveAs: noop,
+      onCopyRichText: noop,
+      onExportHtml: noop,
+      onExportPdf: noop,
+      onPrint: noop,
+      onAlignTable: noop,
+      onSetViewMode: noop,
+      onToggleWordWrap: noop,
+      onToggleSpellcheck: noop,
+      onToggleSyncScroll: noop,
+      onToggleAutoSave: noop,
+      onToggleLineEnding: noop,
+      onZoomDelta: noop,
+      onZoomReset: noop,
+      onOpenSearchPanel: noop,
+      onOpenOutlinePanel: noop,
+      onToggleZen: noop,
+      onToggleTheme: noop,
+      onRevealInExplorer: noop,
+      onShowShortcuts: noop,
+      onScaffoldWorkspaceAgents: onScaffoldAgents,
+      onScaffoldWorkspaceSkill: onScaffoldSkill,
+    });
+    expect(enCmds.find((c) => c.id === 'cmd:scaffold-workspace-agents')?.label).toBe(
+      'Workspace: Create AGENTS.md',
+    );
+    expect(enCmds.find((c) => c.id === 'cmd:scaffold-workspace-skill')?.label).toBe(
+      'Workspace: Create Workspace Skill (.agents/skills/…)',
+    );
+    setLanguage('de', false);
+  });
+
+  it('provides themed HTML export and diff comparison commands when callbacks are supplied', () => {
+    setLanguage('de', false);
+    const noop = vi.fn();
+    const onExportHtmlLight = vi.fn();
+    const onExportHtmlDark = vi.fn();
+    const onDiffWithSaved = vi.fn();
+    const onCompareOpenTabs = vi.fn();
+
+    const cmds = buildPaletteCommandItems({
+      wordWrapActive: false,
+      spellcheckActive: false,
+      syncScrollActive: false,
+      autoSaveActive: false,
+      currentLineEnding: 'CRLF',
+      onNewTab: noop,
+      onOpenFileDialog: noop,
+      onOpenFolderDialog: noop,
+      onSave: noop,
+      onSaveAs: noop,
+      onCopyRichText: noop,
+      onExportHtml: noop,
+      onExportHtmlLight,
+      onExportHtmlDark,
+      onExportPdf: noop,
+      onDiffWithSaved,
+      onCompareOpenTabs,
+      onPrint: noop,
+      onAlignTable: noop,
+      onSetViewMode: noop,
+      onToggleWordWrap: noop,
+      onToggleSpellcheck: noop,
+      onToggleSyncScroll: noop,
+      onToggleAutoSave: noop,
+      onToggleLineEnding: noop,
+      onZoomDelta: noop,
+      onZoomReset: noop,
+      onOpenSearchPanel: noop,
+      onOpenOutlinePanel: noop,
+      onToggleZen: noop,
+      onToggleTheme: noop,
+      onRevealInExplorer: noop,
+      onShowShortcuts: noop,
+    });
+
+    const lightCmd = cmds.find((c) => c.id === 'cmd:export-html-light');
+    const darkCmd = cmds.find((c) => c.id === 'cmd:export-html-dark');
+    const diffSavedCmd = cmds.find((c) => c.id === 'cmd:diff-with-saved');
+    const compareTabsCmd = cmds.find((c) => c.id === 'cmd:compare-open-tabs');
+
+    expect(lightCmd?.label).toContain('(Hell)');
+    expect(darkCmd?.label).toContain('(Dunkel)');
+    expect(diffSavedCmd?.label).toContain('Mit gespeichertem Stand vergleichen');
+    expect(compareTabsCmd?.label).toContain('Offene Tabs vergleichen');
+
+    lightCmd?.run();
+    darkCmd?.run();
+    diffSavedCmd?.run();
+    compareTabsCmd?.run();
+
+    expect(onExportHtmlLight).toHaveBeenCalledTimes(1);
+    expect(onExportHtmlDark).toHaveBeenCalledTimes(1);
+    expect(onDiffWithSaved).toHaveBeenCalledTimes(1);
+    expect(onCompareOpenTabs).toHaveBeenCalledTimes(1);
   });
 });

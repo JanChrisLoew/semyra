@@ -121,13 +121,26 @@ impl AppState {
         }));
 
         let watcher_proxy = proxy.clone();
+        let watcher_inner = Arc::clone(&inner);
         let watcher = RecommendedWatcher::new(
             move |res: Result<Event, notify::Error>| {
                 if let Ok(event) = res {
                     if event.kind.is_modify() || event.kind.is_create() || event.kind.is_remove() {
+                        let watched_roots: Vec<PathBuf> = watcher_inner
+                            .lock()
+                            .ok()
+                            .map(|guard| {
+                                guard
+                                    .watched_paths
+                                    .iter()
+                                    .map(|p| clean_windows_path(p))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
                         // Let the frontend compare the disk contents after any pending save.
                         // A time filter would also hide genuine external changes to the same file.
                         let paths = event.paths.iter()
+                            .filter(|path| !is_ignored_watch_path(path, &watched_roots))
                             .map(|path| clean_windows_path(path).to_string_lossy().into_owned())
                             .collect::<Vec<_>>();
                         if !paths.is_empty() {
@@ -233,5 +246,70 @@ impl AppState {
             .ok()
             .map(|g| g.ui_prefs.language.clone())
             .unwrap_or_else(|| "de".to_string())
+    }
+}
+
+pub(crate) fn is_ignored_watch_path(path: &Path, watched_roots: &[PathBuf]) -> bool {
+    let clean_path = clean_windows_path(path);
+    let mut best_rel: Option<&Path> = None;
+    let mut best_root_depth = 0usize;
+
+    for root in watched_roots {
+        if let Ok(rel) = clean_path.strip_prefix(root) {
+            let depth = root.components().count();
+            if best_rel.is_none() || depth >= best_root_depth {
+                best_rel = Some(rel);
+                best_root_depth = depth;
+            }
+        }
+    }
+
+    let Some(rel) = best_rel else {
+        return false;
+    };
+
+    rel.components().any(|component| match component {
+        std::path::Component::Normal(part) => {
+            let Some(name) = part.to_str() else {
+                return false;
+            };
+            crate::fs_ops::IGNORED_DIRS
+                .iter()
+                .any(|ignored| name.eq_ignore_ascii_case(ignored))
+        }
+        _ => false,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filters_ignored_directories_from_watcher_paths() {
+        let roots = vec![PathBuf::from(r"C:\repo")];
+        assert!(is_ignored_watch_path(Path::new(r"C:\repo\.git\index"), &roots));
+        assert!(is_ignored_watch_path(Path::new(r"C:\repo\node_modules\pkg\README.md"), &roots));
+        assert!(is_ignored_watch_path(Path::new(r"C:\repo\TARGET\debug\Semyra.exe"), &roots));
+        assert!(is_ignored_watch_path(Path::new(r"C:\repo\dist\bundle.js"), &roots));
+        assert!(is_ignored_watch_path(Path::new(r"C:\repo\__pycache__\mod.pyc"), &roots));
+
+        assert!(!is_ignored_watch_path(Path::new(r"C:\repo\README.md"), &roots));
+        assert!(!is_ignored_watch_path(Path::new(r"C:\repo\.github\AGENTS.md"), &roots));
+        assert!(!is_ignored_watch_path(Path::new(r"C:\repo\.agents\skills\demo\SKILL.md"), &roots));
+        assert!(!is_ignored_watch_path(Path::new(r"C:\repo\docs\target-audience.md"), &roots));
+    }
+
+    #[test]
+    fn does_not_ignore_workspace_under_ignored_ancestor_directory() {
+        let roots = vec![PathBuf::from(r"C:\build\dist\target\my-workspace")];
+        assert!(!is_ignored_watch_path(
+            Path::new(r"C:\build\dist\target\my-workspace\README.md"),
+            &roots
+        ));
+        assert!(is_ignored_watch_path(
+            Path::new(r"C:\build\dist\target\my-workspace\target\debug\app.exe"),
+            &roots
+        ));
     }
 }

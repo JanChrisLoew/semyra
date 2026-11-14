@@ -280,11 +280,11 @@ dialog.mermaid-dialog:modal {
   border: 1px solid var(--border-subtle);
   background: var(--bg-surface);
   color: var(--fg-primary);
-  box-shadow: var(--shadow-flyout);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.32);
 }
 
 .mermaid-dialog::backdrop {
-  background: var(--bg-backdrop);
+  background: rgba(0, 0, 0, 0.42);
   backdrop-filter: blur(4px);
 }
 
@@ -673,7 +673,7 @@ dialog.settings-dialog {
 }
 
 .status-lint-badge.is-error {
-  color: light-dark(#b42318, #f97066);
+  color: var(--danger);
 }
 
 dialog.modal-dialog {
@@ -756,17 +756,154 @@ dialog.modal-dialog.external-diff-dialog {
   border-color: var(--accent);
 }
 
+.ai-bundle-search {
+  display: block;
+  padding: 10px 18px 2px;
+}
+
+.ai-bundle-filter-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--fg-primary);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.ai-bundle-filter-input:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
 .ai-bundle-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 10px 18px 4px;
+  padding: 8px 18px 4px;
 }
 
 .ai-bundle-select-actions {
   display: flex;
   gap: 6px;
+}
+
+.ai-bundle-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 18px 6px;
+}
+
+.ai-bundle-format-group {
+  display: inline-flex;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-subtle);
+}
+
+.ai-bundle-format-btn {
+  border: 0;
+  background: transparent;
+  color: var(--fg-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.ai-bundle-format-btn[aria-pressed='true'] {
+  background: var(--bg-active);
+  color: var(--fg-primary);
+  font-weight: 600;
+}
+
+.ai-bundle-format-btn:hover {
+  color: var(--fg-primary);
+}
+
+.ai-bundle-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.ai-bundle-check-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.ai-bundle-budget {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px 18px 6px;
+}
+
+.ai-bundle-budget-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.ai-bundle-budget-select-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-secondary);
+}
+
+.ai-bundle-budget-select {
+  padding: 2px 6px;
+  font-size: 12px;
+  color: var(--fg-primary);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.ai-bundle-budget-status {
+  color: var(--fg-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-bundle-budget-status.is-high {
+  color: var(--color-teal-subtle);
+  font-weight: 600;
+}
+
+.ai-bundle-budget-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+
+.ai-bundle-budget-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  transition: width 140ms ease, background-color 140ms ease;
+}
+
+.ai-bundle-budget-fill.is-high {
+  background: var(--color-teal-subtle);
 }
 
 .ai-bundle-list {
@@ -775,25 +912,47 @@ dialog.modal-dialog.external-diff-dialog {
   gap: 6px;
   padding: 8px 18px 12px;
   overflow-y: auto;
-  max-height: 46vh;
+  max-height: 40vh;
 }
 
 .ai-bundle-item {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
-  padding: 8px 10px;
+  padding: 7px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-subtle);
   background: var(--bg-subtle);
-  cursor: pointer;
   font-size: 13px;
 }
 
 .ai-bundle-item:hover {
   background: var(--bg-hover);
   border-color: var(--accent);
+}
+
+.ai-bundle-item-check {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+  cursor: pointer;
+}
+
+.ai-bundle-item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.ai-bundle-move-btn {
+  width: 24px;
+  height: 24px;
+  font-size: 12px;
 }
 
 .ai-bundle-item-meta {
@@ -824,12 +983,62 @@ dialog.modal-dialog.external-diff-dialog {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   flex-shrink: 0;
+  margin-right: 4px;
 }
 
 .ai-bundle-footer {
   margin-top: 0;
   padding: 10px 18px 14px;
   border-top: 1px solid var(--border-subtle);
+}
+
+.prompt-vars-form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.prompt-vars-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 18px 16px;
+  overflow-y: auto;
+  max-height: 50vh;
+}
+
+.prompt-var-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.prompt-var-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-secondary);
+}
+
+.prompt-var-label code {
+  font-family: var(--font-mono);
+  color: var(--fg-primary);
+}
+
+.prompt-var-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--fg-primary);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.prompt-var-input:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 1px;
+  border-color: var(--accent);
 }
 
 .external-diff-list {
@@ -858,7 +1067,7 @@ dialog.modal-dialog.external-diff-dialog {
 }
 
 .diff-line-row.is-removed {
-  background: light-dark(rgba(152, 108, 61, 0.14), rgba(208, 167, 116, 0.16));
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
 }
 
 .diff-line-num {
@@ -877,6 +1086,80 @@ dialog.modal-dialog.external-diff-dialog {
   color: var(--fg-primary);
 }
 
+.diff-line-row.is-active-hunk {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.diff-nav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-chrome, var(--bg-surface));
+  font-size: 12px;
+}
+
+.diff-nav-status {
+  color: var(--fg-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.diff-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.diff-nav-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: var(--font-ui);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-subtle);
+  color: var(--fg-primary);
+  cursor: pointer;
+}
+
+.diff-nav-btn:hover:not(:disabled) {
+  background: var(--bg-hover, var(--bg-elevated));
+  border-color: var(--accent);
+}
+
+.diff-nav-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.diff-nav-btn:focus-visible,
+.diff-collapsed-row:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 1px;
+}
+
+.diff-collapsed-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin: 4px 0;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-subtle);
+  background: light-dark(rgba(66, 107, 145, 0.06), rgba(131, 165, 198, 0.08));
+  color: var(--fg-secondary);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.diff-collapsed-row:hover {
+  background: light-dark(rgba(66, 107, 145, 0.12), rgba(131, 165, 198, 0.15));
+  color: var(--fg-primary);
+}
+
 .lint-issue-severity {
   font-size: 11px;
   font-weight: 600;
@@ -884,9 +1167,10 @@ dialog.modal-dialog.external-diff-dialog {
   border-radius: 999px;
 }
 
-.lint-issue-row.is-error .lint-issue-severity {
-  background: light-dark(#fee4e2, #4d1b1b);
-  color: light-dark(#b42318, #fda29b);
+.lint-issue-row.is-error .lint-issue-severity,
+.lint-issue-severity.is-error {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
 }
 
 .lint-issue-row.is-warning .lint-issue-severity {
@@ -908,6 +1192,34 @@ dialog.modal-dialog.external-diff-dialog {
 
 .print-document {
   display: none;
+}
+
+@media (forced-colors: active) {
+  .diff-line-row.is-added {
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
+
+  .diff-line-row.is-removed {
+    outline: 1px dashed ButtonText;
+    outline-offset: -1px;
+  }
+
+  .ai-bundle-budget-fill {
+    background: Highlight !important;
+    outline: 1px solid Highlight;
+  }
+
+  mark.preview-find-match {
+    border: 1px solid Highlight;
+    outline: 1px solid Highlight;
+  }
+
+  mark.preview-find-match.is-current {
+    background: Highlight !important;
+    color: HighlightText !important;
+    outline: 2px solid Highlight;
+  }
 }
 
 /* Clean Print / PDF Output (independent of active Light/Dark app theme or view mode) */

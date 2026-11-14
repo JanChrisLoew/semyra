@@ -123,6 +123,9 @@
               <button type="button" id="btn-new-folder-file" class="mini-icon-btn" title="Neue Markdown-Datei im Ordner anlegen" aria-label="Neue Datei im Ordner" data-i18n-title="sidebar.newFileTitle" data-i18n-aria="sidebar.newFileTitle" hidden>+</button>
               <button type="button" id="btn-new-subfolder" class="mini-icon-btn" title="Neuen Unterordner anlegen" aria-label="Neuer Unterordner" data-i18n-title="sidebar.newFolderTitle" data-i18n-aria="sidebar.newFolderTitle" hidden>📁</button>
               <button type="button" id="btn-refresh-tree" class="mini-icon-btn" title="Ordnerbaum aktualisieren" aria-label="Ordnerbaum aktualisieren" data-i18n-title="sidebar.refreshTreeTitle" data-i18n-aria="sidebar.refreshTreeTitle" hidden>↻</button>
+              <button type="button" id="btn-collapse-all" class="mini-icon-btn" title="Alle Ordner einklappen" aria-label="Alle Ordner einklappen" data-i18n-title="sidebar.collapseAllTitle" data-i18n-aria="sidebar.collapseAllTitle" hidden>
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6.5L8 3l3.5 3.5M4.5 12.5L8 9l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
             </div>
           </div>
           <div id="file-tree-container" class="sidebar-scroll scroller">
@@ -188,10 +191,10 @@
               <button type="button" class="fmt-btn" data-fmt="ol" title="Nummerierte Liste" data-i18n-title="format.orderedList"><span class="fmt-icon">1.</span> <span class="fmt-label" data-i18n="format.listBtn">Liste</span></button>
               <button type="button" class="fmt-btn" data-fmt="task" title="Aufgabenliste / Checkliste" data-i18n-title="format.task"><span class="fmt-icon">☑</span> <span class="fmt-label" data-i18n="format.taskBtn">Task</span></button>
               <button type="button" class="fmt-btn" data-fmt="quote" title="Zitatblock (Strg+Umschalt+Q)" data-i18n-title="format.quote"><span class="fmt-icon">❝</span> <span class="fmt-label" data-i18n="format.quoteBtn">Zitat</span></button>
-              <button type="button" class="fmt-btn" data-fmt="alert" title="GitHub Hinweis-Box einfügen" data-i18n-title="format.alert"><span class="fmt-icon">ⓘ</span> <span class="fmt-label" data-i18n="format.alertBtn">Hinweis</span></button>
+              <button type="button" class="fmt-btn" data-fmt="alert" aria-haspopup="menu" aria-expanded="false" title="GitHub Hinweis-Box einfügen" data-i18n-title="format.alert"><span class="fmt-icon">ⓘ</span> <span class="fmt-label" data-i18n="format.alertBtn">Hinweis</span> <span class="fmt-caret" aria-hidden="true">▾</span></button>
               <div class="toolbar-divider"></div>
               <button type="button" class="fmt-btn" data-fmt="code" title="Inline-Code (Strg+Umschalt+E)" data-i18n-title="format.code"><code>&lt;/&gt;</code></button>
-              <button type="button" class="fmt-btn" data-fmt="codeblock" title="Code-Block einfügen" data-i18n-title="format.codeblock"><span class="fmt-icon">#</span> <span class="fmt-label" data-i18n="format.codeblockBtn">Codeblock</span></button>
+              <button type="button" class="fmt-btn" data-fmt="codeblock" aria-haspopup="menu" aria-expanded="false" title="Code-Block einfügen" data-i18n-title="format.codeblock"><span class="fmt-icon">#</span> <span class="fmt-label" data-i18n="format.codeblockBtn">Codeblock</span> <span class="fmt-caret" aria-hidden="true">▾</span></button>
               <button type="button" class="fmt-btn" data-fmt="link" title="Link einfügen (Strg+K)" data-i18n-title="format.link"><span class="fmt-icon">🔗</span> <span class="fmt-label" data-i18n="format.linkBtn">Link</span></button>
               <button type="button" class="fmt-btn" data-fmt="image" title="Bild einfügen" data-i18n-title="format.image"><span class="fmt-icon">🖼</span> <span class="fmt-label" data-i18n="format.imageBtn">Bild</span></button>
               <button type="button" class="fmt-btn" command="show-modal" commandfor="table-dialog" title="Markdown-Tabelle einfügen" data-i18n-title="format.table"><span class="fmt-icon">⊞</span> <span class="fmt-label" data-i18n="format.tableBtn">Tabelle</span></button>
@@ -216,6 +219,16 @@
         <div id="split-resizer" class="split-resizer" role="separator" aria-orientation="vertical" aria-valuemin="20" aria-valuemax="80" aria-valuenow="50" aria-label="Größe zwischen Editor und Vorschau anpassen" tabindex="0" title="Ziehen oder Pfeiltasten zum Anpassen · Doppelklick für 50/50" data-i18n-title="nav.splitResizerTitle" data-i18n-aria="nav.splitResizerTitle"></div>
 
         <section id="preview-pane" class="preview-pane scroller" aria-label="Live-Markdown-Vorschau" data-i18n-aria="preview.paneAria">
+          <div id="preview-find-bar" class="preview-find-bar" hidden>
+            <search class="preview-find-search">
+              <label for="preview-find-input" class="visually-hidden" data-i18n="previewFind.label">In Vorschau suchen</label>
+              <input id="preview-find-input" type="search" class="preview-find-input" placeholder="In Vorschau suchen…" data-i18n-placeholder="previewFind.placeholder" autocomplete="off">
+            </search>
+            <span id="preview-find-count" class="preview-find-count" aria-live="polite">0/0</span>
+            <button type="button" id="preview-find-prev" class="mini-icon-btn" title="Vorheriger Treffer (Umschalt+Enter)" aria-label="Vorheriger Treffer" data-i18n-title="previewFind.prev" data-i18n-aria="previewFind.prev">↑</button>
+            <button type="button" id="preview-find-next" class="mini-icon-btn" title="Nächster Treffer (Enter)" aria-label="Nächster Treffer" data-i18n-title="previewFind.next" data-i18n-aria="previewFind.next">↓</button>
+            <button type="button" id="preview-find-close" class="mini-icon-btn" title="Schließen (Esc)" aria-label="Schließen" data-i18n-title="previewFind.close" data-i18n-aria="previewFind.close">✕</button>
+          </div>
           <article id="preview-content" class="markdown-body"></article>
           <button type="button" id="btn-scroll-top" class="preview-scroll-top-btn" title="Zum Seitenanfang scrollen" aria-label="Zum Seitenanfang" data-i18n-title="sidebar.scrollTop" data-i18n-aria="sidebar.scrollTop">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V3.5M4 7l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -236,7 +249,7 @@
       <div class="status-right">
         <button type="button" id="status-lint-badge" class="status-action-btn status-lint-badge is-ok" command="show-modal" commandfor="lint-dialog" title="Markdown- &amp; YAML-Prüfung öffnen" data-i18n-title="lint.badgeTitle">✓ Valide</button>
         <span class="status-sep">·</span>
-        <span id="status-cursor">Zeile 1, Spalte 1</span>
+        <button type="button" id="status-cursor" class="status-action-btn" title="Zu Zeile springen (Strg+G)" data-i18n-title="status.cursorTitle">Zeile 1, Spalte 1</button>
         <span class="status-sep">·</span>
         <button type="button" id="status-doc-summary" class="status-action-btn status-doc-summary" title="Detaillierte Dokument-Statistiken anzeigen (Klicken)" data-i18n-title="status.docSummaryTitle">0 Wörter · ~0 Tokens</button>
         <span class="status-sep">·</span>
@@ -265,14 +278,15 @@
   <dialog id="palette-dialog" class="palette-dialog" closedby="any" aria-labelledby="palette-title">
     <h2 id="palette-title" class="visually-hidden" data-i18n="palette.commandsHint">Schnellauswahl und Befehlspalette</h2>
     <search class="palette-search-bar">
-      <label for="palette-input" class="visually-hidden">Datei oder Befehl suchen</label>
-      <input id="palette-input" type="search" class="palette-input" placeholder="Dateiname eingeben oder „>“ für Befehle…" data-i18n-placeholder="palette.placeholder" autocomplete="off">
+      <label for="palette-input" class="visually-hidden" data-i18n="palette.searchLabel">Datei oder Befehl suchen</label>
+      <input id="palette-input" type="search" class="palette-input" placeholder="Dateiname eingeben, „>“ für Befehle oder „#“ für Überschriften…" data-i18n-placeholder="palette.placeholder" autocomplete="off">
     </search>
     <div id="palette-results" class="palette-results scroller"></div>
     <div class="palette-footer">
       <span><kbd>↑</kbd><kbd>↓</kbd> <span data-i18n="palette.navigateHint">Navigieren</span></span>
       <span><kbd>Enter</kbd> <span data-i18n="palette.selectHint">Ausführen</span></span>
       <span><kbd>&gt;</kbd> <span data-i18n="palette.commandsHint">Befehle</span></span>
+      <span><kbd>#</kbd> <span data-i18n="palette.headingsHint">Überschriften</span></span>
       <span><kbd>Esc</kbd> <span data-i18n="palette.closeHint">Schließen</span></span>
     </div>
   </dialog>
@@ -322,6 +336,19 @@
         <span data-i18n="treeCtx.reveal">Im Explorer anzeigen</span>
         <kbd class="ctx-shortcut">Alt+R</kbd>
       </button>
+      <button type="button" data-ctx-action="copy-at-path" id="tree-ctx-copy-at-path">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="4" width="7" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M4 11H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v1" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
+        <span data-i18n="treeCtx.copyAtPath">Relativen @Pfad kopieren</span>
+      </button>
+      <hr>
+      <button type="button" data-ctx-action="scaffold-agents" id="tree-ctx-scaffold-agents">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h5l3 3v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1zm4.5 0v3h3M5.5 8.5h5M5.5 11h3.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+        <span data-i18n="treeCtx.scaffoldAgents">AGENTS.md anlegen</span>
+      </button>
+      <button type="button" data-ctx-action="scaffold-skill" id="tree-ctx-scaffold-skill">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2l1.5 3.5L13 7l-3.5 1.5L8 12l-1.5-3.5L3 7l3.5-1.5L8 2z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+        <span data-i18n="treeCtx.scaffoldSkill">Workspace-Skill anlegen…</span>
+      </button>
       <hr>
       <button type="button" data-ctx-action="delete" id="ctx-btn-delete" class="ctx-danger">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 4.5h9M6 4.5V3h4v1.5M4.8 4.5l.6 8.5h5.2l.6-8.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -359,6 +386,19 @@
       <button type="button" data-tab-ctx="copy-path" id="tab-ctx-copy-path">
         <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="4" width="7" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M4 11H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v1" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
         <span data-i18n="tabCtx.copyPath">Dateipfad kopieren</span>
+      </button>
+      <hr>
+      <button type="button" data-tab-ctx="diff-saved" id="tab-ctx-diff-saved">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5v9M3 6h4M11 3.5v9M9 10h4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+        <span data-i18n="tabCtx.diffSaved">Mit gespeichertem Stand vergleichen</span>
+      </button>
+      <button type="button" data-tab-ctx="compare-tabs" id="tab-ctx-compare-tabs">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3" width="4.5" height="10" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="9" y="3" width="4.5" height="10" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
+        <span data-i18n="tabCtx.compareTabs">Offene Tabs vergleichen…</span>
+      </button>
+      <button type="button" data-tab-ctx="copy-at-path" id="tab-ctx-copy-at-path">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M10.2 8v.8a1.6 1.6 0 0 0 3.2 0V8a5.4 5.4 0 1 0-2.1 4.3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+        <span data-i18n="tabCtx.copyAtPath">Relativen @pfad kopieren</span>
       </button>
       <button type="button" data-tab-ctx="copy-markdown">
         <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="4" width="7" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M4 11H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v1" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
@@ -463,13 +503,15 @@
       <div><kbd>Strg</kbd> + <kbd>W</kbd></div><div data-i18n="shortcuts.closeTab">Aktuellen Tab schließen</div>
       <div><kbd>Strg</kbd> + <kbd>Umschalt</kbd> + <kbd>T</kbd></div><div data-i18n="shortcuts.restoreTab">Zuletzt geschlossenen Tab wiederherstellen</div>
       <div><kbd>Strg</kbd> + <kbd>Tab</kbd> / <kbd>BildAb</kbd> / <kbd>BildAuf</kbd></div><div data-i18n="shortcuts.cycleTabs">Nächster / vorheriger Tab</div>
+      <div><kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>→</kbd></div><div data-i18n="shortcuts.navHistory">Navigationsverlauf (Zurück / Vorwärts)</div>
       <div><kbd>Strg</kbd> + <kbd>J</kbd></div><div data-i18n="shortcuts.toggleSidebar">Seitenleiste ein-/ausblenden</div>
       <div><kbd>Strg</kbd> + <kbd>B</kbd> / <kbd>I</kbd> / <kbd>K</kbd></div><div data-i18n="shortcuts.formatBasic">Fett / Kursiv / Link</div>
       <div><kbd>Strg</kbd> + <kbd>Umschalt</kbd> + <kbd>E</kbd> / <kbd>X</kbd> / <kbd>M</kbd></div><div data-i18n="shortcuts.formatAdvanced">Inline-Code / Durchgestrichen / Mathe</div>
-      <div><kbd>Strg</kbd> + <kbd>F</kbd> / <kbd>H</kbd></div><div data-i18n="shortcuts.findReplace">Suchen &amp; Ersetzen im Editor</div>
+      <div><kbd>Strg</kbd> + <kbd>F</kbd> / <kbd>H</kbd></div><div data-i18n="shortcuts.findReplace">Suchen (Editor &amp; Vorschau) / Ersetzen im Editor</div>
       <div><kbd>Strg</kbd> + <kbd>Umschalt</kbd> + <kbd>F</kbd></div><div data-i18n="shortcuts.searchWorkspace">Volltextsuche im Arbeitsordner</div>
       <div><kbd>Tab</kbd> / <kbd>Umschalt</kbd> + <kbd>Tab</kbd></div><div data-i18n="shortcuts.tableNav">Nächste / vorherige Tabellenzelle (neue Zeile am Ende)</div>
       <div><kbd>Alt</kbd> + <kbd>Umschalt</kbd> + <kbd>F</kbd></div><div data-i18n="shortcuts.formatTable">Markdown-Tabelle sauber ausrichten</div>
+      <div><kbd>Strg</kbd> + <kbd>Umschalt</kbd> + <kbd>L</kbd></div><div data-i18n="shortcuts.formatDocument">Markdown-Dokument formatieren</div>
       <div><kbd>Alt</kbd> + <kbd>C</kbd></div><div data-i18n="shortcuts.toggleCheckbox">Aufgaben-Checkbox an-/abhaken (- [ ] / - [x])</div>
       <div><kbd>Strg</kbd> + <kbd>V</kbd> <span data-i18n="shortcuts.smartPasteKeys">(Bild / URL / Excel)</span></div><div data-i18n="shortcuts.smartPaste">Bild einfügen, Auswahl verlinken oder Tabelle konvertieren</div>
       <div><kbd>Strg</kbd> + <kbd>Umschalt</kbd> + <kbd>C</kbd></div><div data-i18n="shortcuts.copyMarkdown">Markdown-Quelltext in die Zwischenablage kopieren</div>
@@ -759,6 +801,10 @@
         <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3.5" width="7.5" height="9" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6 2.5h5.5a1.2 1.2 0 0 1 1.2 1.2v7.8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M4.5 6.5h3.5M4.5 9h2.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
         <span class="menu-item-text" data-i18n="share.bundleAi">Mehrere Tabs für KI bündeln…</span>
       </button>
+      <button type="button" id="btn-share-fill-prompt-vars" class="menu-item" title="{{variable}}-Platzhalter im Dokument ausfüllen und Prompt kopieren" data-i18n-title="share.fillPromptVarsTitle">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3.5c-1 0-1.5.5-1.5 1.5v1.8c0 .7-.4 1.2-1 1.2.6 0 1 .5 1 1.2V11c0 1 .5 1.5 1.5 1.5M10.5 3.5c1 0 1.5.5 1.5 1.5v1.8c0 .7.4 1.2 1 1.2-.6 0-1 .5-1 1.2V11c0 1-.5 1.5-1.5 1.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+        <span class="menu-item-text" data-i18n="share.fillPromptVars">Prompt-Variablen ausfüllen…</span>
+      </button>
       <button type="button" id="btn-share-copy-rich" class="menu-item" title="Als formatierten Text kopieren – ideal für Word, Teams &amp; Outlook (Strg+Umschalt+K)" data-i18n-title="share.copyRichTitle">
         <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="4" width="8" height="9.5" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 10.5h-.5a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v.5M7 7h4M7 9.5h4M7 11.5h2.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
         <span class="menu-item-text" data-i18n="share.copyRich">Formatierter Text (Word / Outlook)</span>
@@ -770,6 +816,14 @@
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 5.5L2.5 8l2.5 2.5M11 5.5l2.5 2.5-2.5 2.5M9 4.5l-2 7" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span class="menu-item-text" data-i18n="share.exportHtml">Eigenständige 1-Datei-HTML (.html)</span>
         <kbd class="menu-item-shortcut">Strg+Umschalt+H</kbd>
+      </button>
+      <button type="button" id="btn-share-html-light" class="menu-item" title="Als eigenständige HTML-Datei im hellen Design exportieren" data-i18n-title="share.exportHtmlLightTitle">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 2v1.5M8 12.5V14M2 8h1.5M12.5 8H14M3.8 3.8l1 1M11.2 11.2l1 1M12.2 3.8l-1 1M4.8 11.2l-1 1" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+        <span class="menu-item-text" data-i18n="share.exportHtmlLight">Als HTML (Hell) exportieren</span>
+      </button>
+      <button type="button" id="btn-share-html-dark" class="menu-item" title="Als eigenständige HTML-Datei im dunklen Design exportieren" data-i18n-title="share.exportHtmlDarkTitle">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.5 9.8A5 5 0 0 1 6.2 3.5a5.2 5.2 0 1 0 6.3 6.3z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+        <span class="menu-item-text" data-i18n="share.exportHtmlDark">Als HTML (Dunkel) exportieren</span>
       </button>
       <button type="button" id="btn-share-export-pdf" class="menu-item" title="Direkt als PDF-Dokument exportieren (Strg+Umschalt+D)" data-i18n-title="share.exportPdfTitle">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h5l3 3v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M9 2.5v3h3M5.5 10.5h5M8 7.5v5m0 0l-1.5-1.5M8 12.5l1.5-1.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -928,7 +982,7 @@
       <div class="settings-header">
         <div>
           <h3 id="external-diff-title" data-i18n="externalDiff.title">Externe Dateiänderung vergleichen</h3>
-          <p class="lint-dialog-sub" data-i18n="externalDiff.subtitle">− (Amber): aktueller Stand im Editor · + (Teal): neuer Stand auf der Festplatte</p>
+          <p class="lint-dialog-sub" data-i18n="externalDiff.subtitle">− Entfernt: aktueller Stand im Editor · + Hinzugefügt: neuer Stand auf der Festplatte</p>
         </div>
         <button type="button" class="mini-icon-btn" command="close" commandfor="external-diff-dialog" aria-label="Schließen" data-i18n-aria="settings.close">✕</button>
       </div>
@@ -947,6 +1001,19 @@
     <form method="dialog" class="dialog-actions">
       <button type="submit" value="cancel" class="dialog-btn" data-i18n="aiBundle.cancelBtn">Abbrechen</button>
       <button type="submit" value="confirm" class="dialog-btn primary" data-i18n="search.replaceAll">Alle ersetzen</button>
+    </form>
+  </dialog>
+
+  <!-- Native Modal Dialog: Go to Line -->
+  <dialog id="goto-line-dialog" class="goto-line-dialog" closedby="any" aria-labelledby="goto-line-title">
+    <h2 id="goto-line-title" data-i18n="gotoLine.title">Zu Zeile springen</h2>
+    <form id="goto-line-form" method="dialog" class="dialog-form">
+      <label for="goto-line-input" data-i18n="gotoLine.label">Zeilennummer (optional :Spalte)</label>
+      <input id="goto-line-input" type="text" inputmode="numeric" placeholder="z. B. 42 oder 42:10" data-i18n-placeholder="gotoLine.placeholder" autocomplete="off" autofocus>
+      <div class="dialog-actions">
+        <button type="submit" value="cancel" class="dialog-btn" data-i18n="gotoLine.cancel">Abbrechen</button>
+        <button type="submit" value="confirm" class="dialog-btn primary" data-i18n="gotoLine.go">Springen</button>
+      </div>
     </form>
   </dialog>
 

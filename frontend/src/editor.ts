@@ -156,10 +156,30 @@ export interface EditorCallbacks {
   onEditorScrolled: () => void;
   onFormatCommand: (cmd: FormatAction) => void;
   onPasteImage: (mimeType: string, dataUrl: string) => void;
+  onPickImage?: () => Promise<string | null>;
   onCopyRichText?: () => void;
   onCopyMarkdown?: () => void;
   onTableContextMenu?: (clientX: number, clientY: number) => void;
 }
+
+export const CODEBLOCK_LANGUAGES = [
+  'typescript',
+  'rust',
+  'python',
+  'bash',
+  'json',
+  'yaml',
+  'mermaid',
+  'text',
+] as const;
+
+export const GITHUB_ALERT_TYPES = [
+  'NOTE',
+  'TIP',
+  'IMPORTANT',
+  'WARNING',
+  'CAUTION',
+] as const;
 
 export type FormatAction =
   | 'bold'
@@ -767,6 +787,12 @@ export class MarkdownEditorController {
     return this.view.state.doc.toString();
   }
 
+  public getSelectedText(): string {
+    const { from, to } = this.view.state.selection.main;
+    if (from === to) return '';
+    return this.view.state.sliceDoc(from, to);
+  }
+
   public replaceAllContent(newContent: string): void {
     this.view.dispatch({
       changes: {
@@ -947,7 +973,7 @@ export class MarkdownEditorController {
     this.view.focus();
   }
 
-  public applyFormat(action: FormatAction): void {
+  public applyFormat(action: FormatAction, option?: string): void {
     const { state } = this.view;
     const range = state.selection.main;
     const selected = state.sliceDoc(range.from, range.to);
@@ -1028,12 +1054,18 @@ export class MarkdownEditorController {
       case 'quote':
         prefixLines('> ');
         break;
-      case 'alert':
-        this.insertSnippet('\n> [!NOTE]\n> Wichtiger Hinweis im Dokument.\n');
+      case 'alert': {
+        const alertType = (option || 'NOTE').toUpperCase();
+        const body = selected || 'Wichtiger Hinweis im Dokument.';
+        this.insertSnippet(`\n> [!${alertType}]\n> ${body}\n`);
         break;
+      }
       case 'codeblock': {
-        const inner = selected || 'println!("Hallo aus Rust!");';
-        const snippet = `\n\`\`\`rust\n${inner}\n\`\`\`\n`;
+        const lang = (option ?? 'rust').trim();
+        const defaultCode =
+          lang === 'rust' ? 'println!("Hallo aus Rust!");' : lang === 'text' ? 'Text' : '// Code';
+        const inner = selected || defaultCode;
+        const snippet = `\n\`\`\`${lang}\n${inner}\n\`\`\`\n`;
         this.insertSnippet(snippet);
         break;
       }
@@ -1050,9 +1082,19 @@ export class MarkdownEditorController {
         this.view.focus();
         break;
       }
-      case 'image':
-        this.insertSnippet(`![${selected || 'Bildbeschreibung'}](./bild.png)`);
+      case 'image': {
+        const alt = selected || 'Bildbeschreibung';
+        if (this.callbacks.onPickImage) {
+          void this.callbacks.onPickImage().then((pickedPath) => {
+            const trimmed = pickedPath?.trim();
+            if (!trimmed) return;
+            this.insertSnippet(`![${alt}](${trimmed})`);
+          });
+        } else {
+          this.insertSnippet(`![${alt}](./bild.png)`);
+        }
         break;
+      }
       case 'align-table':
         this.alignMarkdownTables();
         break;

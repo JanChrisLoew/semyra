@@ -181,8 +181,18 @@ pub fn build_standalone_html_document(title: &str, rendered_body_html: &str) -> 
     .gfm-alert-warning .gfm-alert-title {{ color: var(--warning); }}
     .gfm-alert-caution {{ border-left-color: #cf222e; }}
     .gfm-alert-caution .gfm-alert-title {{ color: #cf222e; }}
-    .frontmatter-card {{ margin-bottom: 1.3rem; padding: 0.65rem 0.95rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 0.9rem; }}
-    .frontmatter-card > summary {{ cursor: pointer; font-weight: 600; color: var(--muted); }}
+    .frontmatter-card {{ margin-bottom: 1.3rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 0.9rem; overflow: hidden; }}
+    .frontmatter-chips {{ display: flex; flex-wrap: wrap; gap: 6px; padding: 0.55rem 0.9rem; border-bottom: 1px solid var(--border); background: light-dark(#f8fafc, #171e28); }}
+    .frontmatter-chip {{ display: inline-flex; align-items: center; max-width: 100%; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); font-size: 0.78rem; line-height: 1.35; overflow: hidden; }}
+    .frontmatter-chip-key {{ padding: 2px 7px; font-family: "Cascadia Code", "Cascadia Mono", Consolas, monospace; font-weight: 600; color: var(--muted); background: var(--surface); border-right: 1px solid var(--border); }}
+    .frontmatter-chip-val {{ padding: 2px 8px; color: var(--fg); overflow-wrap: anywhere; }}
+    .frontmatter-card > summary, .frontmatter-card details > summary {{ cursor: pointer; font-weight: 600; color: var(--muted); padding: 0.55rem 0.9rem; }}
+    .frontmatter-card details[open] > summary {{ border-bottom: 1px solid var(--border); }}
+    .prompt-tag-block {{ margin: 1.2rem 0; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; background: light-dark(#f8fafc, #171e28); overflow: hidden; }}
+    .prompt-tag-label {{ padding: 5px 12px; font-family: "Cascadia Code", "Cascadia Mono", Consolas, monospace; font-size: 0.78rem; font-weight: 600; color: var(--accent); background: var(--surface); border-bottom: 1px solid var(--border); }}
+    .prompt-tag-body {{ padding: 0.75rem 0.95rem; color: var(--fg); }}
+    .prompt-tag-body > :first-child {{ margin-top: 0; }}
+    .prompt-tag-body > :last-child {{ margin-bottom: 0; }}
     .table-wrapper {{ overflow-x: auto; margin: 1.2em 0; border: 1px solid var(--border); border-radius: 8px; }}
     table {{ width: 100%; border-collapse: collapse; font-size: 0.92rem; }}
     th, td {{ border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); padding: 0.55rem 0.85rem; text-align: left; }}
@@ -203,7 +213,7 @@ pub fn build_standalone_html_document(title: &str, rendered_body_html: &str) -> 
     hr {{ border: 0; border-top: 1px solid var(--border); margin: 2rem 0; }}
     @media print {{
       h1, h2, h3, h4, h5, h6 {{ break-after: avoid; }}
-      .frontmatter-card, .table-wrapper, .code-block-wrapper, .mermaid-wrapper, blockquote, tr {{ break-inside: avoid; }}
+      .frontmatter-card, .prompt-tag-block, .table-wrapper, .code-block-wrapper, .mermaid-wrapper, blockquote, tr {{ break-inside: avoid; }}
     }}
   </style>
 </head>

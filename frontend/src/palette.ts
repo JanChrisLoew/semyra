@@ -1,4 +1,5 @@
-import { t } from './i18n';
+import { getLanguage, t } from './i18n';
+import { buildPaletteHeadingItems } from './palette-items';
 
 export interface FuzzyMatchResult {
   score: number;
@@ -67,9 +68,15 @@ export function fuzzyMatch(query: string, candidate: string): FuzzyMatchResult |
   return { score, indices };
 }
 
+export interface PaletteHeading {
+  level: number;
+  text: string;
+  line: number;
+}
+
 export interface PaletteItem {
   id: string;
-  kind: 'tab' | 'recent' | 'file' | 'folder' | 'command';
+  kind: 'tab' | 'recent' | 'file' | 'folder' | 'command' | 'heading';
   label: string;
   subtitle?: string;
   shortcut?: string;
@@ -80,6 +87,8 @@ export interface PaletteItem {
 export interface PaletteDataSource {
   getFileItems: () => Promise<PaletteItem[]>;
   getCommandItems: () => PaletteItem[];
+  getHeadings?: () => PaletteHeading[];
+  onJumpToLine?: (line: number) => void;
 }
 
 function buildHighlightedText(text: string, indices: number[]): DocumentFragment {
@@ -131,7 +140,16 @@ export class CommandPaletteController {
     this.input = input;
     this.resultsEl = resultsEl;
     this.source = source;
+    this.initAccessibility();
     this.bindEvents();
+  }
+
+  private initAccessibility(): void {
+    if (!this.resultsEl.id) {
+      this.resultsEl.id = 'palette-results';
+    }
+    this.resultsEl.setAttribute('role', 'listbox');
+    this.input.setAttribute('aria-controls', this.resultsEl.id);
   }
 
   private bindEvents(): void {
@@ -147,6 +165,7 @@ export class CommandPaletteController {
     this.dialog.addEventListener('close', () => {
       this.dialog.returnValue = '';
       this.input.value = '';
+      this.input.removeAttribute('aria-activedescendant');
     });
 
     this.input.addEventListener('input', () => {
@@ -176,8 +195,8 @@ export class CommandPaletteController {
     });
   }
 
-  public open(mode: 'files' | 'commands'): void {
-    this.input.value = mode === 'commands' ? '> ' : '';
+  public open(mode: 'files' | 'commands' | 'headings'): void {
+    this.input.value = mode === 'commands' ? '> ' : mode === 'headings' ? '# ' : '';
     if (!this.dialog.open) {
       this.dialog.showModal();
     } else {
@@ -203,13 +222,19 @@ export class CommandPaletteController {
 
   private renderFiltered(): void {
     const raw = this.input.value;
-    const isCommandMode = raw.trimStart().startsWith('>');
-    const query = isCommandMode ? raw.trimStart().slice(1).trim() : raw.trim();
+    const trimmedStart = raw.trimStart();
+    const isCommandMode = trimmedStart.startsWith('>');
+    const isHeadingMode = !isCommandMode && trimmedStart.startsWith('#');
+    const query = isCommandMode || isHeadingMode ? trimmedStart.slice(1).trim() : raw.trim();
 
-    const pool = isCommandMode ? this.source.getCommandItems() : [
-      ...this.cachedFileItems,
-      ...(query ? this.source.getCommandItems() : []),
-    ];
+    const pool = isCommandMode
+      ? this.source.getCommandItems()
+      : isHeadingMode
+        ? buildPaletteHeadingItems({
+            headings: this.source.getHeadings?.() ?? [],
+            onJumpToLine: (line) => this.source.onJumpToLine?.(line),
+          })
+        : [...this.cachedFileItems, ...(query ? this.source.getCommandItems() : [])];
 
     const scored: Array<{ item: PaletteItem; score: number; indices: number[] }> = [];
     for (const item of pool) {
@@ -246,19 +271,28 @@ export class CommandPaletteController {
 
     this.resultsEl.replaceChildren();
     if (this.visibleEntries.length === 0) {
+      this.input.removeAttribute('aria-activedescendant');
       const empty = document.createElement('p');
       empty.className = 'muted-hint';
       empty.textContent = isCommandMode
         ? t('palette.noMatchingCommand')
-        : t('palette.noMatchingFiles');
+        : isHeadingMode
+          ? getLanguage() === 'en'
+            ? 'No matching headings in the active document.'
+            : 'Keine passenden Überschriften im aktiven Dokument.'
+          : t('palette.noMatchingFiles');
       this.resultsEl.appendChild(empty);
       return;
     }
 
     this.visibleEntries.forEach(({ item, indices }, idx) => {
+      const isSelected = idx === this.selectedIndex;
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = `palette-item ${idx === this.selectedIndex ? 'is-selected' : ''}`;
+      btn.id = `palette-option-${idx}`;
+      btn.setAttribute('role', 'option');
+      btn.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+      btn.className = `palette-item ${isSelected ? 'is-selected' : ''}`;
       btn.dataset.paletteIdx = String(idx);
 
       const mainCol = document.createElement('div');
@@ -273,11 +307,13 @@ export class CommandPaletteController {
       iconSpan.textContent =
         item.kind === 'command'
           ? '⚡'
-          : item.kind === 'folder'
-            ? '📁'
-            : item.kind === 'tab'
-              ? '📄'
-              : '📝';
+          : item.kind === 'heading'
+            ? '#'
+            : item.kind === 'folder'
+              ? '📁'
+              : item.kind === 'tab'
+                ? '📄'
+                : '📝';
 
       const labelSpan = document.createElement('span');
       labelSpan.className = 'palette-item-label';
@@ -322,17 +358,29 @@ export class CommandPaletteController {
 
       this.resultsEl.appendChild(btn);
     });
+
+    this.input.setAttribute('aria-activedescendant', `palette-option-${this.selectedIndex}`);
   }
 
   private updateSelectionHighlight(scrollIntoView = true): void {
     const buttons = this.resultsEl.querySelectorAll<HTMLButtonElement>('.palette-item');
+    let activeId: string | null = null;
     buttons.forEach((btn, idx) => {
       const selected = idx === this.selectedIndex;
       btn.classList.toggle('is-selected', selected);
-      if (selected && scrollIntoView) {
-        btn.scrollIntoView({ block: 'nearest' });
+      btn.setAttribute('aria-selected', selected ? 'true' : 'false');
+      if (selected) {
+        activeId = btn.id;
+        if (scrollIntoView) {
+          btn.scrollIntoView({ block: 'nearest' });
+        }
       }
     });
+    if (activeId) {
+      this.input.setAttribute('aria-activedescendant', activeId);
+    } else {
+      this.input.removeAttribute('aria-activedescendant');
+    }
   }
 
   private executeItem(item: PaletteItem): void {

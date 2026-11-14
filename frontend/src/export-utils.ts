@@ -22,13 +22,18 @@ const TEXT_LANGUAGES: Record<string, string> = {
   rs: 'rust',
 };
 
-export function renderDocument(name: string, content: string, baseDir: string | null) {
-  if (isMarkdownPath(name)) return backend.renderMarkdown(content, baseDir);
+export function renderDocument(
+  name: string,
+  content: string,
+  baseDir: string | null,
+  docKey?: string,
+) {
+  if (isMarkdownPath(name)) return backend.renderMarkdown(content, baseDir, docKey);
   const ext = getFileExtension(name);
   const language = TEXT_LANGUAGES[ext] ?? (ext || 'text');
   let fence = '```';
   while (content.includes(fence)) fence += '`';
-  return backend.renderMarkdown(`${fence}${language}\n${content}\n${fence}`, baseDir);
+  return backend.renderMarkdown(`${fence}${language}\n${content}\n${fence}`, baseDir, docKey);
 }
 
 const ALERT_COLORS: Record<string, string> = {
@@ -203,6 +208,50 @@ export async function buildOfficeFriendlyHtml(
         'style',
         `font-weight: 600; margin: 0 0 4px 0; color: ${accent};`,
       );
+    }
+  }
+  for (const card of clone.querySelectorAll<HTMLElement>('.frontmatter-card')) {
+    card.setAttribute(
+      'style',
+      'margin: 0 0 14px 0; border: 1px solid #d6dde4; border-radius: 6px; background-color: #f8fafc; font-size: 9.5pt;',
+    );
+  }
+  for (const chips of clone.querySelectorAll<HTMLElement>('.frontmatter-chips')) {
+    chips.setAttribute(
+      'style',
+      'display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; border-bottom: 1px solid #d6dde4;',
+    );
+  }
+  for (const chip of clone.querySelectorAll<HTMLElement>('.frontmatter-chip')) {
+    chip.setAttribute(
+      'style',
+      'display: inline-block; border: 1px solid #d6dde4; border-radius: 4px; background-color: #ffffff; font-size: 9pt;',
+    );
+  }
+  for (const keyEl of clone.querySelectorAll<HTMLElement>('.frontmatter-chip-key')) {
+    keyEl.setAttribute(
+      'style',
+      'padding: 2px 6px; font-family: Cascadia Mono, Consolas, monospace; font-weight: 600; color: #506173; background-color: #f0f3f6; border-right: 1px solid #d6dde4;',
+    );
+  }
+  for (const valEl of clone.querySelectorAll<HTMLElement>('.frontmatter-chip-val')) {
+    valEl.setAttribute('style', 'padding: 2px 7px; color: #202934;');
+  }
+  for (const block of clone.querySelectorAll<HTMLElement>('.prompt-tag-block')) {
+    block.setAttribute(
+      'style',
+      'margin: 12px 0; border: 1px solid #d6dde4; border-left: 3px solid #426b91; border-radius: 6px; background-color: #f8fafc;',
+    );
+    const labelEl = block.querySelector<HTMLElement>('.prompt-tag-label');
+    if (labelEl) {
+      labelEl.setAttribute(
+        'style',
+        'padding: 5px 12px; font-family: Cascadia Mono, Consolas, monospace; font-size: 9pt; font-weight: 600; color: #426b91; background-color: #f0f3f6; border-bottom: 1px solid #d6dde4;',
+      );
+    }
+    const bodyEl = block.querySelector<HTMLElement>('.prompt-tag-body');
+    if (bodyEl) {
+      bodyEl.setAttribute('style', 'padding: 10px 14px; color: #202934;');
     }
   }
 

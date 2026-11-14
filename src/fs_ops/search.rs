@@ -1,9 +1,12 @@
 use super::encoding::{decode_text_bytes, replace_text_file};
 use super::{
-    clean_windows_path, is_markdown_path, is_supported_text_path, normalize_existing_path,
-    IGNORED_DIRS,
+    clean_windows_path, is_allowed_dot_entry, is_markdown_path, is_supported_text_path,
+    normalize_existing_path, IGNORED_DIRS,
 };
+use regex::{NoExpand, Regex, RegexBuilder};
 use serde::Serialize;
+use std::borrow::Cow;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -24,10 +27,65 @@ pub struct SearchFileResult {
     pub matches: Vec<SearchMatchItem>,
 }
 
+fn build_search_regex(
+    query: &str,
+    case_sensitive: bool,
+    use_regex: bool,
+    whole_word: bool,
+) -> Result<Option<Regex>, String> {
+    if !use_regex && !whole_word {
+        return Ok(None);
+    }
+
+    if use_regex && !whole_word {
+        return RegexBuilder::new(query)
+            .case_insensitive(!case_sensitive)
+            .multi_line(true)
+            .build()
+            .map(Some)
+            .map_err(|err| format!("Ungültiger regulärer Ausdruck: {err}"));
+    }
+
+    if use_regex {
+        // Validate the user pattern first so syntax errors report against the original input.
+        if let Err(err) = RegexBuilder::new(query)
+            .case_insensitive(!case_sensitive)
+            .multi_line(true)
+            .build()
+        {
+            return Err(format!("Ungültiger regulärer Ausdruck: {err}"));
+        }
+    }
+
+    let pattern = if use_regex {
+        format!(r"\b(?:{query})\b")
+    } else {
+        format!(r"\b(?:{})\b", regex::escape(query))
+    };
+
+    RegexBuilder::new(&pattern)
+        .case_insensitive(!case_sensitive)
+        .multi_line(true)
+        .build()
+        .map(Some)
+        .map_err(|err| format!("Ungültiger regulärer Ausdruck: {err}"))
+}
+
+#[cfg(test)]
 pub fn search_workspace_files(
     root: &Path,
     query: &str,
     case_sensitive: bool,
+) -> Result<Vec<SearchFileResult>, String> {
+    search_workspace_with_options(root, query, case_sensitive, false, false)
+}
+
+pub fn search_workspace_with_options(
+    root: &Path,
+    query: &str,
+    case_sensitive: bool,
+    use_regex: bool,
+    whole_word: bool,
 ) -> Result<Vec<SearchFileResult>, String> {
     const MAX_TOTAL_MATCHES: usize = 300;
     const MAX_MATCHES_PER_FILE: usize = 40;
@@ -41,7 +99,12 @@ pub fn search_workspace_files(
         return Err("Ungültiger Arbeitsordner.".to_string());
     }
 
-    let needle = if case_sensitive {
+    let active_query = if use_regex { query } else { trimmed_q };
+    let compiled_regex = build_search_regex(active_query, case_sensitive, use_regex, whole_word)?;
+
+    let needle = if compiled_regex.is_some() {
+        String::new()
+    } else if case_sensitive {
         trimmed_q.to_string()
     } else {
         trimmed_q.to_lowercase()
@@ -69,7 +132,10 @@ pub fn search_workspace_files(
 
         let mut file_matches = Vec::new();
         for (idx, raw_line) in content.lines().enumerate() {
-            let found_col = if case_sensitive {
+            let found_col = if let Some(ref re) = compiled_regex {
+                re.find(raw_line)
+                    .map(|m| raw_line[..m.start()].chars().count() + 1)
+            } else if case_sensitive {
                 raw_line
                     .find(&needle)
                     .map(|byte_pos| raw_line[..byte_pos].chars().count() + 1)
@@ -172,7 +238,7 @@ impl WorkspaceScan {
             let path = entry.path();
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if name.starts_with('.') {
+            if !is_allowed_dot_entry(&name) {
                 continue;
             }
             let kind = match entry.file_type() {
@@ -201,11 +267,26 @@ impl WorkspaceScan {
 
 /// Replaces all occurrences of `query` with `replacement` across Markdown/text files in `root`.
 /// Preserves each file's detected line-ending style via atomic `write_text_file`.
+#[cfg(test)]
 pub fn replace_in_workspace_files(
     root: &Path,
     query: &str,
     replacement: &str,
     case_sensitive: bool,
+) -> Result<WorkspaceReplaceResult, String> {
+    replace_in_workspace_with_options(root, query, replacement, case_sensitive, false, false, None)
+}
+
+/// Replaces occurrences of `query` with `replacement` across workspace files with regex,
+/// whole-word, and optional `include_files` filtering.
+pub fn replace_in_workspace_with_options(
+    root: &Path,
+    query: &str,
+    replacement: &str,
+    case_sensitive: bool,
+    use_regex: bool,
+    whole_word: bool,
+    include_files: Option<Vec<String>>,
 ) -> Result<WorkspaceReplaceResult, String> {
     if query.is_empty() {
         return Err("Suchbegriff darf nicht leer sein.".to_string());
@@ -214,6 +295,14 @@ pub fn replace_in_workspace_files(
     if !norm_root.is_dir() {
         return Err("Ungültiger Arbeitsordner.".to_string());
     }
+
+    let compiled_regex = build_search_regex(query, case_sensitive, use_regex, whole_word)?;
+    let include_set: Option<HashSet<PathBuf>> = include_files.map(|paths| {
+        paths
+            .into_iter()
+            .map(|p| clean_windows_path(&normalize_existing_path(Path::new(&p))))
+            .collect()
+    });
 
     let mut scan = WorkspaceScan::default();
     scan.collect_files(&norm_root, 0);
@@ -224,12 +313,18 @@ pub fn replace_in_workspace_files(
     let mut failures = scan.failures;
 
     for file_path in scan.files {
+        let clean_path = clean_windows_path(&file_path);
+        if let Some(ref allowed) = include_set {
+            if !allowed.contains(&clean_path) {
+                continue;
+            }
+        }
         if let Ok(meta) = fs::metadata(&file_path) {
             if meta.len() > 5 * 1024 * 1024 {
                 continue;
             }
         }
-        let path = clean_windows_path(&file_path).to_string_lossy().into_owned();
+        let path = clean_path.to_string_lossy().into_owned();
         let bytes = match fs::read(&file_path) {
             Ok(bytes) => bytes,
             Err(err) => {
@@ -243,8 +338,31 @@ pub fn replace_in_workspace_files(
         let (content, _) = decode_text_bytes(&bytes);
         let prefer_crlf = content.contains("\r\n");
 
-        let (updated, count) = replace_text_occurrences(&content, query, replacement, case_sensitive);
-        if count > 0 && updated != content {
+        let (updated, count, changed) = if let Some(ref re) = compiled_regex {
+            let normalized: Cow<'_, str> = if prefer_crlf {
+                Cow::Owned(content.replace("\r\n", "\n"))
+            } else {
+                Cow::Borrowed(content.as_str())
+            };
+            let count = re.find_iter(&normalized).count();
+            if count == 0 {
+                (String::new(), 0, false)
+            } else {
+                let replaced = if use_regex {
+                    re.replace_all(&normalized, replacement).into_owned()
+                } else {
+                    re.replace_all(&normalized, NoExpand(replacement)).into_owned()
+                };
+                let changed = replaced != *normalized;
+                (replaced, count, changed)
+            }
+        } else {
+            let (replaced, count) =
+                replace_text_occurrences(&content, query, replacement, case_sensitive);
+            let changed = count > 0 && replaced != content;
+            (replaced, count, changed)
+        };
+        if changed {
             match replace_text_file(&file_path, &updated, prefer_crlf, &bytes) {
                 Ok(()) => {
                     files_updated += 1;
@@ -451,5 +569,240 @@ mod tests {
         assert_eq!(fs::read_to_string(blocked).unwrap(), "old");
         drop(lock);
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn dotfile_parity_between_explorer_quick_open_and_search() {
+        let dir = std::env::temp_dir().join(format!(
+            "semyra_dotfile_parity_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(dir.join(".github")).unwrap();
+        fs::create_dir_all(dir.join(".agents").join("skills").join("demo")).unwrap();
+        fs::create_dir_all(dir.join(".git")).unwrap();
+        fs::create_dir_all(dir.join(".vscode")).unwrap();
+
+        fs::write(dir.join(".github").join("AGENTS.md"), "needle in github\n").unwrap();
+        fs::write(
+            dir.join(".agents").join("skills").join("demo").join("SKILL.md"),
+            "needle in agents\n",
+        )
+        .unwrap();
+        fs::write(dir.join(".cursorrules"), "needle in cursorrules\n").unwrap();
+        fs::write(dir.join(".env.local"), "KEY=needle\n").unwrap();
+        fs::write(dir.join(".git").join("notes.md"), "needle in git\n").unwrap();
+        fs::write(dir.join(".vscode").join("notes.md"), "needle in vscode\n").unwrap();
+
+        let tree = crate::fs_ops::build_directory_tree(&dir, 6).unwrap();
+        let root_children = tree.children.unwrap();
+        let names: Vec<&str> = root_children.iter().map(|n| n.name.as_str()).collect();
+        assert!(names.contains(&".github"));
+        assert!(names.contains(&".agents"));
+        assert!(names.contains(&".cursorrules"));
+        assert!(names.contains(&".env.local"));
+        assert!(!names.contains(&".git"));
+        assert!(!names.contains(&".vscode"));
+
+        let quick_open = crate::fs_ops::list_workspace_markdown_files(&dir).unwrap();
+        let rels: Vec<&str> = quick_open.iter().map(|e| e.rel_path.as_str()).collect();
+        assert!(rels.contains(&".github/AGENTS.md"));
+        assert!(rels.contains(&".agents/skills/demo/SKILL.md"));
+        assert!(rels.contains(&".cursorrules"));
+        assert!(rels.contains(&".env.local"));
+        assert!(!rels.iter().any(|r| r.starts_with(".git/") || r.starts_with(".vscode/")));
+
+        let search_hits = search_workspace_files(&dir, "needle", true).unwrap();
+        let hit_rels: Vec<String> = search_hits
+            .iter()
+            .map(|r| r.rel_path.replace('\\', "/"))
+            .collect();
+        assert!(hit_rels.contains(&".github/AGENTS.md".to_string()));
+        assert!(hit_rels.contains(&".agents/skills/demo/SKILL.md".to_string()));
+        assert!(hit_rels.contains(&".cursorrules".to_string()));
+        assert!(hit_rels.contains(&".env.local".to_string()));
+        assert!(!hit_rels.iter().any(|r| r.starts_with(".git/") || r.starts_with(".vscode/")));
+
+        let replaced = replace_in_workspace_files(&dir, "needle", "updated", true).unwrap();
+        assert_eq!(replaced.files_updated, 4);
+        assert!(fs::read_to_string(dir.join(".github").join("AGENTS.md"))
+            .unwrap()
+            .contains("updated in github"));
+        assert!(fs::read_to_string(dir.join(".cursorrules"))
+            .unwrap()
+            .contains("updated in cursorrules"));
+        assert!(fs::read_to_string(dir.join(".git").join("notes.md"))
+            .unwrap()
+            .contains("needle in git"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn search_and_replace_support_regex_and_report_invalid_patterns() {
+        let dir = std::env::temp_dir().join(format!(
+            "semyra_regex_search_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let file_a = dir.join("notes.md");
+        fs::write(&file_a, "v1.2.0 released\nv10.0.1 draft\n").unwrap();
+
+        let err = search_workspace_with_options(&dir, "(unclosed", true, true, false).unwrap_err();
+        assert!(err.contains("Ungültiger regulärer Ausdruck"));
+
+        let hits = search_workspace_with_options(&dir, r"v(\d+)\.\d+\.\d+", true, true, false).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].matches.len(), 2);
+
+        let replaced = replace_in_workspace_with_options(
+            &dir,
+            r"v(\d+)\.\d+\.\d+",
+            "major-$1",
+            true,
+            true,
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(replaced.files_updated, 1);
+        assert_eq!(replaced.total_replacements, 2);
+        assert_eq!(
+            fs::read_to_string(&file_a).unwrap(),
+            "major-1 released\nmajor-10 draft\n"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn search_and_replace_whole_word_ignores_substrings_and_literal_dollars() {
+        let dir = std::env::temp_dir().join(format!(
+            "semyra_whole_word_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let file_a = dir.join("words.md");
+        fs::write(&file_a, "cat caterpillar Cat scatter\n").unwrap();
+
+        let hits = search_workspace_with_options(&dir, "cat", false, false, true).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].matches.len(), 1);
+        assert_eq!(hits[0].matches[0].column, 1);
+
+        let replaced = replace_in_workspace_with_options(
+            &dir,
+            "cat",
+            "$1-dog",
+            false,
+            false,
+            true,
+            None,
+        )
+        .unwrap();
+        assert_eq!(replaced.files_updated, 1);
+        assert_eq!(replaced.total_replacements, 2);
+        assert_eq!(
+            fs::read_to_string(&file_a).unwrap(),
+            "$1-dog caterpillar $1-dog scatter\n"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn replace_respects_include_files_filter() {
+        let dir = std::env::temp_dir().join(format!(
+            "semyra_include_files_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let file_a = dir.join("a.md");
+        let file_b = dir.join("b.md");
+        fs::write(&file_a, "alpha beta\n").unwrap();
+        fs::write(&file_b, "alpha gamma\n").unwrap();
+
+        let empty_res = replace_in_workspace_with_options(
+            &dir,
+            "alpha",
+            "omega",
+            true,
+            false,
+            false,
+            Some(Vec::new()),
+        )
+        .unwrap();
+        assert_eq!(empty_res.files_updated, 0);
+        assert_eq!(empty_res.total_replacements, 0);
+
+        let selected = vec![clean_windows_path(&file_a).to_string_lossy().into_owned()];
+        let res = replace_in_workspace_with_options(
+            &dir,
+            "alpha",
+            "omega",
+            true,
+            false,
+            false,
+            Some(selected),
+        )
+        .unwrap();
+        assert_eq!(res.files_updated, 1);
+        assert_eq!(res.total_replacements, 1);
+        assert_eq!(fs::read_to_string(&file_a).unwrap(), "omega beta\n");
+        assert_eq!(fs::read_to_string(&file_b).unwrap(), "alpha gamma\n");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn regex_search_and_replace_match_line_anchors_consistently() {
+        let dir = std::env::temp_dir().join(format!(
+            "semyra_regex_multiline_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let lf_file = dir.join("lf.md");
+        let crlf_file = dir.join("crlf.md");
+        fs::write(&lf_file, "foo\nbar foo\nbaz\n").unwrap();
+        fs::write(&crlf_file, "foo\r\nbar foo\r\nbaz\r\n").unwrap();
+
+        let hits = search_workspace_with_options(&dir, r"^foo$", true, true, false).unwrap();
+        assert_eq!(hits.len(), 2);
+        assert!(hits.iter().all(|file| file.matches.len() == 1 && file.matches[0].line == 1));
+
+        let res = replace_in_workspace_with_options(
+            &dir,
+            r"^foo$",
+            "qux",
+            true,
+            true,
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(res.files_updated, 2);
+        assert_eq!(res.total_replacements, 2);
+        assert_eq!(fs::read_to_string(&lf_file).unwrap(), "qux\nbar foo\nbaz\n");
+        assert_eq!(
+            fs::read_to_string(&crlf_file).unwrap(),
+            "qux\r\nbar foo\r\nbaz\r\n"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

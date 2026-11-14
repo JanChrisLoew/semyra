@@ -16,6 +16,7 @@ export interface RenderResult {
   html: string;
   outline: HeadingItem[];
   stats: DocStats;
+  superseded?: boolean;
 }
 
 export interface FilePayload {
@@ -114,8 +115,11 @@ export const backend = {
   saveUiPrefs: (revision: number, prefs: UiSessionPrefs) =>
     postJson<{ ok: boolean }>('prefs/save', { revision, prefs }),
 
-  renderMarkdown: (markdown: string, baseDir: string | null) =>
-    postJson<RenderResult>('render', { markdown, baseDir }),
+  renderMarkdown: (markdown: string, baseDir: string | null, docKey?: string) =>
+    postJson<RenderResult>(
+      'render',
+      docKey !== undefined ? { markdown, baseDir, docKey } : { markdown, baseDir },
+    ),
 
   readFile: (path: string) => postJson<FilePayload>('read-file', { path }),
 
@@ -171,11 +175,19 @@ export const backend = {
       { baseDir, sourcePath },
     ),
 
-  searchWorkspace: (root: string, query: string, caseSensitive: boolean) =>
+  searchWorkspace: (
+    root: string,
+    query: string,
+    caseSensitive: boolean,
+    useRegex = false,
+    wholeWord = false,
+  ) =>
     postJson<{ results: SearchFileResult[] }>('search-workspace', {
       root,
       query,
       caseSensitive,
+      useRegex,
+      wholeWord,
     }),
 
   replaceWorkspace: (
@@ -183,12 +195,18 @@ export const backend = {
     query: string,
     replacement: string,
     caseSensitive: boolean,
+    useRegex = false,
+    wholeWord = false,
+    includeFiles?: string[],
   ) =>
     postJson<WorkspaceReplaceResult>('replace-workspace', {
       root,
       query,
       replacement,
       caseSensitive,
+      useRegex,
+      wholeWord,
+      ...(includeFiles !== undefined ? { includeFiles } : {}),
     }),
 
   revealInExplorer: (path: string) =>

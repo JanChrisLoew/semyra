@@ -1,5 +1,5 @@
 import { WorkspaceFileEntry } from './api';
-import { PaletteItem } from './palette';
+import type { PaletteHeading, PaletteItem } from './palette';
 import { baseNameOfPath } from './path-utils';
 import { getLanguage } from './i18n';
 import { AiTemplateId, listAiTemplates } from './ai-templates';
@@ -35,7 +35,11 @@ export interface PaletteCommandContext {
   onSaveAs: () => void;
   onCopyRichText: () => void;
   onExportHtml: () => void;
+  onExportHtmlLight?: () => void;
+  onExportHtmlDark?: () => void;
   onExportPdf: () => void;
+  onDiffWithSaved?: () => void;
+  onCompareOpenTabs?: () => void;
   onPrint: () => void;
   onAlignTable: () => void;
   onSetViewMode: (mode: 'editor' | 'split' | 'preview') => void;
@@ -60,8 +64,12 @@ export interface PaletteCommandContext {
   onToggleTask?: () => void;
   onCopyMarkdown?: () => void;
   onCopyAiContext?: () => void;
+  onCopyAtPath?: () => void;
   onOpenAiBundle?: () => void;
+  onFillPromptVariables?: () => void;
   onCreateFromTemplate?: (templateId: AiTemplateId) => void;
+  onScaffoldWorkspaceAgents?: () => void;
+  onScaffoldWorkspaceSkill?: () => void;
   onInsertTableRowAbove?: () => void;
   onInsertTableRowBelow?: () => void;
   onDeleteTableRow?: () => void;
@@ -79,6 +87,23 @@ export interface PaletteCommandContext {
   onOpenSettings?: () => void;
   onFormatDocument?: () => void;
   onShowLint?: () => void;
+}
+
+export interface PaletteHeadingContext {
+  headings: PaletteHeading[];
+  onJumpToLine: (line: number) => void;
+}
+
+export function buildPaletteHeadingItems(ctx: PaletteHeadingContext): PaletteItem[] {
+  const isEn = getLanguage() === 'en';
+  return ctx.headings.map((heading, index) => ({
+    id: `heading:${heading.line}:${index}`,
+    kind: 'heading',
+    label: heading.text,
+    subtitle: isEn ? `Line ${heading.line}` : `Zeile ${heading.line}`,
+    badge: `H${heading.level}`,
+    run: () => ctx.onJumpToLine(heading.line),
+  }));
 }
 
 export async function buildPaletteFileItems(ctx: PaletteFileContext): Promise<PaletteItem[]> {
@@ -239,6 +264,16 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           },
         ]
       : []),
+    ...(ctx.onCopyAtPath
+      ? [
+          {
+            id: 'cmd:copy-at-path',
+            kind: 'command' as const,
+            label: isEn ? 'Clipboard: Copy @relative/path (CLI Agents)' : 'Zwischenablage: Relativen @pfad kopieren (CLI-Agenten)',
+            run: ctx.onCopyAtPath,
+          },
+        ]
+      : []),
     {
       id: 'cmd:copy-rich',
       kind: 'command',
@@ -253,6 +288,54 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
       shortcut: isEn ? 'Ctrl+Shift+H' : 'Strg+Umschalt+H',
       run: ctx.onExportHtml,
     },
+    ...(ctx.onExportHtmlLight
+      ? [
+          {
+            id: 'cmd:export-html-light',
+            kind: 'command' as const,
+            label: isEn
+              ? 'Export: Standalone 1-File HTML (Light)…'
+              : 'Export: Als eigenständige 1-Datei-HTML (Hell) exportieren…',
+            run: ctx.onExportHtmlLight,
+          },
+        ]
+      : []),
+    ...(ctx.onExportHtmlDark
+      ? [
+          {
+            id: 'cmd:export-html-dark',
+            kind: 'command' as const,
+            label: isEn
+              ? 'Export: Standalone 1-File HTML (Dark)…'
+              : 'Export: Als eigenständige 1-Datei-HTML (Dunkel) exportieren…',
+            run: ctx.onExportHtmlDark,
+          },
+        ]
+      : []),
+    ...(ctx.onDiffWithSaved
+      ? [
+          {
+            id: 'cmd:diff-with-saved',
+            kind: 'command' as const,
+            label: isEn
+              ? 'Compare: Diff with Saved Version…'
+              : 'Vergleichen: Mit gespeichertem Stand vergleichen…',
+            run: ctx.onDiffWithSaved,
+          },
+        ]
+      : []),
+    ...(ctx.onCompareOpenTabs
+      ? [
+          {
+            id: 'cmd:compare-open-tabs',
+            kind: 'command' as const,
+            label: isEn
+              ? 'Compare: Compare Open Tabs…'
+              : 'Vergleichen: Offene Tabs vergleichen…',
+            run: ctx.onCompareOpenTabs,
+          },
+        ]
+      : []),
     {
       id: 'cmd:export-pdf',
       kind: 'command',
@@ -284,6 +367,16 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           },
         ]
       : []),
+    ...(ctx.onFillPromptVariables
+      ? [
+          {
+            id: 'cmd:fill-prompt-vars',
+            kind: 'command' as const,
+            label: isEn ? 'AI: Fill Prompt Variables & Copy…' : 'KI: Prompt-Variablen ausfüllen & kopieren…',
+            run: ctx.onFillPromptVariables,
+          },
+        ]
+      : []),
     ...(ctx.onCreateFromTemplate
       ? listAiTemplates().map((tpl) => ({
           id: `cmd:template-${tpl.id}`,
@@ -292,6 +385,36 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           subtitle: tpl.description,
           run: () => ctx.onCreateFromTemplate?.(tpl.id),
         }))
+      : []),
+    ...(ctx.onScaffoldWorkspaceAgents
+      ? [
+          {
+            id: 'cmd:scaffold-workspace-agents',
+            kind: 'command' as const,
+            label: isEn
+              ? 'Workspace: Create AGENTS.md'
+              : 'Arbeitsbereich: AGENTS.md im Workspace anlegen',
+            subtitle: isEn
+              ? 'Create AGENTS.md in the active workspace root using the agent guide template'
+              : 'AGENTS.md im Stammverzeichnis des Arbeitsordners mit der Agenten-Vorlage anlegen',
+            run: ctx.onScaffoldWorkspaceAgents,
+          },
+        ]
+      : []),
+    ...(ctx.onScaffoldWorkspaceSkill
+      ? [
+          {
+            id: 'cmd:scaffold-workspace-skill',
+            kind: 'command' as const,
+            label: isEn
+              ? 'Workspace: Create Workspace Skill (.agents/skills/…)'
+              : 'Arbeitsbereich: Workspace-Skill (.agents/skills/…) anlegen',
+            subtitle: isEn
+              ? 'Create .agents/skills/<slug>/SKILL.md in the active workspace'
+              : '.agents/skills/<slug>/SKILL.md im aktiven Arbeitsordner anlegen',
+            run: ctx.onScaffoldWorkspaceSkill,
+          },
+        ]
       : []),
     ...(ctx.onInsertTableRowAbove
       ? [

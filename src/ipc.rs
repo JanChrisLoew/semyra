@@ -5,8 +5,8 @@ use crate::fs_ops::{
     create_ai_skill, create_new_folder, create_new_markdown_file, ensure_ai_library_tree,
     import_dropped_image, inline_local_asset_images, list_workspace_markdown_files,
     move_to_recycle_bin, normalize_existing_path, read_text_file, rename_fs_entry,
-    reveal_in_explorer, save_clipboard_image, replace_in_workspace_files,
-    search_workspace_files, write_text_file,
+    replace_in_workspace_with_options, reveal_in_explorer, save_clipboard_image,
+    search_workspace_with_options, write_text_file,
 };
 use crate::markdown::render_markdown;
 use crate::state::{AppState, UserEvent};
@@ -16,19 +16,180 @@ use percent_encoding::percent_decode_str;
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Sender};
+use std::sync::{Arc, Mutex, OnceLock};
 use wry::RequestAsyncResponder;
 
 #[derive(RustEmbed)]
 #[folder = "frontend/dist"]
 struct FrontendAssets;
 
+type WorkerJob = Box<dyn FnOnce() + Send + 'static>;
+
+/// Bounded worker pool for off-UI-thread IPC disk, search, render, and dialog work.
+struct WorkerPool {
+    sender: Sender<WorkerJob>,
+}
+
+fn default_worker_count() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .clamp(4, 8)
+}
+
+impl WorkerPool {
+    fn new(size: usize) -> Self {
+        let count = size.max(1);
+        let (sender, receiver) = mpsc::channel::<WorkerJob>();
+        let shared_rx = Arc::new(Mutex::new(receiver));
+
+        for idx in 0..count {
+            let rx = Arc::clone(&shared_rx);
+            let _ = std::thread::Builder::new()
+                .name(format!("semyra-ipc-worker-{idx}"))
+                .spawn(move || loop {
+                    let job = {
+                        let Ok(guard) = rx.lock() else {
+                            break;
+                        };
+                        guard.recv()
+                    };
+                    match job {
+                        Ok(task) => {
+                            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(task));
+                        }
+                        Err(_) => break,
+                    }
+                });
+        }
+
+        Self { sender }
+    }
+
+    fn execute(&self, job: impl FnOnce() + Send + 'static) {
+        let _ = self.sender.send(Box::new(job));
+    }
+}
+
+fn ipc_worker_pool() -> &'static WorkerPool {
+    static POOL: OnceLock<WorkerPool> = OnceLock::new();
+    POOL.get_or_init(|| WorkerPool::new(default_worker_count()))
+}
+
+/// Tracks the latest queued revision token per document key so stale render jobs
+/// can be skipped without running `pulldown-cmark` / `syntect`.
+#[derive(Default)]
+struct RenderCoalesceState {
+    entries: HashMap<String, (u64, u64)>,
+    next_touch: u64,
+}
+
+#[derive(Default)]
+struct RenderCoalescer {
+    state: Mutex<RenderCoalesceState>,
+}
+
+impl RenderCoalescer {
+    const MAX_KEYS: usize = 256;
+
+    fn register(&self, key: &str, client_revision: Option<u64>) -> u64 {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        state.next_touch = state.next_touch.saturating_add(1);
+        let touch = state.next_touch;
+
+        if !state.entries.contains_key(key) && state.entries.len() >= Self::MAX_KEYS {
+            if let Some(oldest_key) = state
+                .entries
+                .iter()
+                .min_by_key(|(_, (_, last_touch))| *last_touch)
+                .map(|(k, _)| k.clone())
+            {
+                state.entries.remove(&oldest_key);
+            }
+        }
+
+        let entry = state.entries.entry(key.to_string()).or_insert((0, touch));
+        entry.1 = touch;
+        match client_revision {
+            Some(rev) if rev > entry.0 => {
+                entry.0 = rev;
+                rev
+            }
+            Some(rev) => rev,
+            None => {
+                entry.0 = entry.0.saturating_add(1);
+                entry.0
+            }
+        }
+    }
+
+    fn is_superseded(&self, key: &str, token: u64) -> bool {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        state
+            .entries
+            .get(key)
+            .is_some_and(|&(latest, _)| latest > token)
+    }
+}
+
+fn render_coalescer() -> &'static RenderCoalescer {
+    static COALESCER: OnceLock<RenderCoalescer> = OnceLock::new();
+    COALESCER.get_or_init(RenderCoalescer::default)
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RenderReq {
     markdown: String,
     base_dir: Option<String>,
+    #[serde(default)]
+    doc_key: Option<String>,
+    #[serde(default)]
+    revision: Option<u64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SupersededDocStats {
+    words: usize,
+    chars: usize,
+    lines: usize,
+    reading_time_sec: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SupersededRenderResult {
+    superseded: bool,
+    html: &'static str,
+    outline: [(); 0],
+    stats: SupersededDocStats,
+}
+
+impl Default for SupersededRenderResult {
+    fn default() -> Self {
+        Self {
+            superseded: true,
+            html: "",
+            outline: [],
+            stats: SupersededDocStats {
+                words: 0,
+                chars: 0,
+                lines: 0,
+                reading_time_sec: 0,
+            },
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -97,6 +258,10 @@ struct SearchWorkspaceReq {
     query: String,
     #[serde(default)]
     case_sensitive: bool,
+    #[serde(default)]
+    use_regex: bool,
+    #[serde(default)]
+    whole_word: bool,
 }
 
 #[derive(Deserialize)]
@@ -107,6 +272,12 @@ struct ReplaceWorkspaceReq {
     replacement: String,
     #[serde(default)]
     case_sensitive: bool,
+    #[serde(default)]
+    use_regex: bool,
+    #[serde(default)]
+    whole_word: bool,
+    #[serde(default)]
+    include_files: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -236,7 +407,7 @@ pub fn handle_protocol_request(
             responder.respond(err_json(StatusCode::BAD_REQUEST, "Fehlender Pfadparameter."));
             return;
         };
-        std::thread::spawn(move || {
+        ipc_worker_pool().execute(move || {
             let target = PathBuf::from(&raw_path);
             if !state.is_local_asset_allowed(&target) {
                 responder.respond(err_json(
@@ -342,7 +513,7 @@ fn handle_api_route(
                 guard.ui_prefs = req.prefs;
             }
             drop(guard);
-            std::thread::spawn(move || {
+            ipc_worker_pool().execute(move || {
                 let result = crate::window_prefs::update_window_prefs(|disk| {
                     let guard = state.inner.lock()
                         .map_err(|_| std::io::Error::other("Einstellungen sind nicht verfügbar."))?;
@@ -370,7 +541,7 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Entwurfsdaten"));
                 return;
             };
-            std::thread::spawn(move || {
+            ipc_worker_pool().execute(move || {
                 let result = state.drafts.lock().map_err(|e| e.to_string()).and_then(|mut store| {
                     store.as_mut().ok_or_else(|| "Entwurfswiederherstellung ist nicht verfügbar.".to_string())?
                         .save(req.revision, req.entries, req.recovery_restored)
@@ -387,7 +558,23 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Render-Anfrage"));
                 return;
             };
-            std::thread::spawn(move || {
+            let coalesce = req
+                .doc_key
+                .as_deref()
+                .map(str::trim)
+                .filter(|key| !key.is_empty())
+                .map(|key| {
+                    let key = key.to_string();
+                    let token = render_coalescer().register(&key, req.revision);
+                    (key, token)
+                });
+            ipc_worker_pool().execute(move || {
+                if let Some((ref coalesce_key, token)) = coalesce {
+                    if render_coalescer().is_superseded(coalesce_key, token) {
+                        responder.respond(ok_json(&SupersededRenderResult::default()));
+                        return;
+                    }
+                }
                 let base = req.base_dir.as_deref().map(Path::new);
                 let result = render_markdown(&req.markdown, base);
                 responder.respond(ok_json(&result));
@@ -399,7 +586,7 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültiger Dateipfad"));
                 return;
             };
-            std::thread::spawn(move || {
+            ipc_worker_pool().execute(move || {
                 let p = PathBuf::from(&req.path);
                 match read_text_file(&p) {
                     Ok(file_data) => {
@@ -416,7 +603,7 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Speicher-Anfrage"));
                 return;
             };
-            std::thread::spawn(move || {
+            ipc_worker_pool().execute(move || {
                 let p = PathBuf::from(&req.path);
                 let prefer_crlf = req
                     .line_ending
@@ -445,7 +632,7 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültiger Ordnerpfad"));
                 return;
             };
-            std::thread::spawn(move || {
+            ipc_worker_pool().execute(move || {
                 let folder = PathBuf::from(&req.path);
                 match build_directory_tree(&folder, 5) {
                     Ok(tree) => {
@@ -463,7 +650,7 @@ fn handle_api_route(
         }
 
         "ai-library/init" => {
-            std::thread::spawn(move || match ensure_ai_library_tree() {
+            ipc_worker_pool().execute(move || match ensure_ai_library_tree() {
                 Ok((root, tree)) => {
                     state.allow_and_watch_root(&root);
                     responder.respond(ok_json(&serde_json::json!({
@@ -480,14 +667,16 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Skill-Anfrage"));
                 return;
             };
-            match create_ai_skill(Path::new(&req.parent_dir), &req.skill_name) {
-                Ok(payload) => {
-                    let p = Path::new(&payload.path);
-                    state.allow_file_parent(p);
-                    responder.respond(ok_json(&payload));
+            ipc_worker_pool().execute(move || {
+                match create_ai_skill(Path::new(&req.parent_dir), &req.skill_name) {
+                    Ok(payload) => {
+                        let p = Path::new(&payload.path);
+                        state.allow_file_parent(p);
+                        responder.respond(ok_json(&payload));
+                    }
+                    Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
                 }
-                Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
-            }
+            });
         }
 
         "workspace-files" => {
@@ -495,7 +684,7 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültiger Ordnerpfad"));
                 return;
             };
-            std::thread::spawn(move || {
+            ipc_worker_pool().execute(move || {
                 match list_workspace_markdown_files(Path::new(&req.path)) {
                     Ok(files) => responder.respond(ok_json(&serde_json::json!({ "files": files }))),
                     Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
@@ -508,7 +697,7 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Bild-Anfrage"));
                 return;
             };
-            std::thread::spawn(move || {
+            ipc_worker_pool().execute(move || {
                 let base = req.base_dir.as_deref().map(Path::new);
                 match save_clipboard_image(base, &req.mime_type, &req.data_base64) {
                     Ok((saved_path, md_snippet)) => {
@@ -528,7 +717,7 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Bilddatei"));
                 return;
             };
-            std::thread::spawn(move || {
+            ipc_worker_pool().execute(move || {
                 let base = req.base_dir.as_deref().map(Path::new);
                 match import_dropped_image(base, Path::new(&req.source_path)) {
                     Ok((saved_path, md_snippet)) => {
@@ -548,11 +737,13 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Suchanfrage"));
                 return;
             };
-            std::thread::spawn(move || {
-                match search_workspace_files(
+            ipc_worker_pool().execute(move || {
+                match search_workspace_with_options(
                     Path::new(&req.root),
                     &req.query,
                     req.case_sensitive,
+                    req.use_regex,
+                    req.whole_word,
                 ) {
                     Ok(results) => {
                         responder.respond(ok_json(&serde_json::json!({ "results": results })))
@@ -567,12 +758,15 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Ersetzen-Anfrage"));
                 return;
             };
-            std::thread::spawn(move || {
-                match replace_in_workspace_files(
+            ipc_worker_pool().execute(move || {
+                match replace_in_workspace_with_options(
                     Path::new(&req.root),
                     &req.query,
                     &req.replacement,
                     req.case_sensitive,
+                    req.use_regex,
+                    req.whole_word,
+                    req.include_files,
                 ) {
                     Ok(res) => responder.respond(ok_json(&res)),
                     Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
@@ -585,13 +779,15 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Anfrage"));
                 return;
             };
-            match create_new_markdown_file(Path::new(&req.parent_dir), &req.file_name) {
-                Ok(payload) => {
-                    state.allow_file_parent(Path::new(&payload.path));
-                    responder.respond(ok_json(&payload));
+            ipc_worker_pool().execute(move || {
+                match create_new_markdown_file(Path::new(&req.parent_dir), &req.file_name) {
+                    Ok(payload) => {
+                        state.allow_file_parent(Path::new(&payload.path));
+                        responder.respond(ok_json(&payload));
+                    }
+                    Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
                 }
-                Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
-            }
+            });
         }
 
         "create-folder" => {
@@ -599,12 +795,14 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Ordner-Anfrage"));
                 return;
             };
-            match create_new_folder(Path::new(&req.parent_dir), &req.folder_name) {
-                Ok(path) => {
-                    responder.respond(ok_json(&serde_json::json!({ "path": path })));
+            ipc_worker_pool().execute(move || {
+                match create_new_folder(Path::new(&req.parent_dir), &req.folder_name) {
+                    Ok(path) => {
+                        responder.respond(ok_json(&serde_json::json!({ "path": path })));
+                    }
+                    Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
                 }
-                Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
-            }
+            });
         }
 
         "rename-path" => {
@@ -615,20 +813,22 @@ fn handle_api_route(
                 ));
                 return;
             };
-            let old_p = PathBuf::from(&req.path);
-            match rename_fs_entry(&old_p, &req.new_name) {
-                Ok((new_path, new_name)) => {
-                    let new_p = Path::new(&new_path);
-                    if new_p.is_file() {
-                        state.allow_file_parent(new_p);
+            ipc_worker_pool().execute(move || {
+                let old_p = PathBuf::from(&req.path);
+                match rename_fs_entry(&old_p, &req.new_name) {
+                    Ok((new_path, new_name)) => {
+                        let new_p = Path::new(&new_path);
+                        if new_p.is_file() {
+                            state.allow_file_parent(new_p);
+                        }
+                        responder.respond(ok_json(&serde_json::json!({
+                            "path": new_path,
+                            "name": new_name
+                        })));
                     }
-                    responder.respond(ok_json(&serde_json::json!({
-                        "path": new_path,
-                        "name": new_name
-                    })));
+                    Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
                 }
-                Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
-            }
+            });
         }
 
         "delete-path" => {
@@ -636,7 +836,7 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültiger Pfad"));
                 return;
             };
-            std::thread::spawn(move || {
+            ipc_worker_pool().execute(move || {
                 let target = PathBuf::from(&req.path);
                 match move_to_recycle_bin(&target) {
                     Ok(()) => responder.respond(ok_json(&serde_json::json!({ "ok": true }))),
@@ -650,10 +850,12 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültiger Pfad"));
                 return;
             };
-            match reveal_in_explorer(Path::new(&req.path)) {
-                Ok(()) => responder.respond(ok_json(&serde_json::json!({ "ok": true }))),
-                Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
-            }
+            ipc_worker_pool().execute(move || {
+                match reveal_in_explorer(Path::new(&req.path)) {
+                    Ok(()) => responder.respond(ok_json(&serde_json::json!({ "ok": true }))),
+                    Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
+                }
+            });
         }
 
         "window/set-state" => {
@@ -683,7 +885,7 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Fenster-Anfrage"));
                 return;
             };
-            std::thread::spawn(move || {
+            ipc_worker_pool().execute(move || {
                 if let Ok(mut guard) = state.drafts.lock() {
                     if let Some(store) = guard.as_mut() {
                         store.close(req.recovery_restored);
@@ -712,7 +914,7 @@ fn handle_api_route(
             let req_lang = serde_json::from_slice::<DialogLangReq>(&body)
                 .ok()
                 .and_then(|r| r.lang);
-            std::thread::spawn(move || {
+            ipc_worker_pool().execute(move || {
                 let is_en = req_lang.as_deref().unwrap_or(&state.get_language()) == "en";
                 let start_dir = state
                     .inner
@@ -777,7 +979,7 @@ fn handle_api_route(
             let req_lang = serde_json::from_slice::<DialogLangReq>(&body)
                 .ok()
                 .and_then(|r| r.lang);
-            std::thread::spawn(move || {
+            ipc_worker_pool().execute(move || {
                 let is_en = req_lang.as_deref().unwrap_or(&state.get_language()) == "en";
                 let start_dir = state
                     .inner
@@ -815,7 +1017,7 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Speicher-Anfrage"));
                 return;
             };
-            std::thread::spawn(move || {
+            ipc_worker_pool().execute(move || {
                 let is_en = req.lang.as_deref().unwrap_or(&state.get_language()) == "en";
                 let start_dir = req
                     .default_dir
@@ -901,7 +1103,7 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Export-Anfrage"));
                 return;
             };
-            std::thread::spawn(move || {
+            ipc_worker_pool().execute(move || {
                 let is_en = req.lang.as_deref().unwrap_or(&state.get_language()) == "en";
                 let default_stem = if is_en { "Document" } else { "Dokument" };
                 let stem = Path::new(&req.title)
@@ -970,7 +1172,7 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige PDF-Export-Anfrage"));
                 return;
             };
-            std::thread::spawn(move || {
+            ipc_worker_pool().execute(move || {
                 let is_en = req.lang.as_deref().unwrap_or(&state.get_language()) == "en";
                 let default_stem = if is_en { "Document" } else { "Dokument" };
                 let stem = Path::new(&req.title)
@@ -1044,7 +1246,7 @@ fn handle_api_route(
                 return;
             };
 
-            std::thread::spawn(move || {
+            ipc_worker_pool().execute(move || {
                 let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
                 if state
                     .proxy
@@ -1082,5 +1284,149 @@ fn handle_api_route(
         }
 
         _ => responder.respond(err_json(StatusCode::NOT_FOUND, "Unbekannter API-Endpunkt")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread::ThreadId;
+
+    #[test]
+    fn default_worker_count_is_clamped_to_4_to_8() {
+        let count = default_worker_count();
+        assert!((4..=8).contains(&count));
+    }
+
+    #[test]
+    fn worker_pool_executes_jobs_and_bounds_threads() {
+        let pool = WorkerPool::new(4);
+        let thread_ids = Arc::new(Mutex::new(HashSet::<ThreadId>::new()));
+        let completed = Arc::new(AtomicUsize::new(0));
+        let (done_tx, done_rx) = mpsc::channel();
+
+        let total_jobs = 20;
+        for _ in 0..total_jobs {
+            let ids = Arc::clone(&thread_ids);
+            let done = Arc::clone(&completed);
+            let tx = done_tx.clone();
+            pool.execute(move || {
+                ids.lock().unwrap().insert(std::thread::current().id());
+                if done.fetch_add(1, Ordering::SeqCst) + 1 == total_jobs {
+                    let _ = tx.send(());
+                }
+            });
+        }
+        drop(done_tx);
+
+        done_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("worker pool should complete all jobs");
+
+        assert_eq!(completed.load(Ordering::SeqCst), total_jobs);
+        assert!(thread_ids.lock().unwrap().len() <= 4);
+    }
+
+    #[test]
+    fn render_coalescer_skips_stale_revisions_per_key() {
+        let coalescer = RenderCoalescer::default();
+
+        let t1 = coalescer.register("doc-a", None);
+        let t2 = coalescer.register("doc-a", None);
+        let tb = coalescer.register("doc-b", None);
+
+        assert!(coalescer.is_superseded("doc-a", t1));
+        assert!(!coalescer.is_superseded("doc-a", t2));
+        assert!(!coalescer.is_superseded("doc-b", tb));
+
+        // Explicit out-of-order client revisions
+        let c10 = coalescer.register("doc-c", Some(10));
+        let c12 = coalescer.register("doc-c", Some(12));
+        let c11 = coalescer.register("doc-c", Some(11));
+
+        assert!(coalescer.is_superseded("doc-c", c10));
+        assert!(coalescer.is_superseded("doc-c", c11));
+        assert!(!coalescer.is_superseded("doc-c", c12));
+    }
+
+    #[test]
+    fn render_coalescing_on_worker_pool_skips_superseded_queued_work() {
+        let pool = WorkerPool::new(1);
+        let coalescer = Arc::new(RenderCoalescer::default());
+        let (gate_tx, gate_rx) = mpsc::channel::<()>();
+        let (entered_tx, entered_rx) = mpsc::channel::<()>();
+        let (done_tx, done_rx) = mpsc::channel::<(u64, bool)>();
+
+        // Occupy the single worker until we finish queueing the burst of render jobs.
+        pool.execute(move || {
+            let _ = entered_tx.send(());
+            let _ = gate_rx.recv();
+        });
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("worker should enter gate");
+
+        let mut tokens = Vec::new();
+        for _ in 0..3 {
+            let token = coalescer.register("tab-1", None);
+            tokens.push(token);
+            let c = Arc::clone(&coalescer);
+            let tx = done_tx.clone();
+            pool.execute(move || {
+                let superseded = c.is_superseded("tab-1", token);
+                let _ = tx.send((token, superseded));
+            });
+        }
+        drop(done_tx);
+
+        // Release the worker so the 3 queued render jobs run in order.
+        let _ = gate_tx.send(());
+
+        let mut results: Vec<(u64, bool)> = done_rx.iter().collect();
+        results.sort_by_key(|(token, _)| *token);
+
+        assert_eq!(
+            results,
+            vec![(tokens[0], true), (tokens[1], true), (tokens[2], false)]
+        );
+    }
+
+    #[test]
+    fn superseded_render_response_matches_render_result_schema() {
+        let val = serde_json::to_value(SupersededRenderResult::default()).unwrap();
+        assert_eq!(val["superseded"], serde_json::json!(true));
+        assert_eq!(val["html"], serde_json::json!(""));
+        assert_eq!(val["outline"], serde_json::json!([]));
+        assert_eq!(val["stats"]["words"], serde_json::json!(0));
+        assert_eq!(val["stats"]["chars"], serde_json::json!(0));
+        assert_eq!(val["stats"]["lines"], serde_json::json!(0));
+        assert_eq!(val["stats"]["readingTimeSec"], serde_json::json!(0));
+    }
+
+    #[test]
+    fn render_coalescer_evicts_only_oldest_key_when_capacity_reached() {
+        let coalescer = RenderCoalescer::default();
+        let oldest_t1 = coalescer.register("doc-0", Some(1));
+        for i in 1..RenderCoalescer::MAX_KEYS {
+            let key = format!("doc-{i}");
+            coalescer.register(&key, Some(1));
+        }
+
+        // Adding one more key should evict only "doc-0", preserving "doc-1".."doc-255".
+        coalescer.register("doc-new", Some(1));
+
+        let state = coalescer.state.lock().unwrap();
+        assert_eq!(state.entries.len(), RenderCoalescer::MAX_KEYS);
+        assert!(!state.entries.contains_key("doc-0"));
+        assert!(state.entries.contains_key("doc-1"));
+        assert!(state.entries.contains_key("doc-new"));
+        drop(state);
+
+        // Superseding "doc-1" still works after "doc-0" was evicted.
+        let doc1_t2 = coalescer.register("doc-1", Some(2));
+        assert!(coalescer.is_superseded("doc-1", oldest_t1));
+        assert!(!coalescer.is_superseded("doc-1", doc1_t2));
     }
 }

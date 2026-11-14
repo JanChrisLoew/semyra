@@ -259,4 +259,26 @@ describe('MarkdownEditorController keybindings & folding integration', () => {
     ctrl.view.destroy();
     host.remove();
   });
+
+  it('does not insert fallback ./bild.png when onPickImage resolves to null', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const onPickImage = vi.fn().mockResolvedValue(null);
+    const ctrl = new MarkdownEditorController(host, 'Hallo ', {
+      onDocChanged: vi.fn(),
+      onCursorChanged: vi.fn(),
+      onEditorScrolled: vi.fn(),
+      onFormatCommand: vi.fn(),
+      onPasteImage: vi.fn(),
+      onPickImage,
+    });
+    ctrl.view.dispatch({ selection: { anchor: 6 } });
+    ctrl.applyFormat('image');
+    await Promise.resolve();
+    expect(onPickImage).toHaveBeenCalledTimes(1);
+    expect(ctrl.getContent()).toBe('Hallo ');
+
+    ctrl.view.destroy();
+    host.remove();
+  });
 });

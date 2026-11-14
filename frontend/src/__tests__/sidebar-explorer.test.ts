@@ -172,4 +172,245 @@ describe('SidebarExplorerController', () => {
 
     expect(fileBtn.classList.contains('context-active')).toBe(false);
   });
+
+  it('supports WAI-ARIA tree roles, roving tabindex, and arrow/Home/End keyboard navigation', () => {
+    const fileTreeEl = document.createElement('div');
+    const workspaceTitleEl = document.createElement('span');
+    const contextPopoverEl = document.createElement('div');
+    document.body.appendChild(fileTreeEl);
+
+    try {
+      const explorer = new SidebarExplorerController({
+        fileTreeEl,
+        workspaceTitleEl,
+        contextPopoverEl,
+        getActiveFilePath: () => null,
+        onOpenFilePath: vi.fn(),
+        onOpenCreatedFile: vi.fn(),
+        onTriggerOpenFolderDialog: vi.fn(),
+        onWorkspaceFolderLoaded: vi.fn(),
+        onEntryRenamed: vi.fn(),
+        onEntryDeleted: vi.fn(),
+      });
+
+      const tree: FileTreeNode = {
+        name: 'Workspace',
+        path: 'C:\\Workspace',
+        isDir: true,
+        isMarkdown: false,
+        children: [
+          {
+            name: 'Docs',
+            path: 'C:\\Workspace\\Docs',
+            isDir: true,
+            isMarkdown: false,
+            children: [
+              {
+                name: 'Nested',
+                path: 'C:\\Workspace\\Docs\\Nested',
+                isDir: true,
+                isMarkdown: false,
+                children: [
+                  {
+                    name: 'deep.md',
+                    path: 'C:\\Workspace\\Docs\\Nested\\deep.md',
+                    isDir: false,
+                    isMarkdown: true,
+                  },
+                ],
+              },
+              {
+                name: 'guide.md',
+                path: 'C:\\Workspace\\Docs\\guide.md',
+                isDir: false,
+                isMarkdown: true,
+              },
+            ],
+          },
+          {
+            name: 'README.md',
+            path: 'C:\\Workspace\\README.md',
+            isDir: false,
+            isMarkdown: true,
+          },
+        ],
+      };
+
+      explorer.setTree(tree, true);
+
+      expect(fileTreeEl.getAttribute('role')).toBe('tree');
+
+      const docsSummary = fileTreeEl.querySelector<HTMLElement>(
+        'summary[data-entryname="Docs"]',
+      )!;
+      const nestedSummary = fileTreeEl.querySelector<HTMLElement>(
+        'summary[data-entryname="Nested"]',
+      )!;
+      const deepBtn = fileTreeEl.querySelector<HTMLElement>(
+        'button[data-entryname="deep.md"]',
+      )!;
+      const guideBtn = fileTreeEl.querySelector<HTMLElement>(
+        'button[data-entryname="guide.md"]',
+      )!;
+      const readmeBtn = fileTreeEl.querySelector<HTMLElement>(
+        'button[data-entryname="README.md"]',
+      )!;
+
+      // Roles and initial aria-expanded (depth 0 open, depth 1 closed)
+      expect(docsSummary.getAttribute('role')).toBe('treeitem');
+      expect(docsSummary.getAttribute('aria-expanded')).toBe('true');
+      expect(nestedSummary.getAttribute('role')).toBe('treeitem');
+      expect(nestedSummary.getAttribute('aria-expanded')).toBe('false');
+      expect(readmeBtn.getAttribute('role')).toBe('treeitem');
+
+      // Roving tabindex: first visible item has tabIndex 0, others -1
+      expect(docsSummary.tabIndex).toBe(0);
+      expect(nestedSummary.tabIndex).toBe(-1);
+      expect(guideBtn.tabIndex).toBe(-1);
+      expect(readmeBtn.tabIndex).toBe(-1);
+
+      const pressKey = (key: string) => {
+        const target = document.activeElement as HTMLElement;
+        target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+      };
+
+      docsSummary.focus();
+      expect(document.activeElement).toBe(docsSummary);
+
+      // ArrowDown moves to Nested (first visible child of Docs)
+      pressKey('ArrowDown');
+      expect(document.activeElement).toBe(nestedSummary);
+      expect(nestedSummary.tabIndex).toBe(0);
+      expect(docsSummary.tabIndex).toBe(-1);
+
+      // ArrowDown skips deep.md because Nested is collapsed, lands on guide.md
+      pressKey('ArrowDown');
+      expect(document.activeElement).toBe(guideBtn);
+
+      // End jumps to last visible item (README.md)
+      pressKey('End');
+      expect(document.activeElement).toBe(readmeBtn);
+
+      // Home jumps back to first visible item (Docs)
+      pressKey('Home');
+      expect(document.activeElement).toBe(docsSummary);
+
+      // ArrowDown to Nested, then ArrowRight expands Nested without moving focus
+      pressKey('ArrowDown');
+      expect(document.activeElement).toBe(nestedSummary);
+      pressKey('ArrowRight');
+      expect((nestedSummary.parentElement as HTMLDetailsElement).open).toBe(true);
+      expect(nestedSummary.getAttribute('aria-expanded')).toBe('true');
+      expect(document.activeElement).toBe(nestedSummary);
+
+      // Second ArrowRight moves into first child (deep.md)
+      pressKey('ArrowRight');
+      expect(document.activeElement).toBe(deepBtn);
+
+      // ArrowLeft from file moves focus to parent folder (Nested)
+      pressKey('ArrowLeft');
+      expect(document.activeElement).toBe(nestedSummary);
+
+      // ArrowLeft on expanded folder collapses it
+      pressKey('ArrowLeft');
+      expect((nestedSummary.parentElement as HTMLDetailsElement).open).toBe(false);
+      expect(nestedSummary.getAttribute('aria-expanded')).toBe('false');
+      expect(document.activeElement).toBe(nestedSummary);
+
+      // ArrowLeft on collapsed folder moves focus to parent folder (Docs)
+      pressKey('ArrowLeft');
+      expect(document.activeElement).toBe(docsSummary);
+
+      // ArrowUp at top stays on Docs
+      pressKey('ArrowUp');
+      expect(document.activeElement).toBe(docsSummary);
+    } finally {
+      fileTreeEl.remove();
+    }
+  });
+
+  it('collapses all folders via collapseAll() and #btn-collapse-all button', () => {
+    const fileTreeEl = document.createElement('div');
+    const workspaceTitleEl = document.createElement('span');
+    const contextPopoverEl = document.createElement('div');
+    const collapseBtn = document.createElement('button');
+    collapseBtn.id = 'btn-collapse-all';
+    collapseBtn.hidden = true;
+    document.body.append(fileTreeEl, collapseBtn);
+
+    try {
+      const explorer = new SidebarExplorerController({
+        fileTreeEl,
+        workspaceTitleEl,
+        contextPopoverEl,
+        getActiveFilePath: () => null,
+        onOpenFilePath: vi.fn(),
+        onOpenCreatedFile: vi.fn(),
+        onTriggerOpenFolderDialog: vi.fn(),
+        onWorkspaceFolderLoaded: vi.fn(),
+        onEntryRenamed: vi.fn(),
+        onEntryDeleted: vi.fn(),
+      });
+
+      explorer.setTree({
+        name: 'Workspace',
+        path: 'C:\\Workspace',
+        isDir: true,
+        isMarkdown: false,
+        children: [
+          {
+            name: 'Docs',
+            path: 'C:\\Workspace\\Docs',
+            isDir: true,
+            isMarkdown: false,
+            children: [
+              {
+                name: 'Sub',
+                path: 'C:\\Workspace\\Docs\\Sub',
+                isDir: true,
+                isMarkdown: false,
+                children: [
+                  {
+                    name: 'a.md',
+                    path: 'C:\\Workspace\\Docs\\Sub\\a.md',
+                    isDir: false,
+                    isMarkdown: true,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+
+      expect(collapseBtn.hidden).toBe(false);
+
+      const details = fileTreeEl.querySelectorAll<HTMLDetailsElement>('details.tree-dir-details');
+      details[1].open = true;
+      details[1].querySelector('summary')?.setAttribute('aria-expanded', 'true');
+
+      // Focus deep child before collapsing all
+      const fileBtn = fileTreeEl.querySelector<HTMLElement>('button[data-filepath]')!;
+      fileBtn.focus();
+
+      collapseBtn.click();
+
+      for (const d of details) {
+        expect(d.open).toBe(false);
+        expect(d.querySelector(':scope > summary')?.getAttribute('aria-expanded')).toBe('false');
+      }
+
+      // Focus moves to outermost visible parent summary so it isn't trapped in collapsed subtree
+      const topSummary = details[0].querySelector<HTMLElement>(':scope > summary')!;
+      expect(document.activeElement).toBe(topSummary);
+      expect(topSummary.tabIndex).toBe(0);
+
+      explorer.clearWorkspace([], []);
+      expect(collapseBtn.hidden).toBe(true);
+      expect(fileTreeEl.hasAttribute('role')).toBe(false);
+    } finally {
+      fileTreeEl.remove();
+      collapseBtn.remove();
+    }
+  });
 });

@@ -1,5 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { safeSetMarkdownHTML } from '../sanitizer';
+
+const mockMermaidRender = vi.fn();
+const mockMermaidInitialize = vi.fn();
+
+vi.mock('mermaid', () => ({
+  default: {
+    initialize: (...args: unknown[]) => mockMermaidInitialize(...args),
+    render: (...args: unknown[]) => mockMermaidRender(...args),
+  },
+}));
 
 describe('safeSetMarkdownHTML', () => {
   it('checks whether a render is current before updating the live DOM', async () => {
@@ -82,5 +92,83 @@ describe('safeSetMarkdownHTML', () => {
       '<p data-line="1">Formel: <span class="math-inline" data-math="E = mc^2">E = mc^2</span></p>',
     );
     expect(host.querySelector('.katex')).not.toBeNull();
+  });
+
+  it('renders a neutral inline diagnostic hint and preserves source when Mermaid fails', async () => {
+    mockMermaidRender.mockRejectedValueOnce(
+      new Error('Syntax error in text <script>alert(1)</script>\nmermaid version 11.0.0'),
+    );
+
+    const host = document.createElement('article');
+    await safeSetMarkdownHTML(
+      host,
+      '<div class="mermaid-wrapper" data-line="1" data-mermaid="graph TD; A--&gt;"><pre class="mermaid-source"><code>graph TD; A--&gt;</code></pre></div>',
+    );
+
+    const wrapper = host.querySelector('.mermaid-wrapper');
+    expect(wrapper?.classList.contains('has-mermaid-error')).toBe(true);
+
+    const hint = host.querySelector('.mermaid-error-hint');
+    expect(hint).not.toBeNull();
+    expect(hint?.getAttribute('role')).toBe('status');
+    expect(hint?.querySelector('script')).toBeNull();
+    expect(hint?.querySelector('.mermaid-error-message')?.textContent).toBe(
+      'Syntax error in text <script>alert(1)</script>',
+    );
+
+    const sourceCode = host.querySelector('.mermaid-source code');
+    expect(sourceCode?.textContent).toBe('graph TD; A-->');
+  });
+
+  it('renders Mermaid SVG and action buttons cleanly on success', async () => {
+    mockMermaidRender.mockResolvedValueOnce({
+      svg: '<svg viewBox="0 0 100 50"><text>OK</text></svg>',
+    });
+
+    const host = document.createElement('article');
+    await safeSetMarkdownHTML(
+      host,
+      '<div class="mermaid-wrapper" data-line="1" data-mermaid="graph TD; A--&gt;B"><pre class="mermaid-source"><code>graph TD; A--&gt;B</code></pre></div>',
+    );
+
+    const wrapper = host.querySelector('.mermaid-wrapper');
+    expect(wrapper?.classList.contains('has-mermaid-error')).toBe(false);
+    expect(host.querySelector('.mermaid-error-hint')).toBeNull();
+    expect(host.querySelector('.mermaid-actions')).not.toBeNull();
+    expect(host.querySelector('svg')).not.toBeNull();
+  });
+
+  it('preserves frontmatter chips and nested <details> open state across re-renders', async () => {
+    const host = document.createElement('article');
+    await safeSetMarkdownHTML(
+      host,
+      '<div class="frontmatter-card" data-line="1"><div class="frontmatter-chips"><span class="frontmatter-chip"><span class="frontmatter-chip-key">title</span><span class="frontmatter-chip-val">V1</span></span></div><details><summary>Frontmatter (YAML)</summary><pre tabindex="0"><code>title: V1</code></pre></details></div>',
+    );
+    const details = host.querySelector('details') as HTMLDetailsElement;
+    details.open = true;
+
+    await safeSetMarkdownHTML(
+      host,
+      '<div class="frontmatter-card" data-line="1"><div class="frontmatter-chips"><span class="frontmatter-chip"><span class="frontmatter-chip-key">title</span><span class="frontmatter-chip-val">V2</span></span></div><details><summary>Frontmatter (YAML)</summary><pre tabindex="0"><code>title: V2</code></pre></details></div>',
+    );
+    const nextDetails = host.querySelector('details') as HTMLDetailsElement;
+    expect(nextDetails.open).toBe(true);
+    expect(host.querySelector('.frontmatter-chip-val')?.textContent).toBe('V2');
+  });
+
+  it('allows prompt-tag <section> blocks and data-prompt-tag while stripping XSS', async () => {
+    const host = document.createElement('article');
+    await safeSetMarkdownHTML(
+      host,
+      '<section class="prompt-tag-block" data-prompt-tag="role" data-line="3" onclick="alert(1)"><div class="prompt-tag-label">&lt;role&gt;</div><div class="prompt-tag-body"><p data-line="4">Be helpful</p><script>window.__xss=1</script></div></section>',
+    );
+    const section = host.querySelector('section.prompt-tag-block');
+    expect(section).not.toBeNull();
+    expect(section?.getAttribute('data-prompt-tag')).toBe('role');
+    expect(section?.getAttribute('data-line')).toBe('3');
+    expect(section?.hasAttribute('onclick')).toBe(false);
+    expect(host.querySelector('.prompt-tag-label')?.textContent).toBe('<role>');
+    expect(host.querySelector('.prompt-tag-body p')?.getAttribute('data-line')).toBe('4');
+    expect(host.querySelector('script')).toBeNull();
   });
 });

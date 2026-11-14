@@ -34,7 +34,12 @@ export interface SidebarExplorerDeps {
   onEntryDeleted: (deletedPath: string) => void;
   onRemoveRecentFolder?: (folderPath: string) => void;
   onRemoveRecentFile?: (filePath: string) => void;
+  onCopyAtPath?: (entryPath: string) => Promise<void> | void;
+  onScaffoldAgents?: (targetDir: string) => Promise<void> | void;
+  onScaffoldSkill?: (targetDir: string) => Promise<void> | void;
 }
+
+export type SidebarExplorerCallbacks = SidebarExplorerDeps;
 
 /**
  * Manages the sidebar file explorer tree, empty-state recent folders/files view,
@@ -133,10 +138,14 @@ export class SidebarExplorerController {
     if (newSubBtn) newSubBtn.hidden = false;
     const refreshBtn = document.getElementById('btn-refresh-tree');
     if (refreshBtn) refreshBtn.hidden = false;
+    const collapseBtn = document.getElementById('btn-collapse-all');
+    if (collapseBtn) collapseBtn.hidden = false;
 
     this.deps.fileTreeEl.replaceChildren();
     const children = tree.children ?? [];
     if (children.length === 0) {
+      this.deps.fileTreeEl.removeAttribute('role');
+      this.deps.fileTreeEl.removeAttribute('aria-label');
       const p = document.createElement('p');
       p.className = 'muted-hint';
       p.textContent = t('sidebar.emptyFolder');
@@ -144,10 +153,13 @@ export class SidebarExplorerController {
       return;
     }
 
+    this.deps.fileTreeEl.setAttribute('role', 'tree');
+    this.deps.fileTreeEl.setAttribute('aria-label', t('sidebar.filesTitle'));
     for (const node of children) {
       this.deps.fileTreeEl.appendChild(this.renderTreeNode(node, 0, preservedOpenDirs));
     }
     this.highlightActiveFile();
+    this.syncTreeTabindex();
   }
 
   private collectOpenDirStates(): Map<string, boolean> {
@@ -184,11 +196,43 @@ export class SidebarExplorerController {
     if (newSubBtn) newSubBtn.hidden = true;
     const refreshBtn = document.getElementById('btn-refresh-tree');
     if (refreshBtn) refreshBtn.hidden = true;
+    const collapseBtn = document.getElementById('btn-collapse-all');
+    if (collapseBtn) collapseBtn.hidden = true;
     this.renderEmptyStateWithRecents(recentFolders, recentFiles);
+  }
+
+  public collapseAll(): void {
+    const detailsList = this.deps.fileTreeEl.querySelectorAll<HTMLDetailsElement>(
+      'details.tree-dir-details',
+    );
+    for (const details of detailsList) {
+      details.open = false;
+      const summary = details.querySelector<HTMLElement>(':scope > summary.tree-row');
+      summary?.setAttribute('aria-expanded', 'false');
+    }
+
+    const activeEl = document.activeElement as HTMLElement | null;
+    if (activeEl && this.deps.fileTreeEl.contains(activeEl) && !this.isTreeRowVisible(activeEl)) {
+      let current = activeEl.closest<HTMLDetailsElement>('details.tree-dir-details');
+      let outermost = current;
+      while (current) {
+        outermost = current;
+        current =
+          current.parentElement?.closest<HTMLDetailsElement>('details.tree-dir-details') ?? null;
+      }
+      const targetSummary = outermost?.querySelector<HTMLElement>(':scope > summary.tree-row');
+      if (targetSummary) {
+        this.focusTreeRow(targetSummary);
+        return;
+      }
+    }
+    this.syncTreeTabindex();
   }
 
   public renderEmptyStateWithRecents(recentFolders: string[], recentFiles: string[]): void {
     if (this.workspaceTree) return;
+    this.deps.fileTreeEl.removeAttribute('role');
+    this.deps.fileTreeEl.removeAttribute('aria-label');
     this.deps.fileTreeEl.replaceChildren();
 
     const wrap = document.createElement('div');
@@ -323,6 +367,9 @@ export class SidebarExplorerController {
 
       const summary = document.createElement('summary');
       summary.className = 'tree-row';
+      summary.setAttribute('role', 'treeitem');
+      summary.setAttribute('aria-expanded', details.open ? 'true' : 'false');
+      summary.tabIndex = -1;
       summary.dataset.dirpath = node.path;
       summary.dataset.entryname = node.name;
       summary.title = node.path;
@@ -330,8 +377,14 @@ export class SidebarExplorerController {
       summary.lastElementChild!.textContent = node.name;
       details.appendChild(summary);
 
+      details.addEventListener('toggle', () => {
+        summary.setAttribute('aria-expanded', details.open ? 'true' : 'false');
+        this.syncTreeTabindex();
+      });
+
       const childrenBox = document.createElement('div');
       childrenBox.className = 'tree-children';
+      childrenBox.setAttribute('role', 'group');
       for (const child of node.children ?? []) {
         childrenBox.appendChild(this.renderTreeNode(child, depth + 1, preservedOpenDirs));
       }
@@ -354,6 +407,8 @@ export class SidebarExplorerController {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = `tree-row ${isMd ? '' : isImg ? 'is-non-md is-image' : 'is-text-entry'}`;
+    btn.setAttribute('role', 'treeitem');
+    btn.tabIndex = -1;
     btn.dataset.filepath = node.path;
     btn.dataset.entryname = node.name;
     btn.title = node.path;
@@ -369,6 +424,136 @@ export class SidebarExplorerController {
     return btn;
   }
 
+  private isTreeRowVisible(row: HTMLElement): boolean {
+    let parent = row.parentElement;
+    if (row.tagName === 'SUMMARY' && parent?.tagName === 'DETAILS') {
+      parent = parent.parentElement;
+    }
+    while (parent && parent !== this.deps.fileTreeEl) {
+      if (parent.tagName === 'DETAILS' && !(parent as HTMLDetailsElement).open) {
+        return false;
+      }
+      parent = parent.parentElement;
+    }
+    return true;
+  }
+
+  private getVisibleTreeItems(): HTMLElement[] {
+    return Array.from(
+      this.deps.fileTreeEl.querySelectorAll<HTMLElement>('.tree-row[role="treeitem"]'),
+    ).filter((el) => this.isTreeRowVisible(el));
+  }
+
+  private syncTreeTabindex(preferredEl?: HTMLElement | null): void {
+    const allItems = this.deps.fileTreeEl.querySelectorAll<HTMLElement>('.tree-row[role="treeitem"]');
+    if (allItems.length === 0) return;
+
+    const visibleItems = Array.from(allItems).filter((el) => this.isTreeRowVisible(el));
+    if (visibleItems.length === 0) return;
+
+    const active =
+      (preferredEl && visibleItems.includes(preferredEl) ? preferredEl : null) ??
+      visibleItems.find((el) => el.classList.contains('is-active')) ??
+      visibleItems.find((el) => el.tabIndex === 0) ??
+      visibleItems[0];
+
+    for (const item of allItems) {
+      item.tabIndex = item === active ? 0 : -1;
+    }
+  }
+
+  private focusTreeRow(row: HTMLElement): void {
+    this.syncTreeTabindex(row);
+    row.focus();
+  }
+
+  private handleTreeKeyNavigation(e: KeyboardEvent, focusedRow: HTMLElement): boolean {
+    if (e.altKey || e.ctrlKey || e.metaKey) return false;
+    const key = e.key;
+    if (
+      key !== 'ArrowDown' &&
+      key !== 'ArrowUp' &&
+      key !== 'ArrowRight' &&
+      key !== 'ArrowLeft' &&
+      key !== 'Home' &&
+      key !== 'End'
+    ) {
+      return false;
+    }
+
+    const visibleItems = this.getVisibleTreeItems();
+    const idx = visibleItems.indexOf(focusedRow);
+    if (idx < 0) return false;
+
+    e.preventDefault();
+
+    if (key === 'ArrowDown') {
+      if (idx < visibleItems.length - 1) {
+        this.focusTreeRow(visibleItems[idx + 1]);
+      }
+      return true;
+    }
+
+    if (key === 'ArrowUp') {
+      if (idx > 0) {
+        this.focusTreeRow(visibleItems[idx - 1]);
+      }
+      return true;
+    }
+
+    if (key === 'Home') {
+      this.focusTreeRow(visibleItems[0]);
+      return true;
+    }
+
+    if (key === 'End') {
+      this.focusTreeRow(visibleItems[visibleItems.length - 1]);
+      return true;
+    }
+
+    if (key === 'ArrowRight') {
+      if (focusedRow.tagName === 'SUMMARY' && focusedRow.parentElement?.tagName === 'DETAILS') {
+        const details = focusedRow.parentElement as HTMLDetailsElement;
+        if (!details.open) {
+          details.open = true;
+          focusedRow.setAttribute('aria-expanded', 'true');
+          this.syncTreeTabindex(focusedRow);
+        } else {
+          const firstChild = details.querySelector<HTMLElement>(
+            ':scope > .tree-children > .tree-row[role="treeitem"], :scope > .tree-children > details.tree-dir-details > summary.tree-row[role="treeitem"]',
+          );
+          if (firstChild) {
+            this.focusTreeRow(firstChild);
+          }
+        }
+      }
+      return true;
+    }
+
+    // ArrowLeft
+    if (focusedRow.tagName === 'SUMMARY' && focusedRow.parentElement?.tagName === 'DETAILS') {
+      const details = focusedRow.parentElement as HTMLDetailsElement;
+      if (details.open) {
+        details.open = false;
+        focusedRow.setAttribute('aria-expanded', 'false');
+        this.syncTreeTabindex(focusedRow);
+        return true;
+      }
+    }
+
+    const parentDetails =
+      focusedRow.tagName === 'SUMMARY'
+        ? focusedRow.parentElement?.parentElement?.closest<HTMLDetailsElement>(
+            'details.tree-dir-details',
+          )
+        : focusedRow.closest<HTMLDetailsElement>('details.tree-dir-details');
+    const parentSummary = parentDetails?.querySelector<HTMLElement>(':scope > summary.tree-row');
+    if (parentSummary && this.deps.fileTreeEl.contains(parentSummary)) {
+      this.focusTreeRow(parentSummary);
+    }
+    return true;
+  }
+
   private bindEvents(): void {
     document.getElementById('btn-sidebar-open-folder')?.addEventListener('click', () => {
       void this.deps.onTriggerOpenFolderDialog();
@@ -376,6 +561,10 @@ export class SidebarExplorerController {
 
     document.getElementById('btn-refresh-tree')?.addEventListener('click', () => {
       void this.refresh();
+    });
+
+    document.getElementById('btn-collapse-all')?.addEventListener('click', () => {
+      this.collapseAll();
     });
 
     document.getElementById('btn-new-folder-file')?.addEventListener('click', () => {
@@ -404,10 +593,24 @@ export class SidebarExplorerController {
       }
     });
 
+    this.deps.fileTreeEl.addEventListener('focusin', (e: FocusEvent) => {
+      const target = (e.target as HTMLElement | null)?.closest<HTMLElement>(
+        '.tree-row[role="treeitem"]',
+      );
+      if (target && this.deps.fileTreeEl.contains(target) && this.isTreeRowVisible(target)) {
+        this.syncTreeTabindex(target);
+      }
+    });
+
     this.deps.fileTreeEl.addEventListener('keydown', (e: KeyboardEvent) => {
+      const focusedRow = (
+        (e.target as HTMLElement | null) ?? (document.activeElement as HTMLElement | null)
+      )?.closest<HTMLElement>('.tree-row');
+      if (!focusedRow || !this.deps.fileTreeEl.contains(focusedRow)) return;
+
+      if (this.handleTreeKeyNavigation(e, focusedRow)) return;
+
       if (e.key === 'F2') {
-        const focusedRow = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.tree-row');
-        if (!focusedRow || !this.deps.fileTreeEl.contains(focusedRow)) return;
         e.preventDefault();
         const isDir = Boolean(focusedRow.dataset.dirpath);
         const path = isDir ? focusedRow.dataset.dirpath! : focusedRow.dataset.filepath!;
@@ -416,8 +619,6 @@ export class SidebarExplorerController {
           this.openEntryDialog('rename', path, name);
         }
       } else if (e.key === 'Delete') {
-        const focusedRow = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.tree-row');
-        if (!focusedRow || !this.deps.fileTreeEl.contains(focusedRow)) return;
         e.preventDefault();
         const isDir = Boolean(focusedRow.dataset.dirpath);
         const path = isDir ? focusedRow.dataset.dirpath! : focusedRow.dataset.filepath!;
@@ -432,8 +633,6 @@ export class SidebarExplorerController {
           });
         }
       } else if (e.altKey && (e.key === 'r' || e.key === 'R')) {
-        const focusedRow = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.tree-row');
-        if (!focusedRow || !this.deps.fileTreeEl.contains(focusedRow)) return;
         e.preventDefault();
         const path = focusedRow.dataset.dirpath || focusedRow.dataset.filepath;
         if (path) {
@@ -458,6 +657,12 @@ export class SidebarExplorerController {
         this.openEntryDialog('rename', target.path, target.name);
       } else if (action === 'reveal') {
         void backend.revealInExplorer(target.path);
+      } else if (action === 'copy-at-path') {
+        void this.deps.onCopyAtPath?.(target.path);
+      } else if (action === 'scaffold-agents') {
+        void this.deps.onScaffoldAgents?.(target.parentDir);
+      } else if (action === 'scaffold-skill') {
+        void this.deps.onScaffoldSkill?.(target.parentDir);
       } else if (action === 'delete' && !target.isWorkspaceRoot) {
         void this.confirmMoveToRecycleBin(target);
       }

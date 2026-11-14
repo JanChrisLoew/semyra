@@ -25,4 +25,10 @@ describe('estimateTokens', () => {
     expect(tokens).toBeGreaterThan(25);
     expect(tokens).toBeLessThan(60);
   });
+
+  it('handles CRLF and leading/trailing whitespace consistently', () => {
+    const lf = 'Alpha\nBeta\nGamma';
+    const crlf = '  Alpha\r\nBeta\r\nGamma  ';
+    expect(estimateTokens(crlf)).toBeGreaterThanOrEqual(estimateTokens(lf));
+  });
 });

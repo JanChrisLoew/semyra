@@ -154,6 +154,9 @@
 
 .mini-icon-btn {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 24px;
   height: 24px;
   min-width: 24px;
@@ -165,6 +168,12 @@
   cursor: pointer;
   font-size: 14px;
   line-height: 1;
+}
+
+.mini-icon-btn svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 
 /* WCAG 2.5.8: Target size extension */
@@ -393,9 +402,24 @@ details[open] > summary .tree-chevron {
 }
 
 /* Outline Items */
+.outline-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.outline-row:hover {
+  background: var(--bg-hover);
+}
+
 .outline-item {
-  display: block;
-  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
   padding: 4px 8px;
   border: 0;
   border-radius: var(--radius-sm);
@@ -404,13 +428,34 @@ details[open] > summary .tree-chevron {
   font-size: 12.5px;
   text-align: left;
   cursor: pointer;
+}
+
+.outline-item-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+}
+
+.outline-item-tokens {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--fg-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.outline-copy-btn {
+  display: none;
+  flex: 0 0 auto;
+}
+
+.outline-row:hover .outline-copy-btn,
+.outline-row:focus-within .outline-copy-btn {
+  display: inline-flex;
 }
 
 .outline-item:hover {
-  background: var(--bg-hover);
+  background: transparent;
   color: var(--fg-primary);
 }
 
@@ -586,9 +631,35 @@ details[open] > summary .tree-chevron {
 }
 
 .search-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 4px 8px 6px 8px;
   font-size: 11px;
   color: var(--fg-muted);
+}
+
+.search-select-toggle-btn {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-secondary);
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 500;
+  padding: 1px 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.search-select-toggle-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+}
+
+.search-error-hint {
+  color: var(--danger, #c45c5c);
 }
 
 .search-file-group {
@@ -598,7 +669,6 @@ details[open] > summary .tree-chevron {
 .search-file-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 6px;
   padding: 4px 8px;
   font-size: 12px;
@@ -606,7 +676,16 @@ details[open] > summary .tree-chevron {
   color: var(--fg-primary);
 }
 
+.search-file-checkbox {
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .search-file-name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -661,6 +740,8 @@ details[open] > summary .tree-chevron {
   margin: 0;
   padding: 4px;
   min-inline-size: 13.8rem;
+  max-height: min(320px, 60vh);
+  overflow-y: auto;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
   background: var(--bg-elevated);
@@ -755,4 +836,16 @@ details[open] > summary .tree-chevron {
   border: 0;
   border-top: 1px solid var(--border-subtle);
   margin: 4px 0;
+}
+
+#format-option-popover[focusgroup~="menu"] {
+  grid-template-columns: 1fr;
+}
+
+#format-option-popover > button,
+#format-option-popover .context-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  grid-template-columns: none;
 }

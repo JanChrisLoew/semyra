@@ -1,7 +1,7 @@
 use super::encoding::{read_text_file, write_text_file, FilePayload};
 use super::{
-    app_data_dir, clean_windows_path, is_image_path, is_markdown_path, is_supported_text_path,
-    normalize_existing_path, IGNORED_DIRS,
+    app_data_dir, clean_windows_path, is_allowed_dot_entry, is_image_path, is_markdown_path,
+    is_supported_text_path, normalize_existing_path, IGNORED_DIRS,
 };
 use serde::Serialize;
 use std::fs;
@@ -74,13 +74,7 @@ fn scan_dir_children(
         let Some(name_str) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        if name_str.starts_with('.')
-            && name_str != ".github"
-            && !matches!(
-                name_str.to_ascii_lowercase().as_str(),
-                ".cursorrules" | ".env" | ".gitignore" | ".editorconfig"
-            )
-        {
+        if !is_allowed_dot_entry(name_str) {
             continue;
         }
 
@@ -160,12 +154,7 @@ fn collect_markdown_files_recursive(
         let Some(name_str) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        if name_str.starts_with('.')
-            && !matches!(
-                name_str.to_ascii_lowercase().as_str(),
-                ".cursorrules" | ".env" | ".gitignore" | ".editorconfig"
-            )
-        {
+        if !is_allowed_dot_entry(name_str) {
             continue;
         }
         let Ok(ft) = entry.file_type() else {

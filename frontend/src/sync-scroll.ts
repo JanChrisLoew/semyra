@@ -10,6 +10,16 @@ export interface SyncScrollDeps {
   onActiveHeadingChange: (slug: string | null) => void;
 }
 
+interface LineAnchor {
+  line: number;
+  top: number;
+}
+
+interface HeadingAnchor {
+  slug: string;
+  top: number;
+}
+
 function escapeId(id: string): string {
   if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
     return CSS.escape(id);
@@ -24,8 +34,46 @@ export class SyncScrollController {
   private lastActiveSlug: string | null = null;
   private deps: SyncScrollDeps;
 
+  private pendingRafId: number | null = null;
+  private pendingTimeoutId: number | null = null;
+  private pendingSyncDirection: 'editor' | 'preview' | null = null;
+
+  private cachedLineAnchors: LineAnchor[] | null = null;
+  private cachedHeadingAnchors: HeadingAnchor[] | null = null;
+  private cachedOutlineRef: HeadingItem[] | null = null;
+
+  private mutationObserver: MutationObserver | null = null;
+  private resizeObserver: ResizeObserver | null = null;
+  private readonly handleResize = (): void => {
+    this.invalidateCache();
+  };
+
   constructor(deps: SyncScrollDeps) {
     this.deps = deps;
+
+    if (typeof MutationObserver !== 'undefined') {
+      this.mutationObserver = new MutationObserver(() => {
+        this.invalidateCache();
+      });
+      this.mutationObserver.observe(deps.previewContentEl, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['data-line', 'open', 'id'],
+      });
+    }
+
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resizeObserver = new ResizeObserver(() => {
+        this.invalidateCache();
+      });
+      this.resizeObserver.observe(deps.previewPaneEl);
+      this.resizeObserver.observe(deps.previewContentEl);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resize', this.handleResize, { passive: true });
+    }
   }
 
   public isEnabled(): boolean {
@@ -34,6 +82,41 @@ export class SyncScrollController {
 
   public setEnabled(enabled: boolean): void {
     this.enabled = enabled;
+  }
+
+  public invalidateCache(): void {
+    this.cachedLineAnchors = null;
+    this.cachedHeadingAnchors = null;
+    this.cachedOutlineRef = null;
+  }
+
+  public destroy(): void {
+    if (
+      this.pendingRafId !== null &&
+      typeof window !== 'undefined' &&
+      typeof window.cancelAnimationFrame === 'function'
+    ) {
+      window.cancelAnimationFrame(this.pendingRafId);
+      this.pendingRafId = null;
+    }
+    if (this.pendingTimeoutId !== null) {
+      if (typeof window !== 'undefined') {
+        window.clearTimeout(this.pendingTimeoutId);
+      } else {
+        globalThis.clearTimeout(this.pendingTimeoutId);
+      }
+      this.pendingTimeoutId = null;
+    }
+    this.pendingSyncDirection = null;
+    window.clearTimeout(this.scrollUnlockTimer);
+    this.mutationObserver?.disconnect();
+    this.mutationObserver = null;
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('resize', this.handleResize);
+    }
+    this.invalidateCache();
   }
 
   public lockScrollForNavigation(source: 'editor' | 'preview', durationMs = 450): void {
@@ -52,12 +135,23 @@ export class SyncScrollController {
     }, 90);
   }
 
-  private getPreviewLineAnchors(): Array<{ line: number; top: number }> {
+  private flushPendingMutations(): void {
+    if (this.mutationObserver && this.mutationObserver.takeRecords().length > 0) {
+      this.invalidateCache();
+    }
+  }
+
+  private getPreviewLineAnchors(): LineAnchor[] {
+    this.flushPendingMutations();
+    if (this.cachedLineAnchors !== null) {
+      return this.cachedLineAnchors;
+    }
+
     const { previewPaneEl, previewContentEl } = this.deps;
     const paneRect = previewPaneEl.getBoundingClientRect();
     const scrollTop = previewPaneEl.scrollTop;
     const nodes = previewContentEl.querySelectorAll<HTMLElement>('[data-line]');
-    const anchors: Array<{ line: number; top: number }> = [];
+    const anchors: LineAnchor[] = [];
 
     for (const el of nodes) {
       const line = Number(el.getAttribute('data-line'));
@@ -68,6 +162,30 @@ export class SyncScrollController {
       }
     }
     anchors.sort((a, b) => a.line - b.line);
+    this.cachedLineAnchors = anchors;
+    return anchors;
+  }
+
+  private getPreviewHeadingAnchors(outline: HeadingItem[]): HeadingAnchor[] {
+    this.flushPendingMutations();
+    if (this.cachedHeadingAnchors !== null && this.cachedOutlineRef === outline) {
+      return this.cachedHeadingAnchors;
+    }
+
+    const { previewPaneEl, previewContentEl } = this.deps;
+    const paneRect = previewPaneEl.getBoundingClientRect();
+    const scrollTop = previewPaneEl.scrollTop;
+    const anchors: HeadingAnchor[] = [];
+
+    for (const item of outline) {
+      const el = previewContentEl.querySelector<HTMLElement>(`#${escapeId(item.slug)}`);
+      if (!el) continue;
+      const top = el.getBoundingClientRect().top - paneRect.top + scrollTop;
+      anchors.push({ slug: item.slug, top });
+    }
+
+    this.cachedHeadingAnchors = anchors;
+    this.cachedOutlineRef = outline;
     return anchors;
   }
 
@@ -91,14 +209,11 @@ export class SyncScrollController {
         }
       }
     } else {
-      const { previewPaneEl, previewContentEl } = this.deps;
-      const paneRect = previewPaneEl.getBoundingClientRect();
-      const thresholdY = paneRect.top + 56;
-      for (const item of outline) {
-        const el = previewContentEl.querySelector<HTMLElement>(`#${escapeId(item.slug)}`);
-        if (!el) continue;
-        if (el.getBoundingClientRect().top <= thresholdY) {
-          currentSlug = item.slug;
+      const thresholdOffset = this.deps.previewPaneEl.scrollTop + 56;
+      const headingAnchors = this.getPreviewHeadingAnchors(outline);
+      for (const anchor of headingAnchors) {
+        if (anchor.top <= thresholdOffset) {
+          currentSlug = anchor.slug;
         } else {
           break;
         }
@@ -114,7 +229,50 @@ export class SyncScrollController {
     this.deps.onActiveHeadingChange(slug);
   }
 
+  private scheduleSync(direction: 'editor' | 'preview'): void {
+    // Do not let a locked echo overwrite a pending active-direction sync.
+    if (
+      this.pendingSyncDirection !== null &&
+      this.pendingSyncDirection !== direction &&
+      ((direction === 'editor' && this.scrollSyncLock === 'preview') ||
+        (direction === 'preview' && this.scrollSyncLock === 'editor'))
+    ) {
+      return;
+    }
+
+    this.pendingSyncDirection = direction;
+    if (this.pendingRafId !== null || this.pendingTimeoutId !== null) return;
+
+    const runSync = () => {
+      this.pendingRafId = null;
+      this.pendingTimeoutId = null;
+      const dir = this.pendingSyncDirection;
+      this.pendingSyncDirection = null;
+      if (dir === 'editor') {
+        this.performSyncEditorToPreview();
+      } else if (dir === 'preview') {
+        this.performSyncPreviewToEditor();
+      }
+    };
+
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      this.pendingRafId = window.requestAnimationFrame(runSync);
+    } else if (typeof window !== 'undefined') {
+      this.pendingTimeoutId = window.setTimeout(runSync, 16);
+    } else {
+      this.pendingTimeoutId = globalThis.setTimeout(runSync, 16) as unknown as number;
+    }
+  }
+
   public syncEditorToPreview(): void {
+    this.scheduleSync('editor');
+  }
+
+  public syncPreviewToEditor(): void {
+    this.scheduleSync('preview');
+  }
+
+  private performSyncEditorToPreview(): void {
     this.updateActiveHeadingFromViewport();
 
     if (!this.enabled || this.scrollSyncLock === 'preview') return;
@@ -162,7 +320,7 @@ export class SyncScrollController {
     previewPaneEl.scrollTop = prev.top + (next.top - prev.top) * ratio;
   }
 
-  public syncPreviewToEditor(): void {
+  private performSyncPreviewToEditor(): void {
     this.updateActiveHeadingFromViewport();
 
     if (!this.enabled || this.scrollSyncLock === 'editor') return;
