@@ -12,6 +12,7 @@ export interface WorkspaceSearchDeps {
   getWorkspaceRootPath: () => string | null;
   onOpenMatch: (filePath: string, line: number) => Promise<void> | void;
   onFilesReplaced?: (res: WorkspaceReplaceResult) => Promise<void> | void;
+  onReplaceError?: () => void;
 }
 
 /**
@@ -169,6 +170,7 @@ export class WorkspaceSearchController {
       await this.runSearch();
     } catch (err) {
       console.error('Ordner-Ersetzen fehlgeschlagen:', err);
+      this.deps.onReplaceError?.();
     }
   }
 

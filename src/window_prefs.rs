@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn default_true() -> bool {
     true
@@ -108,11 +108,9 @@ fn prefs_path() -> PathBuf {
 }
 
 pub fn load_window_prefs() -> WindowPrefs {
-    let path = prefs_path();
-    let Ok(bytes) = fs::read(path) else {
+    let Ok(mut prefs) = read_prefs(&prefs_path()) else {
         return WindowPrefs::default();
     };
-    let mut prefs: WindowPrefs = serde_json::from_slice(&bytes).unwrap_or_default();
     prefs.ui.split_ratio = prefs.ui.split_ratio.clamp(20.0, 80.0);
     prefs.ui.zoom_percent = prefs.ui.zoom_percent.clamp(75, 175);
     prefs.ui.recent_files.retain(|p| PathBuf::from(p).is_file());
@@ -123,21 +121,69 @@ pub fn load_window_prefs() -> WindowPrefs {
     prefs
 }
 
-pub fn save_window_prefs(prefs: &WindowPrefs) {
-    let path = prefs_path();
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
+fn read_prefs(path: &Path) -> std::io::Result<WindowPrefs> {
+    match fs::read(path) {
+        Ok(bytes) => Ok(serde_json::from_slice(&bytes).unwrap_or_default()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(WindowPrefs::default()),
+        Err(err) => Err(err),
     }
-    let Ok(bytes) = serde_json::to_vec_pretty(prefs) else {
-        return;
-    };
-    let tmp = path.with_extension("json.tmp");
-    if fs::write(&tmp, &bytes).is_ok() {
-        if fs::rename(&tmp, &path).is_err() {
-            let _ = fs::write(&path, &bytes);
-            let _ = fs::remove_file(&tmp);
-        }
-    } else {
-        let _ = fs::write(&path, &bytes);
+}
+
+pub fn update_window_prefs(
+    update: impl FnOnce(&mut WindowPrefs) -> std::io::Result<bool>,
+) -> std::io::Result<()> {
+    update_prefs_file(&prefs_path(), update)
+}
+
+fn update_prefs_file(
+    path: &Path,
+    update: impl FnOnce(&mut WindowPrefs) -> std::io::Result<bool>,
+) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path.with_extension("lock"))?;
+    lock.lock()?;
+    let mut prefs = read_prefs(path)?;
+    if !update(&mut prefs)? {
+        return Ok(());
+    }
+    let bytes = serde_json::to_vec_pretty(&prefs)?;
+    crate::fs_ops::encoding::write_file_atomically(path, &bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn concurrent_updates_preserve_ui_and_window_geometry() {
+        let dir = std::env::temp_dir().join(format!("semyra-prefs-test-{}", std::process::id()));
+        let path = dir.join("window_prefs.json");
+        let worker_path = path.clone();
+        let worker = std::thread::spawn(move || {
+            update_prefs_file(&worker_path, |prefs| {
+                prefs.ui.auto_save = true;
+                Ok(true)
+            })
+        });
+        update_prefs_file(&path, |prefs| {
+            prefs.width = 1120.0;
+            prefs.x = Some(32);
+            Ok(true)
+        })
+        .unwrap();
+        worker.join().unwrap().unwrap();
+
+        let prefs = read_prefs(&path).unwrap();
+        assert_eq!(prefs.width, 1120.0);
+        assert_eq!(prefs.x, Some(32));
+        assert!(prefs.ui.auto_save);
+        fs::remove_dir_all(dir).unwrap();
     }
 }

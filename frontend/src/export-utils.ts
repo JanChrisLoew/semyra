@@ -8,6 +8,28 @@
  */
 
 import { renderMermaidLightInClone } from './sanitizer';
+import { backend } from './api';
+import { getFileExtension, isMarkdownPath } from './path-utils';
+
+const TEXT_LANGUAGES: Record<string, string> = {
+  yml: 'yaml',
+  txt: 'text',
+  csv: 'text',
+  log: 'text',
+  env: 'properties',
+  js: 'javascript',
+  ts: 'typescript',
+  rs: 'rust',
+};
+
+export function renderDocument(name: string, content: string, baseDir: string | null) {
+  if (isMarkdownPath(name)) return backend.renderMarkdown(content, baseDir);
+  const ext = getFileExtension(name);
+  const language = TEXT_LANGUAGES[ext] ?? (ext || 'text');
+  let fence = '```';
+  while (content.includes(fence)) fence += '`';
+  return backend.renderMarkdown(`${fence}${language}\n${content}\n${fence}`, baseDir);
+}
 
 const ALERT_COLORS: Record<string, string> = {
   'gfm-alert-note': '#426b91',
@@ -54,10 +76,13 @@ function syncTaskCheckboxesAndStripChrome(clone: HTMLElement, source: HTMLElemen
  * preserving client-rendered KaTeX MathML and rendering crisp light-theme Mermaid SVGs
  * without mutating or flashing the live preview DOM.
  */
-export async function preparePreviewHtmlForExport(previewEl: HTMLElement): Promise<string> {
+export async function preparePreviewHtmlForExport(
+  previewEl: HTMLElement,
+  options?: { mermaidAlreadyLight?: boolean },
+): Promise<string> {
   const clone = previewEl.cloneNode(true) as HTMLElement;
   syncTaskCheckboxesAndStripChrome(clone, previewEl);
-  await renderMermaidLightInClone(clone);
+  if (!options?.mermaidAlreadyLight) await renderMermaidLightInClone(clone);
   return clone.innerHTML;
 }
 

@@ -16,7 +16,7 @@ use crate::single_instance::{
     cleanup_instance_lock, start_primary_instance_listener, try_forward_to_running_instance,
 };
 use crate::state::{AppState, UserEvent};
-use crate::window_prefs::{load_window_prefs, save_window_prefs, WindowPrefs};
+use crate::window_prefs::{load_window_prefs, update_window_prefs};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -235,38 +235,6 @@ fn build_webview_with_context<'a>(
     builder.build(window)
 }
 
-fn persist_current_window_state(
-    window: &Window,
-    app_state: &AppState,
-    normal_size: (f64, f64),
-    normal_pos: Option<(i32, i32)>,
-) {
-    let (last_folder, ui_prefs) = app_state
-        .inner
-        .lock()
-        .ok()
-        .map(|g| {
-            (
-                g.workspace_folder
-                    .as_ref()
-                    .map(|p| p.to_string_lossy().into_owned()),
-                g.ui_prefs.clone(),
-            )
-        })
-        .unwrap_or_default();
-
-    let prefs = WindowPrefs {
-        width: normal_size.0.max(760.0),
-        height: normal_size.1.max(480.0),
-        x: normal_pos.map(|p| p.0),
-        y: normal_pos.map(|p| p.1),
-        maximized: window.is_maximized(),
-        last_workspace_folder: last_folder,
-        ui: ui_prefs,
-    };
-    save_window_prefs(&prefs);
-}
-
 fn main() {
     let cli = parse_cli_targets();
 
@@ -394,27 +362,7 @@ fn main() {
                 event: WindowEvent::CloseRequested,
                 ..
             } => {
-                let has_unsaved = app_state
-                    .inner
-                    .lock()
-                    .map(|g| g.has_unsaved_changes)
-                    .unwrap_or(false);
-
-                if has_unsaved {
-                    dispatch_frontend_event(&webview, "close-requested", "{}");
-                } else {
-                    crate::drafts::clear_recovery_snapshot();
-                    persist_current_window_state(
-                        &window,
-                        &app_state,
-                        last_normal_size,
-                        last_normal_pos,
-                    );
-                    if is_primary {
-                        cleanup_instance_lock();
-                    }
-                    *control_flow = ControlFlow::Exit;
-                }
+                dispatch_frontend_event(&webview, "close-requested", "{}");
             }
 
             Event::LoopDestroyed => {
@@ -448,13 +396,25 @@ fn main() {
                     window.set_fullscreen(target);
                 }
                 UserEvent::ForceCloseWindow => {
-                    crate::drafts::clear_recovery_snapshot();
-                    persist_current_window_state(
-                        &window,
-                        &app_state,
-                        last_normal_size,
-                        last_normal_pos,
-                    );
+                    let (width, height) = last_normal_size;
+                    let position = last_normal_pos;
+                    let maximized = window.is_maximized();
+                    let proxy = app_state.proxy.clone();
+                    std::thread::spawn(move || {
+                        if let Err(err) = update_window_prefs(|prefs| {
+                            prefs.width = width.max(760.0);
+                            prefs.height = height.max(480.0);
+                            prefs.x = position.map(|p| p.0);
+                            prefs.y = position.map(|p| p.1);
+                            prefs.maximized = maximized;
+                            Ok(true)
+                        }) {
+                            eprintln!("Fensterzustand konnte nicht gespeichert werden: {err}");
+                        }
+                        let _ = proxy.send_event(UserEvent::FinishCloseWindow);
+                    });
+                }
+                UserEvent::FinishCloseWindow => {
                     if is_primary {
                         cleanup_instance_lock();
                     }

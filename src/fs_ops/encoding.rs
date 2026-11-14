@@ -93,8 +93,75 @@ pub fn read_text_file(path: &Path) -> Result<FilePayload, String> {
     })
 }
 
-/// Writes UTF-8 text atomically via a sibling temporary file + rename (with direct fallback).
+pub fn write_text_file_if_unchanged(
+    path: &Path,
+    content: &str,
+    prefer_crlf: bool,
+    expected_content: &str,
+    expected_line_ending: Option<&str>,
+) -> Result<Option<String>, String> {
+    let _guard = lock_text_writes()?;
+    match fs::read(path) {
+        Ok(bytes) => {
+            let (text, _) = decode_text_bytes(&bytes);
+            let line_ending = if text.contains("\r\n") { "CRLF" } else { "LF" };
+            if text.replace("\r\n", "\n") != expected_content
+                || (text.contains('\n') && expected_line_ending.is_some_and(|expected| expected != line_ending))
+            {
+                return Ok(None);
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(format!("Datei konnte nicht gelesen werden: {err}")),
+    }
+    write_text_file_unlocked(path, content, prefer_crlf).map(Some)
+}
+
+pub(super) fn replace_text_file(
+    path: &Path,
+    content: &str,
+    prefer_crlf: bool,
+    expected_bytes: &[u8],
+) -> Result<(), String> {
+    let _guard = lock_text_writes()?;
+    let current = fs::read(path).map_err(|err| format!("Datei konnte nicht gelesen werden: {err}"))?;
+    if current != expected_bytes {
+        return Err("Die Datei wurde während des Ersetzens geändert.".to_string());
+    }
+    write_text_file_unlocked(path, content, prefer_crlf).map(|_| ())
+}
+
+/// Writes UTF-8 text atomically via a sibling temporary file and rename.
 pub fn write_text_file(path: &Path, content: &str, prefer_crlf: bool) -> Result<String, String> {
+    let _guard = lock_text_writes()?;
+    write_text_file_unlocked(path, content, prefer_crlf)
+}
+
+#[cfg(not(test))]
+fn lock_text_writes() -> Result<fs::File, String> {
+    // Keep the expected-content check and replacement together across Semyra windows.
+    let lock = (|| -> std::io::Result<fs::File> {
+        let dir = super::app_data_dir();
+        fs::create_dir_all(&dir)?;
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(dir.join("text-writes.lock"))?;
+        file.lock()?;
+        Ok(file)
+    })();
+    lock.map_err(|e| format!("Dateizugriff konnte nicht synchronisiert werden: {e}"))
+}
+
+#[cfg(test)]
+fn lock_text_writes() -> Result<std::sync::MutexGuard<'static, ()>, String> {
+    static TEXT_WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    TEXT_WRITES.lock().map_err(|e| e.to_string())
+}
+
+fn write_text_file_unlocked(path: &Path, content: &str, prefer_crlf: bool) -> Result<String, String> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() && !parent.exists() {
             fs::create_dir_all(parent)
@@ -108,8 +175,14 @@ pub fn write_text_file(path: &Path, content: &str, prefer_crlf: bool) -> Result<
     } else {
         normalized
     };
-    let final_bytes = final_str.as_bytes();
+    write_file_atomically(path, final_str.as_bytes())
+        .map_err(|e| format!("Datei konnte nicht gespeichert werden: {e}"))?;
+    let canon = normalize_existing_path(path);
+    Ok(canon.to_string_lossy().into_owned())
+}
 
+pub(crate) fn write_file_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -121,24 +194,14 @@ pub fn write_text_file(path: &Path, content: &str, prefer_crlf: bool) -> Result<
         .unwrap_or_else(|| Path::new("."))
         .join(tmp_name);
 
-    let wrote_atomic = if fs::write(&tmp_path, final_bytes).is_ok() {
-        if fs::rename(&tmp_path, path).is_ok() {
-            true
-        } else {
-            let _ = fs::remove_file(&tmp_path);
-            false
-        }
-    } else {
-        false
-    };
-
-    if !wrote_atomic {
-        fs::write(path, final_bytes)
-            .map_err(|e| format!("Datei konnte nicht gespeichert werden: {e}"))?;
+    let mut file = fs::File::create_new(&tmp_path)?;
+    let written = file.write_all(bytes);
+    drop(file);
+    let result = written.and_then(|()| fs::rename(&tmp_path, path));
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp_path);
     }
-
-    let canon = normalize_existing_path(path);
-    Ok(canon.to_string_lossy().into_owned())
+    result
 }
 
 #[cfg(test)]
@@ -160,5 +223,20 @@ mod tests {
         let (cp_decoded, cp_enc) = decode_text_bytes(&cp1252_bytes);
         assert_eq!(cp_enc, "Windows-1252");
         assert_eq!(cp_decoded, "€ üß");
+    }
+
+    #[test]
+    fn guarded_save_keeps_external_edits_and_accepts_the_original_disk_version() {
+        let path = std::env::temp_dir().join(format!("semyra-guarded-save-{}.md", std::process::id()));
+        fs::write(&path, "External\r\n").unwrap();
+        let result = write_text_file_if_unchanged(&path, "Local\n", true, "Original\n", Some("CRLF")).unwrap();
+        assert!(result.is_none());
+        let result = write_text_file_if_unchanged(&path, "Local\n", true, "External\n", Some("LF")).unwrap();
+        assert!(result.is_none());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "External\r\n");
+        let result = write_text_file_if_unchanged(&path, "Local\n", true, "External\n", Some("CRLF")).unwrap();
+        assert!(result.is_some());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "Local\r\n");
+        fs::remove_file(path).unwrap();
     }
 }

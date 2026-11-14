@@ -1,4 +1,4 @@
-use crate::drafts::{load_recovery_snapshot, DraftEntry};
+use crate::drafts::{DraftEntry, DraftStore};
 use crate::fs_ops::{clean_windows_path, normalize_existing_path};
 use crate::window_prefs::UiSessionPrefs;
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
@@ -6,7 +6,6 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 use tao::event_loop::EventLoopProxy;
 
 #[derive(Debug, Clone)]
@@ -15,6 +14,7 @@ pub enum UserEvent {
     SetWindowTheme(Option<tao::window::Theme>),
     SetFullscreen(bool),
     ForceCloseWindow,
+    FinishCloseWindow,
     FsChanged { paths: Vec<String> },
     FrontendEvent { name: String, payload_json: String },
     OpenExternalUrl(String),
@@ -40,13 +40,12 @@ pub struct StartupPayload {
 pub struct AppStateInner {
     pub startup: StartupPayload,
     pub ui_prefs: UiSessionPrefs,
+    pub ui_prefs_revision: u64,
     pub workspace_folder: Option<PathBuf>,
     pub allowed_roots: HashSet<PathBuf>,
     pub watched_paths: HashSet<PathBuf>,
-    pub recent_self_writes: HashMap<PathBuf, Instant>,
     pub pending_pdf_exports: HashMap<u64, PathBuf>,
     pub next_pdf_token: u64,
-    pub has_unsaved_changes: bool,
     pub watcher: Option<RecommendedWatcher>,
 }
 
@@ -54,6 +53,7 @@ pub struct AppStateInner {
 pub struct AppState {
     pub inner: Arc<Mutex<AppStateInner>>,
     pub proxy: EventLoopProxy<UserEvent>,
+    pub drafts: Arc<Mutex<Option<DraftStore>>>,
 }
 
 impl AppState {
@@ -82,7 +82,14 @@ impl AppState {
         let pasted_assets_dir = crate::fs_ops::app_data_dir().join("pasted-assets");
         allowed_roots.insert(normalize_existing_path(&pasted_assets_dir));
 
-        let recovered_drafts = load_recovery_snapshot();
+        let (drafts, recovered_drafts) =
+            match DraftStore::open(&crate::fs_ops::app_data_dir().join("drafts")) {
+                Ok((store, entries)) => (Some(store), entries),
+                Err(err) => {
+                    eprintln!("Entwurfswiederherstellung konnte nicht geöffnet werden: {err}");
+                    (None, Vec::new())
+                }
+            };
         for draft in &recovered_drafts {
             if let Some(ref parent) = draft.parent_dir {
                 allowed_roots.insert(normalize_existing_path(Path::new(parent)));
@@ -104,37 +111,27 @@ impl AppState {
         let inner = Arc::new(Mutex::new(AppStateInner {
             startup,
             ui_prefs,
+            ui_prefs_revision: 0,
             workspace_folder: initial_folder.clone(),
             allowed_roots,
             watched_paths: HashSet::new(),
-            recent_self_writes: HashMap::new(),
             pending_pdf_exports: HashMap::new(),
             next_pdf_token: 1,
-            has_unsaved_changes: false,
             watcher: None,
         }));
 
         let watcher_proxy = proxy.clone();
-        let watcher_inner = inner.clone();
         let watcher = RecommendedWatcher::new(
             move |res: Result<Event, notify::Error>| {
                 if let Ok(event) = res {
                     if event.kind.is_modify() || event.kind.is_create() || event.kind.is_remove() {
-                        let now = Instant::now();
-                        let mut filtered = Vec::new();
-                        if let Ok(mut guard) = watcher_inner.lock() {
-                            guard.recent_self_writes.retain(|_, ts| {
-                                now.duration_since(*ts) < Duration::from_millis(1200)
-                            });
-                            for p in &event.paths {
-                                let norm = normalize_existing_path(p);
-                                if !guard.recent_self_writes.contains_key(&norm) {
-                                    filtered.push(clean_windows_path(p).to_string_lossy().into_owned());
-                                }
-                            }
-                        }
-                        if !filtered.is_empty() {
-                            let _ = watcher_proxy.send_event(UserEvent::FsChanged { paths: filtered });
+                        // Let the frontend compare the disk contents after any pending save.
+                        // A time filter would also hide genuine external changes to the same file.
+                        let paths = event.paths.iter()
+                            .map(|path| clean_windows_path(path).to_string_lossy().into_owned())
+                            .collect::<Vec<_>>();
+                        if !paths.is_empty() {
+                            let _ = watcher_proxy.send_event(UserEvent::FsChanged { paths });
                         }
                     }
                 }
@@ -147,7 +144,7 @@ impl AppState {
             guard.watcher = watcher;
         }
 
-        let state = Self { inner, proxy };
+        let state = Self { inner, proxy, drafts: Arc::new(Mutex::new(drafts)) };
 
         if let Some(ref folder) = initial_folder {
             state.watch_path(folder, true);
@@ -157,13 +154,6 @@ impl AppState {
         }
 
         state
-    }
-
-    pub fn record_self_write(&self, file_path: &Path) {
-        let norm = normalize_existing_path(file_path);
-        if let Ok(mut guard) = self.inner.lock() {
-            guard.recent_self_writes.insert(norm, Instant::now());
-        }
     }
 
     pub fn allow_file_parent(&self, file_path: &Path) {

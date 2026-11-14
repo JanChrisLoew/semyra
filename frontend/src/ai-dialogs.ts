@@ -1,4 +1,4 @@
-import { backend } from './api';
+import { backend, type FilePayload } from './api';
 import { buildAiContextBundle } from './ai-bundle';
 import { getLanguage, t } from './i18n';
 import { computeLineDiff } from './line-diff';
@@ -20,7 +20,7 @@ export interface AiBundleDialogDeps {
 export interface ExternalDiffDialogDeps {
   path: string;
   localContent: string;
-  onKeepLocal: () => void;
+  onKeepLocal: (payload: FilePayload) => void;
   onReloadDisk: () => Promise<void>;
 }
 
@@ -266,7 +266,7 @@ export async function openExternalDiffDialogModal(deps: ExternalDiffDialogDeps):
     }
 
     keepBtn.onclick = () => {
-      deps.onKeepLocal();
+      deps.onKeepLocal(payload);
       dialog.close();
     };
     reloadBtn.onclick = async () => {

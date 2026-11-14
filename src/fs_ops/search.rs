@@ -1,4 +1,4 @@
-use super::encoding::{decode_text_bytes, write_text_file};
+use super::encoding::{decode_text_bytes, replace_text_file};
 use super::{
     clean_windows_path, is_markdown_path, is_supported_text_path, normalize_existing_path,
     IGNORED_DIRS,
@@ -47,13 +47,13 @@ pub fn search_workspace_files(
         trimmed_q.to_lowercase()
     };
 
-    let mut files = Vec::new();
-    collect_searchable_files_recursive(&norm_root, 0, 6, &mut files);
+    let mut scan = WorkspaceScan::default();
+    scan.collect_files(&norm_root, 0);
 
     let mut results = Vec::new();
     let mut total_matches = 0usize;
 
-    for file_path in files {
+    for file_path in scan.files {
         if total_matches >= MAX_TOTAL_MATCHES {
             break;
         }
@@ -125,49 +125,77 @@ pub struct WorkspaceReplaceResult {
     pub files_updated: usize,
     pub total_replacements: usize,
     pub updated_paths: Vec<String>,
+    pub failures: Vec<WorkspaceReplaceFailure>,
 }
 
-fn collect_searchable_files_recursive(
-    dir: &Path,
-    depth: usize,
-    max_depth: usize,
-    out: &mut Vec<PathBuf>,
-) {
-    if depth >= max_depth {
-        return;
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceReplaceFailure {
+    path: String,
+    error: String,
+}
+
+#[derive(Default)]
+struct WorkspaceScan {
+    files: Vec<PathBuf>,
+    failures: Vec<WorkspaceReplaceFailure>,
+}
+
+impl WorkspaceScan {
+    fn report(&mut self, path: &Path, error: String) {
+        self.failures.push(WorkspaceReplaceFailure {
+            path: clean_windows_path(path).to_string_lossy().into_owned(),
+            error,
+        });
     }
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    let mut subdirs = Vec::new();
-    let mut files = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Some(name_str) = path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        if name_str.starts_with('.') {
-            continue;
+
+    fn collect_files(&mut self, dir: &Path, depth: usize) {
+        if depth >= 6 {
+            return;
         }
-        let Ok(ft) = entry.file_type() else {
-            continue;
-        };
-        if ft.is_dir() {
-            if !IGNORED_DIRS
-                .iter()
-                .any(|ig| name_str.eq_ignore_ascii_case(ig))
-            {
-                subdirs.push(path);
+        let entries = match fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(err) => {
+                self.report(dir, format!("Ordner konnte nicht gelesen werden: {err}"));
+                return;
             }
-        } else if ft.is_file() && (is_markdown_path(&path) || is_supported_text_path(&path)) {
-            files.push(path);
+        };
+        let mut subdirs = Vec::new();
+        let mut files = Vec::new();
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(err) => {
+                    self.report(dir, format!("Ordnereintrag konnte nicht gelesen werden: {err}"));
+                    continue;
+                }
+            };
+            let path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('.') {
+                continue;
+            }
+            let kind = match entry.file_type() {
+                Ok(kind) => kind,
+                Err(err) => {
+                    self.report(&path, format!("Dateityp konnte nicht ermittelt werden: {err}"));
+                    continue;
+                }
+            };
+            if kind.is_dir() {
+                if !IGNORED_DIRS.iter().any(|ignored| name.eq_ignore_ascii_case(ignored)) {
+                    subdirs.push(path);
+                }
+            } else if kind.is_file() && (is_markdown_path(&path) || is_supported_text_path(&path)) {
+                files.push(path);
+            }
         }
-    }
-    subdirs.sort();
-    files.sort();
-    out.extend(files);
-    for sub in subdirs {
-        collect_searchable_files_recursive(&sub, depth + 1, max_depth, out);
+        files.sort();
+        subdirs.sort();
+        self.files.extend(files);
+        for subdir in subdirs {
+            self.collect_files(&subdir, depth + 1);
+        }
     }
 }
 
@@ -187,31 +215,44 @@ pub fn replace_in_workspace_files(
         return Err("Ungültiger Arbeitsordner.".to_string());
     }
 
-    let mut files = Vec::new();
-    collect_searchable_files_recursive(&norm_root, 0, 6, &mut files);
+    let mut scan = WorkspaceScan::default();
+    scan.collect_files(&norm_root, 0);
 
     let mut files_updated = 0usize;
     let mut total_replacements = 0usize;
     let mut updated_paths = Vec::new();
+    let mut failures = scan.failures;
 
-    for file_path in files {
+    for file_path in scan.files {
         if let Ok(meta) = fs::metadata(&file_path) {
             if meta.len() > 5 * 1024 * 1024 {
                 continue;
             }
         }
-        let Ok(bytes) = fs::read(&file_path) else {
-            continue;
+        let path = clean_windows_path(&file_path).to_string_lossy().into_owned();
+        let bytes = match fs::read(&file_path) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                failures.push(WorkspaceReplaceFailure {
+                    path,
+                    error: format!("Datei konnte nicht gelesen werden: {err}"),
+                });
+                continue;
+            }
         };
         let (content, _) = decode_text_bytes(&bytes);
         let prefer_crlf = content.contains("\r\n");
 
         let (updated, count) = replace_text_occurrences(&content, query, replacement, case_sensitive);
         if count > 0 && updated != content {
-            write_text_file(&file_path, &updated, prefer_crlf)?;
-            files_updated += 1;
-            total_replacements += count;
-            updated_paths.push(clean_windows_path(&file_path).to_string_lossy().into_owned());
+            match replace_text_file(&file_path, &updated, prefer_crlf, &bytes) {
+                Ok(()) => {
+                    files_updated += 1;
+                    total_replacements += count;
+                    updated_paths.push(path);
+                }
+                Err(error) => failures.push(WorkspaceReplaceFailure { path, error }),
+            }
         }
     }
 
@@ -219,6 +260,7 @@ pub fn replace_in_workspace_files(
         files_updated,
         total_replacements,
         updated_paths,
+        failures,
     })
 }
 
@@ -329,6 +371,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn scan_records_an_unreadable_path_and_still_collects_other_files() {
+        let dir = std::env::temp_dir().join(format!("semyra_scan_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let missing = dir.join("missing");
+        let document = dir.join("available.md");
+        fs::write(&document, "original").unwrap();
+
+        let mut scan = WorkspaceScan::default();
+        scan.collect_files(&missing, 1);
+        scan.collect_files(&dir, 0);
+
+        assert_eq!(scan.files, [document]);
+        assert_eq!(scan.failures.len(), 1);
+        assert_eq!(scan.failures[0].path, missing.to_string_lossy());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn replaces_across_files_preserving_crlf() {
         let dir = std::env::temp_dir().join(format!(
             "semyra_replace_test_{}",
@@ -364,5 +424,32 @@ mod tests {
         let (out2, count2) = replace_text_occurrences("GROẞE Straße", "große", "kleine", false);
         assert_eq!(count2, 1);
         assert_eq!(out2, "kleine Straße");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn reports_locked_file_and_continues_replacing_other_files() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = std::env::temp_dir().join(format!(
+            "semyra_replace_locked_{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        for name in ["a.md", "b.md", "c.md"] {
+            fs::write(dir.join(name), "old").unwrap();
+        }
+        let blocked = dir.join("b.md");
+        // Allow reads of the target while denying replacement of the open file.
+        let lock = fs::OpenOptions::new().read(true).share_mode(1).open(&blocked).unwrap();
+        let result = replace_in_workspace_files(&dir, "old", "new", true).unwrap();
+        assert_eq!(result.files_updated, 2);
+        assert_eq!(result.total_replacements, 2);
+        assert_eq!(result.updated_paths.len(), 2);
+        assert_eq!(result.failures.len(), 1);
+        assert!(result.failures[0].path.ends_with("b.md"));
+        assert_eq!(fs::read_to_string(dir.join("c.md")).unwrap(), "new");
+        assert_eq!(fs::read_to_string(blocked).unwrap(), "old");
+        drop(lock);
+        fs::remove_dir_all(dir).unwrap();
     }
 }

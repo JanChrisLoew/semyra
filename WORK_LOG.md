@@ -7,6 +7,169 @@ Dieses Dokument dient als fortlaufendes Protokoll über Entwicklungssessions, we
 
 ---
 
+## 2026-11-14 — Mermaid-Diagramme per Maus verschieben
+
+- `frontend/src/mermaid-viewer.ts` verschiebt den vorhandenen Scrollbereich beim Ziehen mit gedrückter linker Maustaste. Pointer Capture hält die Geste außerhalb der Diagrammfläche aktiv. Die Dialogstile zeigen Greifcursor und 14 px breite bzw. hohe Scrollleisten in Chromium.
+- Typecheck, 121 Frontend-Tests, Vite-Build, 20 Rust-Tests und alle 15 Playwright-Tests bestanden. Der Mermaid-Test prüft Ziehen auf beiden Achsen, Loslassen außerhalb des Diagramms, Tastaturscrollen und Einpassen.
+- Release kompiliert. Die laufende EXE am Standardpfad konnte wegen einer Dateisperre weder ersetzt noch überschrieben werden. Die verifizierte Kopie des neuen Builds liegt unter `target/mermaid-pan/Semyra.exe`. Build-Schritte einzeln ausgeführt.
+
+---
+
+## 2026-11-14 — Mermaid-Dialog kompakter
+
+- Standardgröße in `frontend/src/styles/dialogs-print.css` auf 84 % der Fensterbreite und 72 % der Fensterhöhe reduziert. SVG-Zoom und Einpassen bleiben verfügbar. Der bestehende Playwright-Test prüft zusätzlich beide Dialogmaße.
+- Typecheck, 121 Frontend-Tests, Vite-Build, 20 Rust-Tests und gezielter Playwright-Test erfolgreich. `Build-Release.ps1` über die einzelnen Schritte abgedeckt. Die aktualisierte x64-EXE wurde nach `target/release/Semyra.exe` gebaut. Die neue Dialoggröße wurde in Edge geprüft.
+
+---
+
+## 2026-11-14 — Mermaid-Großansicht mit SVG-Zoom
+
+- `frontend/index.html`, `frontend/src/mermaid-viewer.ts`, `main.ts`, `i18n.ts` und die Dialog- und Markdown-Stile erweitert. Die Großansicht nutzt 94 % der Fensterbreite und 90 % der Fensterhöhe. Ein Klick auf das Diagramm oder auf „Vergrößern“ öffnet das eingepasste SVG. Die Bedienelemente skalieren von 50 bis 800 % relativ zur eingepassten Ansicht.
+- Typecheck, 121 Frontend-Tests, Vite-Build, 20 Rust-Tests und 15 Playwright-Tests bestanden. Der neue Test in `frontend/e2e/mermaid-viewer.spec.ts` prüft Klick, SVG-Skalierung, Scrollbereich, Einpassen und Tastaturzugriff. Nativ in WebView2 direktes Öffnen, große Darstellung und 125-%-Stufe bestätigt.
+- `Build-Release.ps1` konnte die offene bzw. gesperrte `target/release/Semyra.exe` nicht ersetzen. Die frisch kompilierte Release-EXE wurde separat unter `target/mermaid-build/Semyra.exe` bereitgestellt und bytegleich unter eindeutigem Prozessnamen getestet.
+- Anschließend den getesteten Build auch nach `target/release/Semyra.exe` kopiert und die identischen SHA-256-Prüfsummen verifiziert. Die installierte EXE hat weiterhin einen älteren Stand.
+
+---
+
+## 2026-11-14 — Mermaid-Großansicht nativ geprüft
+
+- Im Split- und Lesemodus mit einer bytegleichen Kopie des Release-Builds getestet. Der Klick auf das Diagramm öffnet keinen Dialog. Die Schaltfläche „Vergrößern“ am Diagramm öffnet in beiden Modi den Dialog und Escape schließt ihn.
+- Anwendungscode unverändert. Typecheck, Frontend- und Rust-Tests sowie Release-Build für diesen gezielten UI-Test nicht erneut ausgeführt.
+
+---
+
+## 2026-11-14 — Refactoring erneut geprüft
+
+- `Build-Release.ps1` mit Typecheck, 121 Frontend-Tests, Vite-Build, 20 Rust-Tests und x64-Build erneut erfolgreich. ARM64-Compile-Check und 14 Playwright-Tests gegen das Produktionsbundle ebenfalls erfolgreich. Die README-Build-Anleitung enthält keine festen Testzahlen mehr.
+- Nativer Test mit einer bytegleichen Kopie des x64-Builds unter eindeutigem Prozessnamen, da die Windows-Automation die gleichnamigen Fenster der installierten und der gebauten EXE verwechselte. Die native WebView2-PDF enthält auf einer Seite die erwartete Überschrift und beide Mermaid-Beschriftungen.
+- Die Testinstanz ließ sich regulär schließen. `window_prefs.json` enthielt danach Fenstergeometrie und Testsession. Beim erneuten Start ohne Dateiparameter erschien das Testdokument aus der gespeicherten Sitzung. Der Test hat den zuletzt gespeicherten Sitzungsstand auf den Testordner gesetzt.
+- Anwendungscode unverändert. Nativer PDF-Export und Sitzungswiederherstellung im Normalfall bestätigt. Der Schreibfehlerfall beim Schließen wurde in Playwright mit simulierter IPC-Antwort geprüft.
+
+---
+
+## 2026-11-14 — Einstellungspersistenz und Exportsteuerung konsolidiert
+
+### 1. Ziel & Scope
+- Einstellungsspeicherung und Exportsteuerung nach dem Codebase-Review gezielt überarbeitet und veraltete Testzahlen aus dem README entfernt.
+
+### 2. Änderungen & Entscheidungen
+- `src/window_prefs.rs` nutzt den vorhandenen atomaren Dateiaustausch und eine prozessübergreifende Sperre um Lesen, Ändern und Schreiben. `src/ipc.rs` und `src/state.rs` prüfen die Revision der UI-Einstellungen, damit verspätete Antworten keinen neueren UI-Stand zurücksetzen.
+- `src/main.rs` speichert Fenstergröße und Position beim Schließen außerhalb des UI-Threads und übernimmt nur die Geometriefelder. Die UI meldet Schreibfehler der Einstellungen und lässt beim Schließen einen erneuten Versuch oder bewusstes Schließen zu.
+- `frontend/src/document-export.ts` übernimmt HTML, PDF, Druck und Rich-Text-Kopie. `frontend/src/main.ts` liefert den Dokumentstand und bindet die Aktionen ein.
+
+### 3. Testergebnisse & Build-Status
+- `Build-Release.ps1` erfolgreich mit `npm run typecheck`, 121 Frontend-Tests, Vite-Build, 20 Rust-Tests und x64-Release-Build. ARM64-Compile-Check erfolgreich.
+- 14 Playwright-Tests bestanden. Die Suite enthält jetzt einen Fehler-und-Wiederholungsfall für die UI-Persistenz. Ausführung gegen das Produktionsbundle mit direktem Vite-Aufruf außerhalb der Sandbox.
+
+### 4. Verbleibende Prüfung
+- Die aktuelle EXE wurde nach dem Refactoring gebaut. Der native Fenster-Schließablauf und der PDF-Export wurden für diesen neuen Build nicht erneut manuell geprüft.
+
+---
+
+## 2026-11-14 — Review möglicher kleiner Refactorings nach der Abnahme
+
+- Den abgenommenen Arbeitsbaum geprüft. Der größte konkrete Nutzen liegt in der Konsolidierung der Einstellungspersistenz. `prefs/save` und die Fensterschließlogik schreiben dieselbe Datei über getrennte Abläufe. Ein gemeinsamer, serialisierter Update-Pfad mit atomarem Dateiaustausch und Fehlerweitergabe würde veraltete Snapshots und beschädigte JSON-Dateien vermeiden.
+- Als kleines Refactoring bietet sich die Auslagerung der Exportsteuerung aus `frontend/src/main.ts` an. Die vorhandenen Tests für HTML- und PDF-Ausgabe beim Tabwechsel bilden eine Verhaltensgrenze. Die Kopplung von Speichern, Reload, Auto-Save und Schließen bleibt ein eigener, größerer Schritt. Anwendungscode unverändert. Der Nutzer bestätigte zuvor die vier nativen Abnahmetests.
+- `npm run typecheck`, 121 Frontend-Tests, `cargo check --locked`, 19 Rust-Tests und 13 Playwright-Tests erfolgreich. Playwright nutzte das vorhandene Produktionsbundle und einen direkten Vite-Aufruf außerhalb der Sandbox. `Build-Release.ps1` für dieses Review nicht erneut ausgeführt.
+
+---
+
+## 2026-11-14 — Grenzfälle aus der Nachprüfung abgesichert
+
+### 1. Ziel & Scope
+- Verwerfen, Auto-Save, Export, Dateiwächter und Ordner-Ersetzen gegen die in der Nachprüfung gefundenen Grenzfälle abgesichert.
+
+### 2. Änderungen
+- `frontend/src/main.ts` bindet Schließbestätigungen an die geprüften Editorrevisionen, pausiert Auto-Save während des Dialogs und plant ihn bei Abbruch erneut. Nach der letzten Prüfung wird das Dokument bis zur nativen Schließantwort gegen weitere Benutzereingaben gesperrt.
+- `frontend/src/main.ts`, `export-utils.ts`, `sanitizer.ts` und die Druckstile verwenden einen festen Dokumentstand für HTML, Rich Text, PDF und Druck. Die Live-Vorschau behält ihren eigenen Renderlauf. Mermaid-Renderläufe wechseln das globale Theme erst nach Abschluss des vorherigen Laufs.
+- `src/state.rs` und `src/ipc.rs` leiten Dateiereignisse ohne Zeitfilter weiter. Die Oberfläche vergleicht den gelesenen Stand nach ausstehenden Speicheroperationen. `src/fs_ops/search.rs` sammelt Zugriffsfehler bei der Verzeichnissuche und meldet sie als Teil des Ersetzen-Ergebnisses.
+
+### 3. Testergebnisse & Build-Status
+- `Build-Release.ps1` mit Typecheck, 121 Frontend-Tests, Vite-Build, 19 Rust-Tests und x64-Release-Build erfolgreich. Das finale Frontend-Bundle wurde erneut für x64 eingebettet und für ARM64 kompiliert.
+- Alle 13 Playwright-Tests gegen das Produktionsbundle bestanden. Fünf neue Fälle prüfen abgebrochenes Schließen, spätere Eingaben, HTML- und PDF-Ausgabe nach Tabwechsel sowie eine externe Änderung direkt nach dem Speichern.
+
+### 4. Verbleibende Grenzen
+- Browser-Tests prüfen IPC und die Druckansicht mit simulierten nativen Antworten. Der native WebView2-PDF-Dialog und der tatsächliche Benachrichtigungsablauf in WebView2 wurden nicht manuell geprüft.
+- Externe Prozesse können weiterhin im kurzen Zeitfenster zwischen Inhaltsvergleich und atomarem Dateiaustausch schreiben.
+
+---
+
+## 2026-11-14 — Nachprüfung der fünf Review-Korrekturen
+
+### 1. Ziel & Scope
+- Die Korrekturen für Speichern, Auto-Save, Entwurfswiederherstellung, Ordner-Ersetzen und Vorschau im aktuellen Arbeitsbaum nachgeprüft.
+
+### 2. Befunde
+- Drei Fehler mit temporären Playwright-Prüfungen und nachgestelltem IPC bestätigt. Beim Schließen des Fensters kann die Verwerfen-Bestätigung spätere Eingaben einschließen (`frontend/src/main.ts`). Nach Abbruch eines Tab-Schließens bleibt ein geplanter Auto-Save aus. Der HTML-Export kann beim Tabwechsel Inhalt eines anderen Tabs übernehmen.
+- Per Codeanalyse festgestellt, dass der Dateiwächter externe Änderungen kurz nach einem eigenen Schreibzugriff ausfiltern kann (`src/state.rs`). Beim Ordner-Ersetzen werden Fehler in der Dateisuche still übersprungen (`src/fs_ops/search.rs`).
+- Anwendungscode nicht geändert. Temporäre Prüfspezifikationen und Konfigurationen entfernt.
+
+### 3. Testergebnisse & Build-Status
+- `npm run typecheck`, `npm test` (121 Tests), `cargo check --locked` und `cargo test --locked` (18 Tests) erfolgreich. Die 8 vorhandenen Playwright-Tests bestanden gegen das vorhandene Vite-Bundle mit direktem Vite-Aufruf außerhalb der Sandbox.
+- Drei zusätzliche Prüfungen reproduzierten die genannten Fehler. `scripts/Build-Release.ps1` und native WebView2-UI für die Nachprüfung nicht erneut ausgeführt.
+
+### 4. Nächste Schritte
+- Verwerfen an konkrete Editorrevisionen binden, Auto-Save bei abgebrochenem Schließen wieder einplanen, Exporte an das Ausgangsdokument binden und Watcher-Ereignisse anhand des Dateistands einordnen.
+
+---
+
+## 2026-11-14 — P1- und P2-Befunde aus dem Review behoben
+
+### 1. Ziel & Scope
+- Fünf Befunde zu Speichern, Auto-Save, Entwurfswiederherstellung, Ordner-Ersetzen und Live-Vorschau behoben.
+
+### 2. Änderungen & Entscheidungen
+- `frontend/src/main.ts`, `api.ts`, `ai-dialogs.ts`, `src/ipc.rs` und `src/fs_ops/encoding.rs`: Speichern bestätigt den tatsächlich geschriebenen Inhalt und Zeilenumbruch. Rust prüft den erwarteten Dateistand und serialisiert Semyra-Schreibzugriffe fensterübergreifend. Auto-Save wartet bei Konflikten. „Lokal behalten“ erlaubt manuelles Speichern gegen den zuvor verglichenen Dateistand.
+- `src/drafts.rs`, `src/state.rs` und `src/main.rs`: Recovery-Dateien pro Sitzung mit Dateisperre und monotonen Revisionen. Das bisherige `recovery.json` bleibt einlesbar. Das Schließen fragt den aktuellen Editorzustand ab.
+- `src/fs_ops/search.rs`, `frontend/src/workspace-search.ts` und `i18n.ts`: Ordner-Ersetzen verarbeitet weitere Dateien nach einzelnen Fehlern und meldet Teilresultate. Betroffene Tabs werden aktualisiert oder als Konflikt markiert.
+- `frontend/src/sanitizer.ts` und `main.ts`: Vorschau prüft die Rendergeneration direkt vor der DOM-Übernahme und verwirft geplante Renderläufe beim Tabwechsel.
+
+### 3. Testergebnisse & Build-Status
+- `scripts/Build-Release.ps1` erfolgreich mit `npm run typecheck`, `npm test` (121 Tests), Vite-Build, `cargo test` (18 Tests) und x64-Release-Build. ARM64-Compile-Check ebenfalls erfolgreich.
+- Alle 8 Playwright-Tests bestanden, einschließlich der neuen Tests in `frontend/e2e/file-safety.spec.ts`. Ausführung mit direktem Vite-Aufruf auf einem separaten lokalen Port außerhalb der Sandbox. Weitere Regressionstests decken Recovery, bedingtes Speichern, Teilerfolge und die Übernahme der Vorschau ab.
+
+### 4. Verbleibende Grenzen
+- Die Dateiprüfung vor dem atomaren Austausch serialisiert Semyra-Schreibzugriffe. Fremdprogramme können im kurzen Zeitfenster zwischen Prüfung und Austausch weiterhin schreiben.
+- Native UI und Installer wurden in dieser Sitzung nicht separat praktisch geprüft.
+
+---
+
+## 2026-11-14 — Review von Produktidee, Codebasis und Release-Stand
+
+### 1. Ziel & Scope
+- Produktpositionierung, Dateisicherheit, asynchrone Abläufe, Modulzuschnitt und Release-Stand auf `main` (`25d7bf0`) geprüft.
+
+### 2. Durchgeführte Arbeiten
+- Die Kombination aus Prüfung von Agentendateien, externem Änderungsvergleich und lokalem Kontext-Export als stärksten Anwendungsfall eingeordnet. Im Willkommensdokument ist dieser Ablauf bisher kaum sichtbar.
+- Per Code-Review Risiken bei Speichervorgängen mit weiteren Änderungen, bei geplantem Auto-Save nach externen Änderungen, bei gemeinsam genutzter Entwurfswiederherstellung, bei teilweise fehlgeschlagenem Ordner-Ersetzen und bei veralteten Vorschau-Renderings identifiziert. Anwendungscode unverändert.
+
+### 3. Testergebnisse & Build-Status
+- `npm run typecheck`, `npm test` (120 Tests), `npm run build`, `cargo check --locked`, `cargo test --locked` (15 Tests), `cargo build --release --locked` und `cargo check --locked --target aarch64-pc-windows-msvc` erfolgreich. Rust meldete ein Hardlink-Problem im inkrementellen Cache und nutzte Kopien.
+- `npm run test:e2e` lief zunächst in den Vite-Starttimeout. Alle 6 bestehenden Playwright-Tests liefen mit direktem Vite-Aufruf auf einem separaten lokalen Port außerhalb der Sandbox erfolgreich.
+- `Build-Release.ps1` durch die einzelnen Befehle abgedeckt. Installer und native Windows-Nutzerabläufe in dieser Sitzung nicht separat geprüft.
+
+### 4. Entscheidungen & Nächste Schritte
+- Vor einer breiteren Veröffentlichung Speichern, Entwurfswiederherstellung und Konflikte absichern. Den produktprägenden Ablauf danach im Einstieg zeigen und mit wenigen Testnutzern beobachten.
+
+---
+
+## 2026-11-14 — Einarbeitung in den Projektstand
+
+### 1. Ziel & Scope
+- Produktkontext, Repository-Dokumentation und Implementierung am lokalen Stand `25d7bf0` gelesen.
+
+### 2. Durchgeführte Arbeiten
+- Den Weg der Live-Vorschau von CodeMirror über `frontend/src/api.ts` und `src/ipc.rs` bis zur Markdown-Engine, HTML-Sanitierung und Scroll-Synchronisierung nachvollzogen.
+- Die Zuständigkeiten für Datei-I/O, Sitzungswiederherstellung, KI-Bibliothek, Kontext-Export, externe Dateiänderungen und Windows-Builds eingeordnet. Nur `WORK_LOG.md` geändert.
+
+### 3. Testergebnisse & Build-Status
+- `npm run typecheck`, `npm test`, `cargo test` und `scripts/Build-Release.ps1` für die Einarbeitung nicht ausgeführt. Die zuletzt protokollierten Ergebnisse stehen in Session 9.
+
+### 4. Entscheidungen & Nächste Schritte
+- Funktionsstand anhand des Quellcodes eingeordnet. Die Testzahlen im README sind älter als die Ergebnisse aus Session 9.
+
+---
+
 ## 2026-11-13 — Session 9: Produktreview & Maßnahmenpakete 1–5 (Doku-Sync, CI-Härtung, AI-Bundler & Templates, Diff & Workspace-Replace, Tab-Pinning)
 
 ### 1. Ziel & Scope

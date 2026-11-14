@@ -177,9 +177,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\Build-Release.ps1
 ```
 *Ablauf:*
 1. Frontend-Typprüfung (`tsc --noEmit`)
-2. Frontend-Unit-Tests (`vitest run` — 110 Tests)
+2. Frontend-Unit-Tests (`vitest run`)
 3. Vite-Frontend-Produktionsbundle (`frontend/dist`)
-4. Rust-Unit-Tests (`cargo test` — 13 Tests)
+4. Rust-Unit-Tests (`cargo test`)
 5. Rust-Release-Build (`cargo build --release` -> `target\release\Semyra.exe`)
 
 ### Manuelle Einzelschritte während der Entwicklung

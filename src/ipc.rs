@@ -1,4 +1,5 @@
-use crate::drafts::{clear_recovery_snapshot, save_recovery_snapshot, DraftEntry};
+use crate::drafts::DraftEntry;
+use crate::fs_ops::encoding::write_text_file_if_unchanged;
 use crate::fs_ops::{
     app_data_dir, build_directory_tree, build_standalone_html_document, clean_windows_path,
     create_ai_skill, create_new_folder, create_new_markdown_file, ensure_ai_library_tree,
@@ -42,6 +43,8 @@ struct WriteReq {
     path: String,
     content: String,
     line_ending: Option<String>,
+    expected_content: String,
+    expected_line_ending: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -109,7 +112,21 @@ struct ReplaceWorkspaceReq {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SaveDraftsReq {
+    revision: u64,
     entries: Vec<DraftEntry>,
+    recovery_restored: bool,
+}
+
+#[derive(Deserialize)]
+struct SavePrefsReq {
+    revision: u64,
+    prefs: UiSessionPrefs,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CloseWindowReq {
+    recovery_restored: bool,
 }
 
 #[derive(Deserialize, Default)]
@@ -157,7 +174,6 @@ struct ExecutePdfExportReq {
 #[serde(rename_all = "camelCase")]
 struct WindowStateReq {
     title: Option<String>,
-    has_unsaved_changes: Option<bool>,
     theme: Option<String>,
     fullscreen: Option<bool>,
 }
@@ -313,24 +329,39 @@ fn handle_api_route(
         }
 
         "prefs/save" => {
-            let Ok(prefs) = serde_json::from_slice::<UiSessionPrefs>(&body) else {
+            let Ok(req) = serde_json::from_slice::<SavePrefsReq>(&body) else {
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Einstellungen"));
                 return;
             };
-            let ws_folder = if let Ok(mut guard) = state.inner.lock() {
-                guard.ui_prefs = prefs.clone();
-                guard.workspace_folder.as_ref().map(|p| p.to_string_lossy().to_string())
-            } else {
-                None
+            let Ok(mut guard) = state.inner.lock() else {
+                responder.respond(err_json(StatusCode::INTERNAL_SERVER_ERROR, "Einstellungen sind nicht verfügbar."));
+                return;
             };
+            if req.revision > guard.ui_prefs_revision {
+                guard.ui_prefs_revision = req.revision;
+                guard.ui_prefs = req.prefs;
+            }
+            drop(guard);
             std::thread::spawn(move || {
-                let mut disk = crate::window_prefs::load_window_prefs();
-                disk.ui = prefs;
-                if ws_folder.is_some() {
-                    disk.last_workspace_folder = ws_folder;
+                let result = crate::window_prefs::update_window_prefs(|disk| {
+                    let guard = state.inner.lock()
+                        .map_err(|_| std::io::Error::other("Einstellungen sind nicht verfügbar."))?;
+                    if req.revision != guard.ui_prefs_revision {
+                        return Ok(false);
+                    }
+                    disk.ui = guard.ui_prefs.clone();
+                    if let Some(folder) = &guard.workspace_folder {
+                        disk.last_workspace_folder = Some(folder.to_string_lossy().into_owned());
+                    }
+                    Ok(true)
+                });
+                match result {
+                    Ok(()) => responder.respond(ok_json(&serde_json::json!({ "ok": true }))),
+                    Err(err) => responder.respond(err_json(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Einstellungen konnten nicht gespeichert werden: {err}"),
+                    )),
                 }
-                crate::window_prefs::save_window_prefs(&disk);
-                responder.respond(ok_json(&serde_json::json!({ "ok": true })));
             });
         }
 
@@ -339,15 +370,16 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Entwurfsdaten"));
                 return;
             };
-            std::thread::spawn(move || match save_recovery_snapshot(req.entries) {
-                Ok(()) => responder.respond(ok_json(&serde_json::json!({ "ok": true }))),
-                Err(err) => responder.respond(err_json(StatusCode::INTERNAL_SERVER_ERROR, err)),
+            std::thread::spawn(move || {
+                let result = state.drafts.lock().map_err(|e| e.to_string()).and_then(|mut store| {
+                    store.as_mut().ok_or_else(|| "Entwurfswiederherstellung ist nicht verfügbar.".to_string())?
+                        .save(req.revision, req.entries, req.recovery_restored)
+                });
+                match result {
+                    Ok(()) => responder.respond(ok_json(&serde_json::json!({ "ok": true }))),
+                    Err(err) => responder.respond(err_json(StatusCode::INTERNAL_SERVER_ERROR, err)),
+                }
             });
-        }
-
-        "drafts/clear" => {
-            clear_recovery_snapshot();
-            responder.respond(ok_json(&serde_json::json!({ "ok": true })));
         }
 
         "render" => {
@@ -391,14 +423,16 @@ fn handle_api_route(
                     .as_deref()
                     .map(|le| le.eq_ignore_ascii_case("CRLF"))
                     .unwrap_or(true);
-                state.record_self_write(&p);
-                match write_text_file(&p, &req.content, prefer_crlf) {
-                    Ok(saved_path) => {
+                match write_text_file_if_unchanged(
+                    &p, &req.content, prefer_crlf, &req.expected_content,
+                    req.expected_line_ending.as_deref(),
+                ) {
+                    Ok(Some(saved_path)) => {
                         let saved_p = Path::new(&saved_path);
-                        state.record_self_write(saved_p);
                         state.allow_file_parent(saved_p);
-                        responder.respond(ok_json(&serde_json::json!({ "path": saved_path })));
+                        responder.respond(ok_json(&serde_json::json!({ "saved": true })));
                     }
+                    Ok(None) => responder.respond(ok_json(&serde_json::json!({ "saved": false }))),
                     Err(err) => {
                         responder.respond(err_json(StatusCode::INTERNAL_SERVER_ERROR, err))
                     }
@@ -449,7 +483,6 @@ fn handle_api_route(
             match create_ai_skill(Path::new(&req.parent_dir), &req.skill_name) {
                 Ok(payload) => {
                     let p = Path::new(&payload.path);
-                    state.record_self_write(p);
                     state.allow_file_parent(p);
                     responder.respond(ok_json(&payload));
                 }
@@ -479,7 +512,6 @@ fn handle_api_route(
                 let base = req.base_dir.as_deref().map(Path::new);
                 match save_clipboard_image(base, &req.mime_type, &req.data_base64) {
                     Ok((saved_path, md_snippet)) => {
-                        state.record_self_write(&saved_path);
                         state.allow_file_parent(&saved_path);
                         responder.respond(ok_json(&serde_json::json!({
                             "savedPath": saved_path.to_string_lossy(),
@@ -500,7 +532,6 @@ fn handle_api_route(
                 let base = req.base_dir.as_deref().map(Path::new);
                 match import_dropped_image(base, Path::new(&req.source_path)) {
                     Ok((saved_path, md_snippet)) => {
-                        state.record_self_write(&saved_path);
                         state.allow_file_parent(&saved_path);
                         responder.respond(ok_json(&serde_json::json!({
                             "savedPath": saved_path.to_string_lossy(),
@@ -556,7 +587,6 @@ fn handle_api_route(
             };
             match create_new_markdown_file(Path::new(&req.parent_dir), &req.file_name) {
                 Ok(payload) => {
-                    state.record_self_write(Path::new(&payload.path));
                     state.allow_file_parent(Path::new(&payload.path));
                     responder.respond(ok_json(&payload));
                 }
@@ -571,7 +601,6 @@ fn handle_api_route(
             };
             match create_new_folder(Path::new(&req.parent_dir), &req.folder_name) {
                 Ok(path) => {
-                    state.record_self_write(Path::new(&path));
                     responder.respond(ok_json(&serde_json::json!({ "path": path })));
                 }
                 Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
@@ -587,11 +616,9 @@ fn handle_api_route(
                 return;
             };
             let old_p = PathBuf::from(&req.path);
-            state.record_self_write(&old_p);
             match rename_fs_entry(&old_p, &req.new_name) {
                 Ok((new_path, new_name)) => {
                     let new_p = Path::new(&new_path);
-                    state.record_self_write(new_p);
                     if new_p.is_file() {
                         state.allow_file_parent(new_p);
                     }
@@ -611,7 +638,6 @@ fn handle_api_route(
             };
             std::thread::spawn(move || {
                 let target = PathBuf::from(&req.path);
-                state.record_self_write(&target);
                 match move_to_recycle_bin(&target) {
                     Ok(()) => responder.respond(ok_json(&serde_json::json!({ "ok": true }))),
                     Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
@@ -635,11 +661,6 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültiger Status"));
                 return;
             };
-            if let Some(unsaved) = req.has_unsaved_changes {
-                if let Ok(mut guard) = state.inner.lock() {
-                    guard.has_unsaved_changes = unsaved;
-                }
-            }
             if let Some(title) = req.title {
                 let _ = state.proxy.send_event(UserEvent::SetWindowTitle(title));
             }
@@ -658,11 +679,19 @@ fn handle_api_route(
         }
 
         "window/force-close" => {
-            if let Ok(mut guard) = state.inner.lock() {
-                guard.has_unsaved_changes = false;
-            }
-            let _ = state.proxy.send_event(UserEvent::ForceCloseWindow);
-            responder.respond(ok_json(&serde_json::json!({ "ok": true })));
+            let Ok(req) = serde_json::from_slice::<CloseWindowReq>(&body) else {
+                responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Fenster-Anfrage"));
+                return;
+            };
+            std::thread::spawn(move || {
+                if let Ok(mut guard) = state.drafts.lock() {
+                    if let Some(store) = guard.as_mut() {
+                        store.close(req.recovery_restored);
+                    }
+                }
+                responder.respond(ok_json(&serde_json::json!({ "ok": true })));
+                let _ = state.proxy.send_event(UserEvent::ForceCloseWindow);
+            });
         }
 
         "open-external" => {
@@ -838,11 +867,9 @@ fn handle_api_route(
                         .as_deref()
                         .map(|le| le.eq_ignore_ascii_case("CRLF"))
                         .unwrap_or(true);
-                    state.record_self_write(&chosen);
                     match write_text_file(&chosen, &req.content, prefer_crlf) {
                         Ok(saved_path) => {
                             let norm = normalize_existing_path(Path::new(&saved_path));
-                            state.record_self_write(&norm);
                             state.allow_file_parent(&norm);
                             let name = norm
                                 .file_name()

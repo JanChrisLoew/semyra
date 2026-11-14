@@ -13,15 +13,16 @@ import { formatAiContextEntry } from './ai-bundle';
 import { openAiBundleDialogModal, openExternalDiffDialogModal } from './ai-dialogs';
 import { AiTemplateId, getAiTemplate } from './ai-templates';
 import { FormatAction, MarkdownEditorController } from './editor';
-import { copyRichPreviewToClipboard, preparePreviewHtmlForExport } from './export-utils';
+import { DocumentExportController, type DocumentSnapshot } from './document-export';
+import { renderDocument } from './export-utils';
 import { formatMarkdownDocument } from './markdown-formatter';
 import { lintMarkdownDocument, type LintIssue } from './markdown-lint';
+import { MermaidViewer } from './mermaid-viewer';
 import { bindRovingHorizontalKeyNav, syncRovingTabindex } from './navigation-a11y';
 import { CommandPaletteController } from './palette';
 import { buildPaletteCommandItems, buildPaletteFileItems } from './palette-items';
 import {
   baseNameOfPath,
-  getFileExtension,
   isMarkdownPath,
   parentDirOfPath,
   resolveRelativeMarkdownPath,
@@ -59,6 +60,7 @@ interface OpenTab {
   path: string | null;
   parentDir: string | null;
   savedContent: string;
+  savedLineEnding?: 'CRLF' | 'LF';
   currentContent: string;
   lineEnding: 'CRLF' | 'LF';
   encoding: string;
@@ -69,7 +71,9 @@ interface OpenTab {
   outline: HeadingItem[];
   stats: DocStats;
   hasExternalConflict?: boolean;
+  overwriteExpected?: Pick<FilePayload, 'content' | 'lineEnding'>;
   isPinned?: boolean;
+  revision?: number;
 }
 
 class SemyraApp {
@@ -102,9 +106,17 @@ class SemyraApp {
   private activeHeadingSlug: string | null = null;
 
   private renderDebounceTimer: number | undefined;
-  private autoSaveTimer: number | undefined;
+  private autoSaveTimers = new Map<OpenTab, number>();
+  private pendingSaves = new Map<OpenTab, Promise<boolean>>();
+  private diskReads = new WeakMap<OpenTab, number>();
   private draftSyncTimer: number | undefined;
+  private draftRevision = 0;
+  private recoveryRestored = false;
+  private closePending = false;
+  private closingTabs = new Set<OpenTab>();
   private prefsSyncTimer: number | undefined;
+  private prefsRevision = 0;
+  private prefsSaveFailed = false;
   private toastTimer: number | undefined;
   private renderSeq = 0;
   private externalChangedPath: string | null = null;
@@ -119,6 +131,12 @@ class SemyraApp {
   private tabBarEl = document.getElementById('tab-bar')!;
   private previewPaneEl = document.getElementById('preview-pane')!;
   private previewContentEl = document.getElementById('preview-content')!;
+  private readonly mermaidViewer = new MermaidViewer();
+  private documentExport = new DocumentExportController(
+    () => this.snapshotActiveDocument(),
+    this.previewPaneEl,
+    (message) => this.showToast(message),
+  );
   private outlineEl = document.getElementById('outline-container')!;
   private outlineCountBadgeEl = document.getElementById('outline-count-badge');
   private statusPathBtn = document.getElementById('status-filepath') as HTMLButtonElement;
@@ -172,7 +190,7 @@ class SemyraApp {
         void this.handlePasteImage(mimeType, dataUrl);
       },
       onCopyRichText: () => {
-        void this.copyCurrentTabRichText();
+        void this.documentExport.copyRichText();
       },
       onCopyMarkdown: () => {
         void this.copyCurrentTabMarkdown();
@@ -247,31 +265,25 @@ class SemyraApp {
         });
       },
       onFilesReplaced: async (res) => {
-        if (res.totalReplacements === 0) {
-          this.showToast(t('toast.workspaceReplaceNone'));
-          return;
-        }
         const updatedSet = new Set(res.updatedPaths.map((p) => p.toLowerCase()));
-        for (const tab of this.tabs) {
-          if (tab.path && updatedSet.has(tab.path.toLowerCase())) {
-            if (!tab.isDirty) {
-              await this.reloadTabFromDisk(tab.path);
-            } else {
-              tab.hasExternalConflict = true;
-              if (tab.id === this.activeTabId) {
-                this.externalChangedPath = tab.path;
-                this.externalBannerEl.hidden = false;
-              }
-            }
-          }
+        await Promise.all(this.tabs
+          .filter((tab) => tab.path && updatedSet.has(tab.path.toLowerCase()))
+          .map((tab) => this.syncTabFromDisk(tab)));
+        const summary = { count: res.totalReplacements, files: res.filesUpdated };
+        if (res.failures.length > 0) {
+          console.error('Ordner-Ersetzen konnte einige Dateien nicht verarbeiten:', res.failures);
+          this.showToast(t('toast.workspaceReplacePartial', {
+            ...summary,
+            failed: res.failures.length,
+            file: res.failures[0].path,
+          }), 7000);
+        } else {
+          this.showToast(res.totalReplacements > 0
+            ? t('toast.workspaceReplaced', summary)
+            : t('toast.workspaceReplaceNone'));
         }
-        this.showToast(
-          t('toast.workspaceReplaced', {
-            count: String(res.totalReplacements),
-            files: String(res.filesUpdated),
-          }),
-        );
       },
+      onReplaceError: () => this.showToast(t('toast.workspaceReplaceFailed')),
     });
 
     this.palette = new CommandPaletteController(
@@ -311,7 +323,7 @@ class SemyraApp {
               if (this.activeTab) void this.saveTab(this.activeTab, true);
             },
             onCopyRichText: () => {
-              void this.copyCurrentTabRichText();
+              void this.documentExport.copyRichText();
             },
             onCopyMarkdown: () => {
               void this.copyCurrentTabMarkdown();
@@ -326,13 +338,13 @@ class SemyraApp {
               this.createTabFromAiTemplate(templateId);
             },
             onExportHtml: () => {
-              void this.exportCurrentTabHtml();
+              void this.documentExport.exportHtml();
             },
             onExportPdf: () => {
-              void this.exportCurrentTabPdf();
+              void this.documentExport.exportPdf();
             },
             onPrint: () => {
-              void this.printCurrentTab();
+              void this.documentExport.print();
             },
             onAlignTable: () => this.alignActiveMarkdownTables(),
             onInsertTableRowAbove: () => {
@@ -519,6 +531,8 @@ class SemyraApp {
       if (startup.recoveredDrafts.length > 0) {
         this.restoreRecoveredDrafts(startup.recoveredDrafts);
       }
+      this.recoveryRestored = true;
+      if (startup.recoveredDrafts.length > 0) this.flushDraftSync();
     } catch {
       // Fallback to welcome tab
     }
@@ -905,8 +919,24 @@ class SemyraApp {
   private schedulePrefsSave(): void {
     window.clearTimeout(this.prefsSyncTimer);
     this.prefsSyncTimer = window.setTimeout(() => {
-      void backend.saveUiPrefs(this.buildCurrentUiPrefs()).catch(() => {});
+      void this.persistUiPrefs();
     }, 350);
+  }
+
+  private async persistUiPrefs(): Promise<boolean> {
+    const revision = ++this.prefsRevision;
+    try {
+      await backend.saveUiPrefs(revision, this.buildCurrentUiPrefs());
+      if (revision === this.prefsRevision) this.prefsSaveFailed = false;
+      return true;
+    } catch (err) {
+      console.error('Einstellungen konnten nicht gespeichert werden:', err);
+      if (revision === this.prefsRevision && !this.prefsSaveFailed) {
+        this.prefsSaveFailed = true;
+        this.showToast(t('toast.prefsSaveFailed'));
+      }
+      return false;
+    }
   }
 
   // ==========================================================================
@@ -915,14 +945,28 @@ class SemyraApp {
 
   private restoreRecoveredDrafts(drafts: DraftEntry[]): void {
     let restoredCount = 0;
+    const restoredPaths = new Set<string>();
     for (const draft of drafts) {
       restoredCount++;
-      if (draft.path) {
-        const normLower = draft.path.toLowerCase();
+      const normLower = draft.path?.toLowerCase();
+      const duplicate = normLower !== undefined && restoredPaths.has(normLower);
+      if (normLower && !duplicate) {
+        restoredPaths.add(normLower);
         const existing = this.tabs.find((t) => t.path?.toLowerCase() === normLower);
         if (existing) {
+          const diskContent = existing.savedContent;
+          const diskLineEnding = existing.lineEnding;
+          existing.savedContent = draft.savedContent;
+          existing.savedLineEnding = draft.savedLineEnding ?? diskLineEnding;
           existing.currentContent = draft.content;
-          existing.isDirty = draft.content !== existing.savedContent;
+          existing.lineEnding = draft.lineEnding;
+          existing.isDirty = draft.content !== diskContent || draft.lineEnding !== diskLineEnding;
+          existing.hasExternalConflict = existing.isDirty
+            && (diskContent !== draft.savedContent || diskLineEnding !== existing.savedLineEnding);
+          if (!existing.isDirty) {
+            existing.savedContent = diskContent;
+            existing.savedLineEnding = diskLineEnding;
+          }
           existing.editorState = this.editor.createState(draft.content);
           if (existing.id === this.activeTabId) {
             this.editor.swapState(existing.editorState, 0);
@@ -939,9 +983,10 @@ class SemyraApp {
       const tab: OpenTab = {
         id,
         name: draft.name || t('tab.untitledName', { num: this.untitledCounter++ }),
-        path: draft.path,
+        path: duplicate ? null : draft.path,
         parentDir: draft.parentDir ?? this.explorer.rootPath,
         savedContent: draft.savedContent,
+        savedLineEnding: draft.savedLineEnding,
         currentContent: draft.content,
         lineEnding: draft.lineEnding === 'LF' ? 'LF' : 'CRLF',
         encoding: 'UTF-8',
@@ -979,9 +1024,13 @@ class SemyraApp {
         parentDir: t.parentDir,
         content: t.currentContent,
         savedContent: t.savedContent,
+        savedLineEnding: t.savedLineEnding,
         lineEnding: t.lineEnding,
       }));
-    void backend.saveDrafts(dirtyEntries).catch(() => {});
+    void backend.saveDrafts(++this.draftRevision, dirtyEntries, this.recoveryRestored).catch((err) => {
+      console.error('Entwurfswiederherstellung konnte nicht aktualisiert werden:', err);
+      this.showToast(t('toast.draftSaveFailed'));
+    });
   }
 
   private scheduleDraftSync(): void {
@@ -1079,11 +1128,14 @@ class SemyraApp {
     const target = this.tabs.find((t) => t.id === tabId);
     if (!target) return;
 
+    window.clearTimeout(this.renderDebounceTimer);
+    this.renderDebounceTimer = undefined;
     this.activeTabId = tabId;
     if (target.hasExternalConflict && target.path) {
       this.externalChangedPath = target.path;
       this.externalBannerEl.hidden = false;
     } else {
+      this.externalChangedPath = null;
       this.externalBannerEl.hidden = true;
     }
     this.editor.swapState(target.editorState, target.editorScrollTop);
@@ -1159,6 +1211,7 @@ class SemyraApp {
       path: payload.path,
       parentDir: payload.parentDir,
       savedContent: payload.content,
+      savedLineEnding: payload.lineEnding,
       currentContent: payload.content,
       lineEnding: payload.lineEnding,
       encoding: payload.encoding || 'UTF-8',
@@ -1177,30 +1230,61 @@ class SemyraApp {
     }
   }
 
-  private async saveTab(tab: OpenTab, forceSaveAs = false): Promise<boolean> {
-    const isNewPath = !tab.path || forceSaveAs;
-    if (isNewPath) {
-      const res = await backend.saveFileDialog(
-        tab.currentContent,
-        tab.name,
-        tab.parentDir ?? this.explorer.rootPath,
-        tab.lineEnding,
-        getLanguage(),
-      );
-      if (!res.saved || !res.path) return false;
-      tab.path = res.path;
-      tab.name = res.name ?? tab.name;
-      tab.parentDir = res.parentDir ?? tab.parentDir;
-    } else if (tab.path) {
-      await backend.writeFile(tab.path, tab.currentContent, tab.lineEnding);
-    } else {
+  private async saveTab(tab: OpenTab, forceSaveAs = false, automatic = false): Promise<boolean> {
+    while (this.pendingSaves.has(tab)) {
+      await this.pendingSaves.get(tab);
+    }
+    if (!this.tabs.includes(tab)) return false;
+    if (automatic && (this.closePending || this.closingTabs.has(tab)
+      || !this.autoSaveEnabled || !tab.path || !tab.isDirty || tab.hasExternalConflict)) {
+      return false;
+    }
+    this.cancelAutoSave(tab);
+    const pending = this.writeTabSnapshot(tab, forceSaveAs, automatic);
+    this.pendingSaves.set(tab, pending);
+    try {
+      return await pending;
+    } finally {
+      this.pendingSaves.delete(tab);
+    }
+  }
+
+  private async writeTabSnapshot(tab: OpenTab, forceSaveAs: boolean, automatic: boolean): Promise<boolean> {
+    const { path, currentContent: content, lineEnding } = tab;
+    const isNewPath = !path || forceSaveAs;
+    const overwrite = automatic ? undefined : tab.overwriteExpected;
+    try {
+      if (isNewPath) {
+        const res = await backend.saveFileDialog(
+          content, tab.name, tab.parentDir ?? this.explorer.rootPath, lineEnding, getLanguage(),
+        );
+        if (!res.saved || !res.path) return false;
+        tab.path = res.path;
+        tab.name = res.name ?? tab.name;
+        tab.parentDir = res.parentDir ?? tab.parentDir;
+      } else {
+        const res = await backend.writeFile(
+          path, content, lineEnding,
+          overwrite?.content ?? tab.savedContent, overwrite?.lineEnding ?? tab.savedLineEnding,
+        );
+        if (!res.saved) {
+          this.markExternalConflict(tab);
+          this.showToast(t('toast.saveConflict'));
+          return false;
+        }
+      }
+    } catch (err) {
+      console.error('Datei konnte nicht gespeichert werden:', err);
+      this.showToast(t('toast.saveFailed'));
       return false;
     }
 
-    tab.savedContent = tab.currentContent;
+    this.invalidateDiskRead(tab);
+    tab.savedContent = content;
+    tab.savedLineEnding = lineEnding;
     tab.encoding = 'UTF-8';
-    tab.isDirty = false;
-    tab.hasExternalConflict = false;
+    tab.isDirty = tab.currentContent !== content || tab.lineEnding !== lineEnding;
+    this.clearExternalConflict(tab);
     if (tab.path) {
       this.pushRecentFile(tab.path);
     }
@@ -1209,11 +1293,16 @@ class SemyraApp {
     if (isNewPath) {
       this.renderTabBar(false);
     } else {
-      this.updateTabDirtyState(tab.id, false);
+      this.updateTabDirtyState(tab.id, tab.isDirty);
     }
     this.updateStatusBar();
     this.syncWindowMetadata();
-    this.scheduleDraftSync();
+    if (tab.isDirty) {
+      this.flushDraftSync();
+      this.scheduleAutoSave(tab);
+    } else {
+      this.scheduleDraftSync();
+    }
     this.schedulePrefsSave();
 
     if (this.explorer.hasWorkspace) {
@@ -1225,12 +1314,14 @@ class SemyraApp {
   private setActiveTabLineEnding(eol: 'CRLF' | 'LF'): void {
     const tab = this.activeTab;
     if (!tab || tab.lineEnding === eol) return;
+    tab.revision = (tab.revision ?? 0) + 1;
     tab.lineEnding = eol;
     if (tab.path) {
-      tab.isDirty = true;
-      this.updateTabDirtyState(tab.id, true);
+      tab.isDirty = tab.currentContent !== tab.savedContent || eol !== tab.savedLineEnding;
+      this.updateTabDirtyState(tab.id, tab.isDirty);
       this.syncWindowMetadata();
       this.scheduleDraftSync();
+      this.scheduleAutoSave(tab);
     }
     this.updateStatusBar();
     this.settingsCtrl?.syncAll();
@@ -1243,20 +1334,32 @@ class SemyraApp {
   }
 
   private async requestCloseTab(tabId: string): Promise<boolean> {
-    const idx = this.tabs.findIndex((t) => t.id === tabId);
-    if (idx === -1) return true;
-    const tab = this.tabs[idx];
-
-    if (tab.isDirty) {
-      const choice = await this.promptUnsavedChanges(
-        t('unsavedDialog.descWithName', { name: tab.name }),
-      );
-      if (choice === 'cancel') return false;
-      if (choice === 'save') {
-        const saved = await this.saveTab(tab);
-        if (!saved) return false;
+    const tab = this.tabs.find((t) => t.id === tabId);
+    if (!tab) return true;
+    if (this.closePending || this.closingTabs.size > 0) return false;
+    this.closingTabs.add(tab);
+    this.cancelAutoSave(tab);
+    try {
+      await this.pendingSaves.get(tab);
+      if (tab.isDirty) {
+        const revision = tab.revision;
+        const choice = await this.promptUnsavedChanges(
+          t('unsavedDialog.descWithName', { name: tab.name }),
+        );
+        if (choice === 'cancel' || revision !== tab.revision) return false;
+        if (choice === 'save' && (!await this.saveTab(tab) || tab.isDirty)) return false;
       }
+      this.removeClosedTab(tab);
+      return true;
+    } finally {
+      this.closingTabs.delete(tab);
+      if (this.tabs.includes(tab)) this.scheduleAutoSave(tab);
     }
+  }
+
+  private removeClosedTab(tab: OpenTab): void {
+    const idx = this.tabs.indexOf(tab);
+    if (idx === -1) return;
 
     this.closedTabsHistory.push({
       name: tab.name,
@@ -1268,10 +1371,11 @@ class SemyraApp {
       this.closedTabsHistory.shift();
     }
 
+    this.cancelAutoSave(tab);
     this.tabs.splice(idx, 1);
     if (this.tabs.length === 0) {
       this.createNewTab();
-    } else if (this.activeTabId === tabId) {
+    } else if (this.activeTabId === tab.id) {
       const nextTab = this.tabs[Math.min(idx, this.tabs.length - 1)];
       this.activateTab(nextTab.id);
     } else {
@@ -1280,7 +1384,6 @@ class SemyraApp {
     this.syncWindowMetadata();
     this.flushDraftSync();
     this.schedulePrefsSave();
-    return true;
   }
 
   private async reopenLastClosedTab(): Promise<void> {
@@ -1414,8 +1517,10 @@ class SemyraApp {
     const tab = this.activeTab;
     if (!tab) return;
 
+    if (tab.currentContent !== content) tab.revision = (tab.revision ?? 0) + 1;
     tab.currentContent = content;
-    const nextDirty = content !== tab.savedContent;
+    const nextDirty = content !== tab.savedContent
+      || (tab.path !== null && tab.savedLineEnding !== undefined && tab.lineEnding !== tab.savedLineEnding);
     if (tab.isDirty !== nextDirty) {
       tab.isDirty = nextDirty;
       this.updateTabDirtyState(tab.id, nextDirty);
@@ -1425,67 +1530,51 @@ class SemyraApp {
     this.scheduleDraftSync();
 
     window.clearTimeout(this.renderDebounceTimer);
+    ++this.renderSeq;
     this.renderDebounceTimer = window.setTimeout(() => {
+      this.renderDebounceTimer = undefined;
       void this.renderPreviewImmediate(
         content,
         tab.parentDir ?? this.explorer.rootPath,
       );
     }, 35);
 
-    if (this.autoSaveEnabled && tab.path && tab.isDirty && !tab.hasExternalConflict) {
-      window.clearTimeout(this.autoSaveTimer);
-      this.autoSaveTimer = window.setTimeout(() => {
-        void this.saveTab(tab);
-      }, 900);
-    }
+    this.scheduleAutoSave(tab);
+  }
+
+  private cancelAutoSave(tab: OpenTab): void {
+    window.clearTimeout(this.autoSaveTimers.get(tab));
+    this.autoSaveTimers.delete(tab);
+  }
+
+  private scheduleAutoSave(tab: OpenTab): void {
+    this.cancelAutoSave(tab);
+    if (this.closePending || this.closingTabs.has(tab)
+      || !this.autoSaveEnabled || !tab.path || !tab.isDirty || tab.hasExternalConflict) return;
+    this.autoSaveTimers.set(tab, window.setTimeout(() => {
+      this.autoSaveTimers.delete(tab);
+      void this.saveTab(tab, false, true);
+    }, 900));
   }
 
   private async renderPreviewImmediate(
     markdown: string,
     baseDir: string | null,
     restoreScrollTop?: number,
-    forceLightTheme = false,
   ): Promise<void> {
     const seq = ++this.renderSeq;
+    const isCurrent = () => seq === this.renderSeq;
     try {
-      let markdownToRender = markdown;
       const tab = this.activeTab;
-      if (tab && !isMarkdownPath(tab.name)) {
-        const ext = getFileExtension(tab.name);
-        const langMap: Record<string, string> = {
-          json: 'json',
-          yaml: 'yaml',
-          yml: 'yaml',
-          toml: 'toml',
-          ini: 'ini',
-          txt: 'text',
-          csv: 'text',
-          log: 'text',
-          env: 'properties',
-          xml: 'xml',
-          js: 'javascript',
-          ts: 'typescript',
-          rs: 'rust',
-          html: 'html',
-          css: 'css',
-        };
-        const lang = langMap[ext] ?? (ext || 'text');
-        let fence = '```';
-        while (markdown.includes(fence)) {
-          fence += '`';
-        }
-        markdownToRender = `${fence}${lang}\n${markdown}\n${fence}`;
-      }
-
-      const res = await backend.renderMarkdown(markdownToRender, baseDir);
+      const res = await renderDocument(tab?.name ?? 'Untitled.md', markdown, baseDir);
       if (seq !== this.renderSeq) return;
 
+      const applied = await safeSetMarkdownHTML(this.previewContentEl, res.html, { isCurrent });
+      if (!applied || !isCurrent()) return;
       if (tab) {
         tab.outline = res.outline;
         tab.stats = res.stats;
       }
-
-      await safeSetMarkdownHTML(this.previewContentEl, res.html, { forceLightTheme });
       this.renderOutline(res.outline);
       this.updateStatusBar();
 
@@ -1832,19 +1921,16 @@ class SemyraApp {
 
   private syncWindowMetadata(): void {
     const tab = this.activeTab;
-    const anyDirty = this.tabs.some((t) => t.isDirty);
     const dirtyPrefix = tab?.isDirty ? '● ' : '';
     const title = tab ? `${dirtyPrefix}${tab.name} — Semyra` : 'Semyra';
-    void backend.setWindowState({
-      title,
-      hasUnsavedChanges: anyDirty,
-    });
+    void backend.setWindowState({ title });
   }
 
   private promptUnsavedChanges(
     message: string,
   ): Promise<'save' | 'discard' | 'cancel'> {
     const dialog = document.getElementById('unsaved-dialog') as HTMLDialogElement;
+    if (dialog.open) return Promise.resolve('cancel');
     const desc = document.getElementById('unsaved-dialog-desc')!;
     desc.textContent = message;
 
@@ -1862,14 +1948,6 @@ class SemyraApp {
       dialog.addEventListener('close', onClose);
       dialog.showModal();
     });
-  }
-
-  private openMermaidLightbox(svgEl: SVGElement): void {
-    const dialog = document.getElementById('mermaid-dialog') as HTMLDialogElement | null;
-    const body = document.getElementById('mermaid-dialog-body');
-    if (!dialog || !body) return;
-    body.replaceChildren(svgEl.cloneNode(true));
-    dialog.showModal();
   }
 
   // ==========================================================================
@@ -1910,6 +1988,9 @@ class SemyraApp {
 
   private toggleAutoSave(): void {
     this.autoSaveEnabled = !this.autoSaveEnabled;
+    if (!this.autoSaveEnabled) {
+      for (const tab of this.autoSaveTimers.keys()) this.cancelAutoSave(tab);
+    }
     const btn = document.getElementById('btn-autosave');
     if (btn) {
       btn.classList.toggle('is-active', this.autoSaveEnabled);
@@ -2103,17 +2184,10 @@ class SemyraApp {
     }, durationMs);
   }
 
-  private async flushActivePreviewRender(): Promise<void> {
+  private snapshotActiveDocument(): DocumentSnapshot | undefined {
     const tab = this.activeTab;
     if (!tab) return;
-    if (this.renderDebounceTimer !== undefined) {
-      window.clearTimeout(this.renderDebounceTimer);
-      this.renderDebounceTimer = undefined;
-      await this.renderPreviewImmediate(
-        tab.currentContent,
-        tab.parentDir ?? this.explorer.rootPath,
-      );
-    }
+    return { name: tab.name, content: tab.currentContent, baseDir: tab.parentDir ?? this.explorer.rootPath };
   }
 
   private alignActiveMarkdownTables(): void {
@@ -2141,66 +2215,6 @@ class SemyraApp {
     this.editor.openSearch(true);
   }
 
-  private async withLightPaperPreview<T>(fn: () => Promise<T>): Promise<T> {
-    const tab = this.activeTab;
-    await this.flushActivePreviewRender();
-    if (!tab) return fn();
-
-    const baseDir = tab.parentDir ?? this.explorer.rootPath;
-    const prevView = (this.appEl.getAttribute('data-view') ?? 'split') as
-      | 'editor'
-      | 'split'
-      | 'preview';
-    const hasMermaid = this.previewContentEl.querySelector('.mermaid-wrapper[data-mermaid]') !== null;
-    const metaScheme = document
-      .querySelector('meta[name="color-scheme"]')
-      ?.getAttribute('content');
-    const isDarkActive =
-      metaScheme === 'dark' ||
-      (metaScheme !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-
-    // Expose preview pane offscreen when in editor-only mode so images decode & Mermaid measures
-    // without visibly resizing `.editor-pane` on screen.
-    if (prevView === 'editor') {
-      this.appEl.setAttribute('data-print-prep', 'true');
-    }
-    if (hasMermaid && isDarkActive) {
-      await this.renderPreviewImmediate(tab.currentContent, baseDir, undefined, true);
-    }
-
-    const imgs = Array.from(this.previewContentEl.querySelectorAll<HTMLImageElement>('img'));
-    await Promise.all(
-      imgs.map(async (img) => {
-        img.loading = 'eager';
-        if (typeof img.decode === 'function') {
-          await img.decode().catch(() => {});
-        }
-      }),
-    );
-
-    try {
-      return await fn();
-    } finally {
-      this.appEl.removeAttribute('data-print-prep');
-      if (hasMermaid && isDarkActive) {
-        await this.renderPreviewImmediate(tab.currentContent, baseDir);
-      }
-    }
-  }
-
-  private async copyCurrentTabRichText(): Promise<void> {
-    const tab = this.activeTab;
-    if (!tab) return;
-    try {
-      await this.flushActivePreviewRender();
-      await copyRichPreviewToClipboard(this.previewContentEl, tab.currentContent);
-      this.showToast(t('toast.copyRich'));
-    } catch (err) {
-      console.error('Formatierter Text konnte nicht kopiert werden:', err);
-      this.showToast(t('toast.copyFailed'));
-    }
-  }
-
   private async copyCurrentTabMarkdown(): Promise<void> {
     const tab = this.activeTab;
     if (!tab) return;
@@ -2213,40 +2227,96 @@ class SemyraApp {
     }
   }
 
-  private async reloadTabFromDisk(targetPath: string): Promise<void> {
-    const tab = this.tabs.find(
-      (t) => t.path?.toLowerCase() === targetPath.toLowerCase(),
-    );
-    if (!tab || !tab.path) return;
+  private invalidateDiskRead(tab: OpenTab): number {
+    const revision = (this.diskReads.get(tab) ?? 0) + 1;
+    this.diskReads.set(tab, revision);
+    return revision;
+  }
+
+  private clearExternalConflict(tab: OpenTab): void {
     tab.hasExternalConflict = false;
-    const payload = await backend.readFile(tab.path);
+    tab.overwriteExpected = undefined;
+    if (tab.id === this.activeTabId) {
+      this.externalChangedPath = null;
+      this.externalBannerEl.hidden = true;
+    }
+  }
+
+  private markExternalConflict(tab: OpenTab): void {
+    this.cancelAutoSave(tab);
+    tab.hasExternalConflict = true;
+    tab.overwriteExpected = undefined;
+    if (tab.id === this.activeTabId) {
+      this.externalChangedPath = tab.path;
+      this.externalBannerEl.hidden = false;
+    }
+  }
+
+  private async syncTabFromDisk(tab: OpenTab, discardLocal = false): Promise<void> {
+    const { path, currentContent, lineEnding } = tab;
+    if (!path) return;
+    while (this.pendingSaves.has(tab)) {
+      await this.pendingSaves.get(tab);
+    }
+    if (tab.path !== path || !this.tabs.includes(tab)) return;
+    const revision = this.invalidateDiskRead(tab);
+    const isCurrent = () => this.diskReads.get(tab) === revision
+      && tab.path === path && this.tabs.includes(tab);
+    try {
+      const payload = await backend.readFile(path);
+      if (!isCurrent()) return;
+      const localChanged = currentContent !== tab.currentContent || lineEnding !== tab.lineEnding;
+      const hasLineEndings = payload.content.includes('\n');
+      const matchesLocal = tab.currentContent === payload.content
+        && (tab.lineEnding === payload.lineEnding || (!hasLineEndings && !tab.isDirty));
+      if (!matchesLocal && (localChanged || (tab.isDirty && !discardLocal))) {
+        if (payload.content !== tab.savedContent || (hasLineEndings && payload.lineEnding !== tab.savedLineEnding)) {
+          this.markExternalConflict(tab);
+        }
+        return;
+      }
+      if (!discardLocal && !tab.hasExternalConflict && !tab.isDirty && matchesLocal
+        && tab.encoding === payload.encoding) return;
+      if (!hasLineEndings && !discardLocal) payload.lineEnding = tab.lineEnding;
+      this.applyDiskContent(tab, payload);
+    } catch (err) {
+      if (!isCurrent()) return;
+      if (tab.isDirty) this.markExternalConflict(tab);
+      if (discardLocal) {
+        console.error('Datei konnte nicht neu geladen werden:', err);
+        this.showToast(t('toast.reloadFailed'));
+      }
+    }
+  }
+
+  private applyDiskContent(tab: OpenTab, payload: FilePayload): void {
+    this.cancelAutoSave(tab);
+    this.clearExternalConflict(tab);
+    const contentChanged = tab.currentContent !== payload.content;
+    if (contentChanged || tab.lineEnding !== payload.lineEnding) {
+      tab.revision = (tab.revision ?? 0) + 1;
+    }
     tab.savedContent = payload.content;
+    tab.savedLineEnding = payload.lineEnding;
     tab.currentContent = payload.content;
     tab.encoding = payload.encoding || 'UTF-8';
     tab.lineEnding = payload.lineEnding;
     tab.isDirty = false;
-    if (tab.id === this.activeTabId) {
-      this.editor.replaceAllContent(payload.content);
-    } else {
-      tab.editorState = this.editor.createState(payload.content);
+    if (contentChanged) {
+      if (tab.id === this.activeTabId) {
+        this.editor.replaceAllContent(payload.content);
+      } else {
+        tab.editorState = this.editor.createState(payload.content);
+      }
     }
     this.renderTabBar();
     this.updateStatusBar();
+    this.syncWindowMetadata();
     this.scheduleDraftSync();
   }
 
   private dismissExternalConflictBanner(): void {
     this.externalBannerEl.hidden = true;
-    if (this.activeTab) {
-      this.activeTab.hasExternalConflict = false;
-    }
-    if (this.externalChangedPath) {
-      const tab = this.tabs.find(
-        (t) => t.path?.toLowerCase() === this.externalChangedPath?.toLowerCase(),
-      );
-      if (tab) tab.hasExternalConflict = false;
-      this.externalChangedPath = null;
-    }
   }
 
   private async openExternalDiffDialog(): Promise<void> {
@@ -2260,12 +2330,12 @@ class SemyraApp {
     await openExternalDiffDialogModal({
       path: tab.path,
       localContent: tab.currentContent,
-      onKeepLocal: () => this.dismissExternalConflictBanner(),
-      onReloadDisk: async () => {
-        this.externalBannerEl.hidden = true;
-        this.externalChangedPath = null;
-        await this.reloadTabFromDisk(targetPath);
+      onKeepLocal: (payload) => {
+        if (tab.path !== targetPath) return;
+        tab.overwriteExpected = payload;
+        if (tab.id === this.activeTabId) this.dismissExternalConflictBanner();
       },
+      onReloadDisk: () => this.syncTabFromDisk(tab, true),
     });
   }
 
@@ -2293,61 +2363,6 @@ class SemyraApp {
       workspaceRootPath: this.explorer.rootPath,
       onShowToast: (msg) => this.showToast(msg),
     });
-  }
-
-  private async exportCurrentTabHtml(): Promise<void> {
-    const tab = this.activeTab;
-    if (!tab) return;
-    const baseDir = tab.parentDir ?? this.explorer.rootPath;
-    try {
-      await this.flushActivePreviewRender();
-      const renderedHtml = await preparePreviewHtmlForExport(this.previewContentEl);
-      const res = await backend.exportHtmlDialog(
-        tab.name,
-        tab.currentContent,
-        baseDir,
-        baseDir,
-        renderedHtml,
-        getLanguage(),
-      );
-      if (res.exported && res.path) {
-        this.showToast(t('toast.htmlExportSuccess', { name: baseNameOfPath(res.path) }));
-      }
-    } catch (err) {
-      console.error('HTML-Export fehlgeschlagen:', err);
-      this.showToast(t('toast.htmlExportFailed'));
-    }
-  }
-
-  private async exportCurrentTabPdf(): Promise<void> {
-    const tab = this.activeTab;
-    if (!tab) return;
-    const baseDir = tab.parentDir ?? this.explorer.rootPath;
-    try {
-      const pick = await backend.pickPdfSavePath(tab.name, baseDir, getLanguage());
-      if (!pick.chosen || pick.token === undefined) {
-        return;
-      }
-      const token = pick.token;
-      const res = await this.withLightPaperPreview(() => backend.executePdfExport(token));
-      if (res.exported && res.path) {
-        this.showToast(t('toast.pdfExportSuccess', { name: baseNameOfPath(res.path) }));
-      }
-    } catch (err) {
-      console.error('PDF-Export fehlgeschlagen:', err);
-      this.showToast(t('toast.pdfExportFailed'));
-    }
-  }
-
-  private async printCurrentTab(): Promise<void> {
-    try {
-      await this.withLightPaperPreview(async () => {
-        window.print();
-      });
-    } catch (err) {
-      console.error('Druckvorbereitung fehlgeschlagen:', err);
-      window.print();
-    }
   }
 
   private bindUIEvents(): void {
@@ -2397,19 +2412,19 @@ class SemyraApp {
     });
 
     document.getElementById('btn-copy-rich')?.addEventListener('click', () => {
-      void this.copyCurrentTabRichText();
+      void this.documentExport.copyRichText();
     });
 
     document.getElementById('btn-export-html')?.addEventListener('click', () => {
-      void this.exportCurrentTabHtml();
+      void this.documentExport.exportHtml();
     });
 
     document.getElementById('btn-export-pdf')?.addEventListener('click', () => {
-      void this.exportCurrentTabPdf();
+      void this.documentExport.exportPdf();
     });
 
     document.getElementById('btn-print')?.addEventListener('click', () => {
-      void this.printCurrentTab();
+      void this.documentExport.print();
     });
 
     // Share & Export Popover Actions
@@ -2439,22 +2454,22 @@ class SemyraApp {
 
     document.getElementById('btn-share-copy-rich')?.addEventListener('click', () => {
       closeShareMenu();
-      void this.copyCurrentTabRichText();
+      void this.documentExport.copyRichText();
     });
 
     document.getElementById('btn-share-export-html')?.addEventListener('click', () => {
       closeShareMenu();
-      void this.exportCurrentTabHtml();
+      void this.documentExport.exportHtml();
     });
 
     document.getElementById('btn-share-export-pdf')?.addEventListener('click', () => {
       closeShareMenu();
-      void this.exportCurrentTabPdf();
+      void this.documentExport.exportPdf();
     });
 
     document.getElementById('btn-share-print')?.addEventListener('click', () => {
       closeShareMenu();
-      void this.printCurrentTab();
+      void this.documentExport.print();
     });
 
     document.getElementById('btn-share-save-as')?.addEventListener('click', () => {
@@ -2918,12 +2933,11 @@ class SemyraApp {
       }
 
       const zoomMermaidBtn = target.closest<HTMLButtonElement>('.zoom-mermaid-btn');
-      if (zoomMermaidBtn) {
-        const wrapper = zoomMermaidBtn.closest('.mermaid-wrapper');
-        const svgEl = wrapper?.querySelector('svg');
-        if (svgEl) {
-          this.openMermaidLightbox(svgEl);
-        }
+      const diagram = zoomMermaidBtn
+        ? zoomMermaidBtn.closest('.mermaid-wrapper')?.querySelector<SVGSVGElement>(':scope > svg')
+        : target.closest<SVGSVGElement>('.mermaid-wrapper > svg');
+      if (diagram && !target.closest('a[href], a[*|href]')) {
+        this.mermaidViewer.open(diagram);
         return;
       }
 
@@ -2985,12 +2999,8 @@ class SemyraApp {
     });
 
     document.getElementById('btn-reload-external')!.addEventListener('click', async () => {
-      this.externalBannerEl.hidden = true;
-      const targetPath = this.externalChangedPath;
-      this.externalChangedPath = null;
-      if (targetPath) {
-        await this.reloadTabFromDisk(targetPath);
-      }
+      const tab = this.activeTab;
+      if (tab) await this.syncTabFromDisk(tab, true);
     });
 
     document.getElementById('btn-dismiss-banner')!.addEventListener('click', () => {
@@ -3003,6 +3013,7 @@ class SemyraApp {
     window.addEventListener(
       'keydown',
       (e) => {
+        if (document.body.inert) return;
         if (e.getModifierState?.('AltGraph') || (e.ctrlKey && e.altKey)) {
           return;
         }
@@ -3068,7 +3079,7 @@ class SemyraApp {
           if (this.activeTab) void this.saveTab(this.activeTab, true);
         } else if (mod && !e.altKey && e.shiftKey && key === 'k') {
           consume();
-          void this.copyCurrentTabRichText();
+          void this.documentExport.copyRichText();
         } else if (mod && !e.altKey && e.shiftKey && key === 'c') {
           consume();
           void this.copyCurrentTabMarkdown();
@@ -3077,13 +3088,13 @@ class SemyraApp {
           void this.copyCurrentTabAiContext();
         } else if (mod && !e.altKey && e.shiftKey && key === 'h') {
           consume();
-          void this.exportCurrentTabHtml();
+          void this.documentExport.exportHtml();
         } else if (mod && !e.altKey && e.shiftKey && key === 'd') {
           consume();
-          void this.exportCurrentTabPdf();
+          void this.documentExport.exportPdf();
         } else if (mod && !e.altKey && !e.shiftKey && key === 'p') {
           consume();
-          void this.printCurrentTab();
+          void this.documentExport.print();
         } else if (mod && !e.altKey && !e.shiftKey && key === 'w') {
           consume();
           if (this.activeTab) void this.requestCloseTab(this.activeTab.id);
@@ -3168,6 +3179,7 @@ class SemyraApp {
     });
 
     onBackendEvent('files-dropped', async ({ files, images, folder }) => {
+      if (document.body.inert) return;
       this.dropOverlayEl.hidden = true;
       if (folder) {
         await this.explorer.loadFolder(folder, true);
@@ -3183,44 +3195,9 @@ class SemyraApp {
 
     onBackendEvent('fs-changed', async ({ paths }) => {
       const changedLower = new Set(paths.map((p) => p.toLowerCase()));
-      for (const tab of this.tabs) {
-        if (!tab.path || !changedLower.has(tab.path.toLowerCase())) continue;
-        try {
-          const disk = await backend.readFile(tab.path);
-          if (disk.content === tab.currentContent) {
-            tab.savedContent = disk.content;
-            tab.isDirty = false;
-            tab.hasExternalConflict = false;
-            if (tab.id === this.activeTabId) {
-              this.externalBannerEl.hidden = true;
-            }
-            this.renderTabBar();
-            this.scheduleDraftSync();
-            continue;
-          }
-          if (!tab.isDirty) {
-            tab.savedContent = disk.content;
-            tab.currentContent = disk.content;
-            tab.encoding = disk.encoding || 'UTF-8';
-            tab.lineEnding = disk.lineEnding;
-            tab.hasExternalConflict = false;
-            if (tab.id === this.activeTabId) {
-              this.externalBannerEl.hidden = true;
-              this.editor.replaceAllContent(disk.content);
-            } else {
-              tab.editorState = this.editor.createState(disk.content);
-            }
-          } else {
-            tab.hasExternalConflict = true;
-            if (tab.id === this.activeTabId) {
-              this.externalChangedPath = tab.path;
-              this.externalBannerEl.hidden = false;
-            }
-          }
-        } catch {
-          // File may have been deleted or temporarily locked
-        }
-      }
+      await Promise.all(this.tabs
+        .filter((tab) => tab.path && changedLower.has(tab.path.toLowerCase()))
+        .map((tab) => this.syncTabFromDisk(tab)));
 
       if (this.explorer.hasWorkspace) {
         this.explorer.scheduleRefresh();
@@ -3228,29 +3205,41 @@ class SemyraApp {
     });
 
     onBackendEvent('close-requested', async () => {
-      const dirtyTabs = this.tabs.filter((t) => t.isDirty);
-      if (dirtyTabs.length === 0) {
-        await backend.saveUiPrefs(this.buildCurrentUiPrefs()).catch(() => {});
-        await backend.clearDrafts().catch(() => {});
-        await backend.forceCloseWindow();
-        return;
-      }
-
-      const names = dirtyTabs.map((t) => `„${t.name}“`).join(', ');
-      const choice = await this.promptUnsavedChanges(
-        t('unsavedDialog.beforeQuitDesc', { names }),
-      );
-      if (choice === 'cancel') return;
-
-      if (choice === 'save') {
-        for (const tab of dirtyTabs) {
-          const ok = await this.saveTab(tab, false);
-          if (!ok) return;
+      if (this.closePending || this.closingTabs.size > 0) return;
+      this.closePending = true;
+      let closing = false;
+      try {
+        await Promise.all(this.pendingSaves.values());
+        const dirtyTabs = this.tabs.filter((tab) => tab.isDirty);
+        const revisions = new Map(dirtyTabs.map((tab) => [tab, tab.revision]));
+        const names = dirtyTabs.map((tab) => `„${tab.name}“`).join(', ');
+        const choice = dirtyTabs.length > 0
+          ? await this.promptUnsavedChanges(t('unsavedDialog.beforeQuitDesc', { names }))
+          : undefined;
+        if (choice === 'cancel') return;
+        if (choice === 'save') {
+          for (const tab of dirtyTabs) {
+            if (tab.revision !== revisions.get(tab)) return;
+            if (!await this.saveTab(tab) || tab.isDirty) return;
+          }
+        }
+        window.clearTimeout(this.prefsSyncTimer);
+        if (!await this.persistUiPrefs() && !window.confirm(t('prefs.closeAfterSaveFailure'))) return;
+        if (this.tabs.some((tab) => tab.isDirty && (
+          choice !== 'discard' || !revisions.has(tab) || revisions.get(tab) !== tab.revision
+        ))) return;
+        document.body.inert = true;
+        await backend.forceCloseWindow(this.recoveryRestored);
+        closing = true;
+      } catch (err) {
+        console.error('Fenster konnte nicht geschlossen werden:', err);
+      } finally {
+        if (!closing) {
+          document.body.inert = false;
+          this.closePending = false;
+          for (const tab of this.tabs) this.scheduleAutoSave(tab);
         }
       }
-      await backend.saveUiPrefs(this.buildCurrentUiPrefs()).catch(() => {});
-      await backend.clearDrafts().catch(() => {});
-      await backend.forceCloseWindow();
     });
   }
 }

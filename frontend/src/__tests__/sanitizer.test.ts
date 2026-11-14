@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { safeSetMarkdownHTML } from '../sanitizer';
 
 describe('safeSetMarkdownHTML', () => {
+  it('checks whether a render is current before updating the live DOM', async () => {
+    const host = document.createElement('article');
+    await safeSetMarkdownHTML(host, '<p>Newest preview</p>');
+    let current = true;
+    const pending = safeSetMarkdownHTML(host, '<p>Stale preview</p>', { isCurrent: () => current });
+    current = false;
+    expect(await pending).toBe(false);
+    expect(host.textContent).toBe('Newest preview');
+  });
+
   it('strips dangerous script tags and event attributes while preserving GFM attributes', async () => {
     const host = document.createElement('article');
     await safeSetMarkdownHTML(

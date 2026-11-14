@@ -727,9 +727,18 @@
   <dialog id="mermaid-dialog" class="mermaid-dialog" closedby="any" aria-labelledby="mermaid-dialog-title">
     <div class="mermaid-dialog-header">
       <h2 id="mermaid-dialog-title" data-i18n="format.mermaidBtn">Mermaid-Diagramm</h2>
+      <div class="mermaid-zoom-controls">
+        <button type="button" class="dialog-btn" id="mermaid-zoom-out" aria-label="Diagramm verkleinern" data-i18n-aria="mermaid.zoomOut">−</button>
+        <output id="mermaid-zoom-level" aria-label="Zoom relativ zur eingepassten Ansicht" data-i18n-aria="mermaid.zoomLevel">100%</output>
+        <button type="button" class="dialog-btn" id="mermaid-zoom-in" aria-label="Diagramm vergrößern" data-i18n-aria="mermaid.zoomIn">+</button>
+        <button type="button" class="dialog-btn" id="mermaid-zoom-fit" data-i18n="mermaid.zoomFit">Einpassen</button>
+      </div>
       <form method="dialog"><button type="submit" class="dialog-close-btn" aria-label="Schließen" data-i18n-aria="settings.close">✕</button></form>
     </div>
-    <div id="mermaid-dialog-body" class="mermaid-dialog-body scroller"></div>
+    <div id="mermaid-dialog-body" class="mermaid-dialog-body scroller" tabindex="0"
+      role="region" aria-labelledby="mermaid-dialog-title">
+      <div id="mermaid-dialog-stage" class="mermaid-dialog-stage"></div>
+    </div>
   </dialog>
 
   <!-- Fluent Popover: Share, Copy & Export Dropdown Menu (modern-web-guidance menu) -->

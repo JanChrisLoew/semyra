@@ -265,10 +265,16 @@ kbd {
 }
 
 /* Mermaid Fullscreen Lightbox Dialog */
-.mermaid-dialog {
-  max-width: 90vw;
-  max-height: 85vh;
-  width: 900px;
+dialog.mermaid-dialog:modal {
+  width: 84vw;
+  height: 72vh;
+  min-width: 0;
+  max-width: none;
+  max-height: none;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
   padding: 0;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border-subtle);
@@ -286,6 +292,8 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
   padding: 12px 18px;
   border-bottom: 1px solid var(--border-subtle);
 }
@@ -296,18 +304,68 @@ kbd {
   margin: 0;
 }
 
-.mermaid-dialog-body {
-  padding: 24px;
+.mermaid-dialog-body.scroller {
+  margin: 16px;
   overflow: auto;
-  max-height: calc(85vh - 58px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+  scrollbar-gutter: stable both-edges;
 }
 
-.mermaid-dialog-body svg {
-  max-width: 100%;
-  height: auto;
+.mermaid-dialog-body::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+
+.mermaid-dialog-body::-webkit-scrollbar-track,
+.mermaid-dialog-body::-webkit-scrollbar-corner {
+  background: var(--bg-subtle);
+}
+
+.mermaid-dialog-body::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: var(--radius-sm);
+}
+
+.mermaid-dialog-body::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-muted);
+}
+
+.mermaid-dialog-body.can-pan .mermaid-dialog-stage {
+  cursor: grab;
+  user-select: none;
+}
+
+.mermaid-dialog-body.is-panning .mermaid-dialog-stage {
+  cursor: grabbing;
+}
+
+.mermaid-zoom-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.mermaid-zoom-controls output {
+  min-inline-size: 5ch;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.mermaid-dialog-stage {
+  display: grid;
+  place-items: center;
+  width: max-content;
+  height: max-content;
+  min-width: 100%;
+  min-height: 100%;
+}
+
+.mermaid-dialog-stage > svg {
+  display: block;
+  max-width: none;
+  max-height: none;
 }
 
 /* ==========================================================================
@@ -848,6 +906,10 @@ dialog.modal-dialog.external-diff-dialog {
   line-height: 1.4;
 }
 
+.print-document {
+  display: none;
+}
+
 /* Clean Print / PDF Output (independent of active Light/Dark app theme or view mode) */
 @media print {
   :root {
@@ -897,6 +959,12 @@ dialog.modal-dialog.external-diff-dialog {
     color: #181c24 !important;
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
+  }
+  .preview-pane:has(> .print-document) > #preview-content {
+    display: none;
+  }
+  .print-document {
+    display: block;
   }
   .table-wrapper {
     max-block-size: none !important;

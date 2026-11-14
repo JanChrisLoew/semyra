@@ -48,6 +48,7 @@ export interface DraftEntry {
   content: string;
   savedContent: string;
   lineEnding: 'CRLF' | 'LF';
+  savedLineEnding?: 'CRLF' | 'LF';
 }
 
 export interface SearchMatchItem {
@@ -60,6 +61,7 @@ export interface WorkspaceReplaceResult {
   filesUpdated: number;
   totalReplacements: number;
   updatedPaths: string[];
+  failures: Array<{ path: string; error: string }>;
 }
 
 export interface SearchFileResult {
@@ -109,16 +111,23 @@ async function postJson<T>(endpoint: string, payload: unknown = {}): Promise<T> 
 export const backend = {
   getStartup: () => postJson<StartupPayload>('startup'),
 
-  saveUiPrefs: (prefs: UiSessionPrefs) =>
-    postJson<{ ok: boolean }>('prefs/save', prefs),
+  saveUiPrefs: (revision: number, prefs: UiSessionPrefs) =>
+    postJson<{ ok: boolean }>('prefs/save', { revision, prefs }),
 
   renderMarkdown: (markdown: string, baseDir: string | null) =>
     postJson<RenderResult>('render', { markdown, baseDir }),
 
   readFile: (path: string) => postJson<FilePayload>('read-file', { path }),
 
-  writeFile: (path: string, content: string, lineEnding: string) =>
-    postJson<{ path: string }>('write-file', { path, content, lineEnding }),
+  writeFile: (
+    path: string,
+    content: string,
+    lineEnding: string,
+    expectedContent: string,
+    expectedLineEnding?: string,
+  ) => postJson<{ saved: boolean }>('write-file', {
+    path, content, lineEnding, expectedContent, expectedLineEnding,
+  }),
 
   listTree: (path: string) => postJson<FileTreeNode>('list-tree', { path }),
 
@@ -143,11 +152,8 @@ export const backend = {
   deletePath: (path: string) =>
     postJson<{ ok: boolean }>('delete-path', { path }),
 
-  saveDrafts: (entries: DraftEntry[]) =>
-    postJson<{ ok: boolean }>('drafts/save', { entries }),
-
-  clearDrafts: () =>
-    postJson<{ ok: boolean }>('drafts/clear'),
+  saveDrafts: (revision: number, entries: DraftEntry[], recoveryRestored: boolean) =>
+    postJson<{ ok: boolean }>('drafts/save', { revision, entries, recoveryRestored }),
 
   savePastedImage: (
     baseDir: string | null,
@@ -243,12 +249,12 @@ export const backend = {
 
   setWindowState: (opts: {
     title?: string;
-    hasUnsavedChanges?: boolean;
     theme?: 'light' | 'dark' | 'system';
     fullscreen?: boolean;
   }) => postJson<{ ok: boolean }>('window/set-state', opts),
 
-  forceCloseWindow: () => postJson<{ ok: boolean }>('window/force-close'),
+  forceCloseWindow: (recoveryRestored: boolean) =>
+    postJson<{ ok: boolean }>('window/force-close', { recoveryRestored }),
 
   openExternalUrl: (url: string) =>
     postJson<{ ok: boolean }>('open-external', { url }),

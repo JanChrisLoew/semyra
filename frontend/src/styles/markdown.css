@@ -363,6 +363,10 @@
   box-shadow: 0 3px 12px rgba(0, 0, 0, 0.08);
 }
 
+#preview-content .mermaid-wrapper > svg {
+  cursor: zoom-in;
+}
+
 .mermaid-actions {
   position: absolute;
   top: 8px;

@@ -121,8 +121,8 @@ function isDarkColorSchemeActive(): boolean {
 export async function safeSetMarkdownHTML(
   container: HTMLElement,
   rawHtml: string,
-  options?: { forceLightTheme?: boolean },
-): Promise<void> {
+  options?: { forceLightTheme?: boolean; isCurrent?: () => boolean },
+): Promise<boolean> {
   const staging = document.createElement('div') as HTMLElement & ElementWithSetHTML;
   let insertedViaNative = false;
 
@@ -179,7 +179,9 @@ export async function safeSetMarkdownHTML(
     await renderMermaidBlocksCached(mermaidNodes, Boolean(options?.forceLightTheme));
   }
 
+  if (options?.isCurrent?.() === false) return false;
   reconcileChildren(container, staging);
+  return true;
 }
 
 /**
@@ -228,15 +230,6 @@ async function renderMermaidBlocksCached(
     mermaidModulePromise ??= import('mermaid').then((m) => m.default);
     const mermaid = await mermaidModulePromise;
 
-    if (lastMermaidTheme !== theme) {
-      mermaid.initialize({
-        startOnLoad: false,
-        securityLevel: 'strict',
-        theme,
-      });
-      lastMermaidTheme = theme;
-    }
-
     for (const wrapper of nodes) {
       const definition = (wrapper.getAttribute('data-mermaid') ?? '').trim();
       if (!definition) continue;
@@ -249,7 +242,7 @@ async function renderMermaidBlocksCached(
 
       const id = `semyra-mermaid-${++mermaidCounter}`;
       try {
-        const { svg } = await mermaid.render(id, definition);
+        const svg = await renderMermaidInTheme(mermaid, id, definition, theme);
         if (mermaidCache.size >= MAX_MERMAID_CACHE) {
           const oldest = mermaidCache.keys().next().value;
           if (oldest !== undefined) mermaidCache.delete(oldest);
@@ -265,6 +258,26 @@ async function renderMermaidBlocksCached(
   } catch {
     // Keep readable fallback code block
   }
+}
+
+let mermaidRenderQueue: Promise<unknown> = Promise.resolve();
+
+function renderMermaidInTheme(
+  mermaid: Awaited<NonNullable<typeof mermaidModulePromise>>,
+  id: string,
+  definition: string,
+  theme: 'dark' | 'default',
+): Promise<string> {
+  const render = mermaidRenderQueue.then(async () => {
+    // Mermaid's theme is module-wide, so switch it only when the preceding render has finished.
+    if (lastMermaidTheme !== theme) {
+      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme });
+      lastMermaidTheme = theme;
+    }
+    return (await mermaid.render(id, definition)).svg;
+  });
+  mermaidRenderQueue = render.catch(() => {});
+  return render;
 }
 
 function syncElementAttributes(target: Element, source: Element): void {
