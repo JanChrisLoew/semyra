@@ -7,10 +7,10 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Platform-Windows%2011%20x64-0078D4?logo=windows11&logoColor=white" alt="Windows 11">
+  <img src="https://img.shields.io/badge/Platform-Windows%2011%20x64%20%7C%20ARM64-0078D4?logo=windows11&logoColor=white" alt="Windows 11">
   <img src="https://img.shields.io/badge/Host-Rust%202021-CE412B?logo=rust&logoColor=white" alt="Rust">
   <img src="https://img.shields.io/badge/Editor-CodeMirror%206%20%7C%20TypeScript-3178C6?logo=typescript&logoColor=white" alt="CodeMirror 6">
-  <img src="https://img.shields.io/badge/Binary-Standalone%20EXE%20(~10.8%20MB)-107C41" alt="Standalone EXE">
+  <img src="https://img.shields.io/badge/Binary-Standalone%20EXE%20(~11.0%20MB)-107C41" alt="Standalone EXE">
   <img src="https://img.shields.io/badge/Runtime-Zero%20Node%20%2F%20No%20Electron-brightgreen" alt="No Electron">
   <img src="https://img.shields.io/badge/License-MIT-blue" alt="License">
 </p>
@@ -28,7 +28,7 @@ Entwickelt für den täglichen Workflow von Software-Ingenieuren, Prompt-Designe
 ## Die wichtigsten Highlights
 
 ### ⚡ 1. Echte Desktop-Performance ohne Electron
-- **Kompakte Standalone-Binary**: Das gesamte Frontend ist zur Kompilierzeit via Rust-Embed in die ~10.8 MB große PE-Executable integriert.
+- **Kompakte Standalone-Binary**: Das gesamte Frontend ist zur Kompilierzeit via Rust-Embed in die ~11.0 MB große PE-Executable integriert (nativ für **x64** und **ARM64**).
 - **Ressourceneffizient**: Minimale RAM-Auslastung und blitzschneller Kaltstart über Microsoft Edge WebView2.
 - **Single-Instance & Multi-Window**: Dateien, die im Windows Explorer angeklickt werden, öffnen sich automatisch als neue Tabs im bestehenden Fenster. Mit `--new-window` lässt sich jederzeit ein zweites, isoliertes Instanzfenster starten.
 
@@ -42,9 +42,9 @@ Entwickelt für den täglichen Workflow von Software-Ingenieuren, Prompt-Designe
   - **Amber Status-Indikator** (`#D0A774` Dark / `#986C3D` Light): Ein dezenter, runder Statuspunkt im Tab signalisiert ungespeicherte Änderungen sofort – völlig ohne Layout-Jitter oder Breitenänderungen.
 
 ### 🧠 3. Entwickelt für die KI-Ära
-- **Perfekt für Agent-Workflows**: Optimiert für das Verfassen und Pflegen von `AGENTS.md`, `PROMPT.md`, `SKILL.md`, Copilot-Regeln und Kontextdateien.
+- **Perfekt für Agent-Workflows**: Optimiert für das Verfassen und Pflegen von `AGENTS.md`, `PROMPT.md`, `SKILL.md`, Copilot-Regeln und Kontextdateien – inklusive **AI Context Bundler** (`Strg+Umschalt+A`), persistenter **AI-Library & Templates**, **YAML-/Markdown-Linting**, **Markdown-Formatter** (`Strg+Umschalt+L`) und Workspace-Skill-Vorlagen.
 - **Strukturierte Blöcke**: Erstklassige Darstellung von YAML-Frontmatter-Metadaten, GitHub-Alerts (`[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`), Task-Listen und Fußnoten.
-- **Mathematik & Diagramme**: Schnelles, flackerfreies Rendering von **KaTeX**-Formeln (`$...$` / `$$...$$`) und interaktiven **Mermaid**-Diagrammen (Flowcharts, Sequenzdiagramme, Klassendiagramme).
+- **Mathematik & Diagramme**: Schnelles, flackerfreies Rendering von **KaTeX**-Formeln (`$...$` / `$$...$$`) und interaktiven **Mermaid**-Diagrammen mit Großansicht-Dialog (SVG-Zoom von 50–800 %, Einpassen und Maus-Panning).
 
 ### ✍️ 4. Intelligenter CodeMirror 6 Editor
 - **Smart Formatting**:
@@ -59,8 +59,9 @@ Entwickelt für den täglichen Workflow von Software-Ingenieuren, Prompt-Designe
 ### 🔍 5. Arbeitsbereich & Produktivitätswerkzeuge
 - **Fuzzy Quick-Open (`Strg+E`)**: Blitzschneller Dateisprung über alle offenen Tabs, Workspace-Dateien und zuletzt geöffneten Dokumente.
 - **Befehlspalette (`Strg+Umschalt+P` / `>` in Quick-Open)**: Alle Editor-, Ansichts- und Exportaktionen direkt über die Tastatur erreichbar.
-- **Volltextsuche im Workspace (`Strg+Umschalt+F`)**: Schnelle Multi-File-Suche über das Rust-Backend mit Ergebnis-Vorschau und direktem Zeilensprung.
-- **Arbeitsbereich-Explorer**: Baumansicht mit Drag-&-Drop, Kontextmenü (Neu, Umbenennen, Explorer-Show) und sicherer Löschung über den **Windows-Papierkorb** (`trash`).
+- **Volltextsuche & Ersetzen im Workspace (`Strg+Umschalt+F`)**: Schnelle Multi-File-Suche und atomares Ersetzen über das Rust-Backend mit Ergebnis-Vorschau, Fehlerreport und direktem Zeilensprung.
+- **Arbeitsbereich-Explorer & Tabs**: Baumansicht mit Drag-&-Drop, Kontextmenü (Neu, Umbenennen, Explorer-Show), Tab-Pinning, External Diff sowie sicherer Löschung über den **Windows-Papierkorb** (`trash`).
+- **Zweisprachige Oberfläche (DE / EN)**: Vollständige deutsche und englische UI-Lokalisierung (`i18n`), umschaltbar in den Einstellungen.
 - **Bidirektionales Sync-Scroll**: Pixelgenauer Scroll-Abgleich zwischen Editor und Live-Vorschau mit aktiver Inhaltsverzeichnis-Hervorhebung.
 - **Crash-Sicherheit & Entwurfssicherung**: Automatisches Sichern von Sitzungszustand und ungespeicherten Entwürfen unter `%LOCALAPPDATA%\Semyra\drafts\recovery.json`.
 
@@ -117,7 +118,7 @@ powershell -ExecutionPolicy Bypass -File .\installer\Uninstall-Semyra.ps1
 ```
 
 ### 3. Setup-Installer (Inno Setup)
-Für Enterprise-Deployments oder klassische Installationsassistenten steht das Inno-Setup-6-Skript [`installer/Semyra.iss`](installer/Semyra.iss) bereit, das ein signierbares `Semyra-Setup-x64.exe` erzeugt.
+Für Enterprise-Deployments oder klassische Installationsassistenten stehen [`installer/Semyra.iss`](installer/Semyra.iss) und [`scripts/Build-Installer.ps1`](scripts/Build-Installer.ps1) bereit, um signierbare `Semyra-Setup-x64.exe`- und `Semyra-Setup-arm64.exe`-Installer zu erzeugen.
 
 ---
 
@@ -150,7 +151,7 @@ flowchart LR
 
 | Komponente | Technologie | Details |
 |---|---|---|
-| **OS-Zielplattform** | Windows 11 x64 | Windows 10 (Build 19041+) kompatibel |
+| **OS-Zielplattform** | Windows 11 x64 / ARM64 | Windows 10 (Build 19041+) kompatibel |
 | **Backend & Host** | Rust 2021 | `tao` (Win32 Event-Loop), `wry` (WebView2), `rfd` (Dialoge) |
 | **Markdown-Engine** | `pulldown-cmark` 0.12 + `syntect` 5.2 | GFM-Pipeline, Syntect TwoDark/Light Highlighting |
 | **Dateisystem & I/O** | Rust `std::fs` + `trash` 5.2 | Atomic Writes, Windows Recycle Bin, Windows-1252/UTF-16 Fallbacks |
