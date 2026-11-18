@@ -45,6 +45,7 @@ export function findAdjacentTabId<T extends { id: string }>(
 
 /**
  * Toggles `isPinned` on `tabId` and keeps all pinned tabs grouped at the start of the strip.
+ * Preserve the tab object so pending saves, disk reads and timers stay attached to it.
  */
 export function toggleTabPinned<T extends { id: string; isPinned?: boolean }>(
   tabs: T[],
@@ -53,10 +54,8 @@ export function toggleTabPinned<T extends { id: string; isPinned?: boolean }>(
   const idx = tabs.findIndex((t) => t.id === tabId);
   if (idx === -1) return tabs;
 
-  const updated = tabs.map((t) =>
-    t.id === tabId ? { ...t, isPinned: !t.isPinned } : t,
-  );
-  const pinned = updated.filter((t) => t.isPinned);
-  const unpinned = updated.filter((t) => !t.isPinned);
+  tabs[idx].isPinned = !tabs[idx].isPinned;
+  const pinned = tabs.filter((t) => t.isPinned);
+  const unpinned = tabs.filter((t) => !t.isPinned);
   return [...pinned, ...unpinned];
 }

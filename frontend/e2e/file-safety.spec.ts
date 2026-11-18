@@ -79,6 +79,28 @@ test('an external change cancels an already scheduled auto-save', async ({ page 
   expect(writes).toBe(0);
 });
 
+test('pinning a dirty tab preserves its scheduled auto-save', async ({ page }) => {
+  const { editor, setDisk } = await openDraft(page, true);
+  const writes: string[] = [];
+  await page.route('**/api/write-file', async (route) => {
+    const { content } = route.request().postDataJSON();
+    writes.push(content);
+    setDisk(content);
+    await route.fulfill({ json: { saved: true } });
+  });
+  await page.clock.install();
+  await editor.fill('Local changes');
+
+  const tab = page.getByRole('tab', { name: /^Draft\.md/ });
+  await tab.click({ button: 'right' });
+  await page.getByRole('button', { name: 'Tab anheften', exact: true }).click();
+  await expect(page.locator('.tab-slot.is-pinned').getByRole('tab')).toHaveCount(1);
+  await page.clock.fastForward(1500);
+
+  await expect.poll(() => writes).toEqual(['Local changes']);
+  await expect(page.locator('#status-save-badge')).not.toHaveClass(/is-dirty/);
+});
+
 test('cancelling tab close resumes auto-save', async ({ page }) => {
   const { editor } = await openDraft(page, true);
   await page.route('**/api/write-file', (route) => route.fulfill({ json: { saved: true } }));

@@ -94,6 +94,7 @@ describe('toggleTabPinned', () => {
       { id: 'c', isPinned: false },
     ];
     const once = toggleTabPinned(initial, 'c');
+    expect(once[0]).toBe(initial[2]);
     expect(once.map((t) => `${t.id}:${!!t.isPinned}`)).toEqual(['c:true', 'a:false', 'b:false']);
 
     const twice = toggleTabPinned(once, 'c');
