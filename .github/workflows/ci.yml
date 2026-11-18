@@ -67,6 +67,34 @@ jobs:
         timeout-minutes: 3
         run: .\scripts\Test-Installer.ps1
 
+      - name: Checkout installer upgrade baseline
+        uses: actions/checkout@v4
+        with:
+          # First pilot build with the current Explorer registration.
+          ref: 8c2cd1e9b116e9eaec3c20deb1f9d39ee5adb2d6
+          path: target/installer-baseline
+          persist-credentials: false
+
+      - name: Build x64 baseline installer
+        shell: pwsh
+        working-directory: target/installer-baseline
+        run: |
+          npm --prefix frontend ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm --prefix frontend run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo build --release --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\scripts\Build-Installer.ps1 -Architecture x64
+
+      - name: Verify x64 Installer Upgrade
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          .\scripts\Test-Installer.ps1 `
+            -BaselineInstaller target/installer-baseline/target/installer/Semyra-Setup-x64.exe `
+            -BaselineExe target/installer-baseline/target/release/Semyra.exe
+
       - name: Upload installer diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4

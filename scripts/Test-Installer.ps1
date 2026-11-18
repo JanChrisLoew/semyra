@@ -1,6 +1,12 @@
 #Requires -Version 5.1
-[CmdletBinding()]
-param()
+[CmdletBinding(DefaultParameterSetName = 'FreshInstall')]
+param(
+    [Parameter(Mandatory, ParameterSetName = 'Upgrade')]
+    [string]$BaselineInstaller,
+
+    [Parameter(Mandatory, ParameterSetName = 'Upgrade')]
+    [string]$BaselineExe
+)
 
 $ErrorActionPreference = 'Stop'
 
@@ -8,11 +14,12 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $installer = Join-Path $repoRoot 'target\installer\Semyra-Setup-x64.exe'
 $releaseExe = Join-Path $repoRoot 'target\release\Semyra.exe'
 $testRoot = Join-Path $repoRoot 'target\installer-test'
-$installDir = Join-Path $testRoot 'Semyra Test'
+$upgrade = $PSCmdlet.ParameterSetName -eq 'Upgrade'
+$installDir = Join-Path $testRoot $(if ($upgrade) { 'Semyra Upgrade Test' } else { 'Semyra Test' })
 $installedExe = Join-Path $installDir 'Semyra.exe'
 $uninstaller = Join-Path $installDir 'unins000.exe'
-$setupLog = Join-Path $testRoot 'setup.log'
-$uninstallLog = Join-Path $testRoot 'uninstall.log'
+$setupLog = Join-Path $testRoot $(if ($upgrade) { 'upgrade-setup.log' } else { 'setup.log' })
+$uninstallLog = Join-Path $testRoot $(if ($upgrade) { 'upgrade-uninstall.log' } else { 'uninstall.log' })
 
 $progId = 'Semyra.Document'
 $progIdKey = "Software\Classes\$progId"
@@ -68,7 +75,51 @@ function Invoke-InstallerProcess {
     }
 }
 
-foreach ($file in @($installer, $releaseExe)) {
+function Assert-InstalledBuild {
+    param([string]$ExpectedExe, [string]$ExpectedHash)
+
+    $installedHash = (Get-FileHash -LiteralPath $installedExe -Algorithm SHA256).Hash
+    if ($installedHash -ne $ExpectedHash) {
+        throw "Installed EXE SHA-256 $installedHash differs from $ExpectedExe ($ExpectedHash)."
+    }
+
+    $openCommand = '"{0}" "%1"' -f $installedExe
+    Assert-RegistryValue "HKCU:\$progIdKey\shell\open\command" '' $openCommand
+    Assert-RegistryValue "HKCU:\$applicationKey\shell\open\command" '' $openCommand
+    Assert-RegistryValue "HKCU:\$directoryMenuKey\command" '' ('"{0}" "%V"' -f $installedExe)
+    Assert-RegistryValue "HKCU:\$registeredAppsKey" 'Semyra' $capabilitiesKey
+    Assert-RegistryValue "HKCU:\$appPathsKey" '' $installedExe
+    $expectedVersion = (Get-Item -LiteralPath $ExpectedExe).VersionInfo.ProductVersion
+    if (-not $expectedVersion) {
+        throw "Missing product version on $ExpectedExe."
+    }
+    Assert-RegistryValue "HKCU:\$uninstallKey" 'DisplayVersion' $expectedVersion
+    foreach ($extension in $extensions) {
+        if (-not (Test-RegistryValue "HKCU:\Software\Classes\$extension\OpenWithProgids" $progId)) {
+            throw "Semyra is missing from OpenWithProgids for $extension."
+        }
+        Assert-RegistryValue "HKCU:\$capabilitiesKey\FileAssociations" $extension $progId
+    }
+    Assert-NoSemyraRegistration 'HKLM:'
+    Write-Host "Verified x64 payload ($installedHash) and per-user Explorer registration."
+}
+
+function Assert-ProfileFiles {
+    param([hashtable]$ExpectedHashes)
+
+    foreach ($path in $ExpectedHashes.Keys) {
+        $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        if ($hash -ne $ExpectedHashes[$path]) {
+            throw "The installer changed test data at $path."
+        }
+    }
+}
+
+$artifacts = @($installer, $releaseExe)
+if ($upgrade) {
+    $artifacts += @($BaselineInstaller, $BaselineExe)
+}
+foreach ($file in $artifacts) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
         throw "Missing build artifact: $file"
     }
@@ -80,39 +131,70 @@ Assert-NoSemyraRegistration 'HKCU:'
 Assert-NoSemyraRegistration 'HKLM:'
 [void](New-Item -ItemType Directory -Path $testRoot -Force)
 
+$releaseHash = (Get-FileHash -LiteralPath $releaseExe -Algorithm SHA256).Hash
+if ($upgrade) {
+    $baselineHash = (Get-FileHash -LiteralPath $BaselineExe -Algorithm SHA256).Hash
+    if ($baselineHash -eq $releaseHash) {
+        throw 'The upgrade test requires different baseline and candidate executables.'
+    }
+    $profileDir = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Semyra'
+    if (Test-Path -LiteralPath $profileDir) {
+        throw "The Semyra profile already exists at $profileDir. Use a clean Windows test environment."
+    }
+}
+
 $silentOptions = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
-$setupOptions = $silentOptions + @(
-    '/SP-', '/CURRENTUSER', '/TASKS=assocmd,dirmenu', ('/DIR="{0}"' -f $installDir), ('/LOG="{0}"' -f $setupLog)
-)
+$setupOptions = $silentOptions + @('/SP-', '/CURRENTUSER')
+$freshOptions = $setupOptions + @('/TASKS=assocmd,dirmenu', ('/DIR="{0}"' -f $installDir))
 
 try {
-    Invoke-InstallerProcess $installer $setupOptions $setupLog
+    if ($upgrade) {
+        $baselineLog = Join-Path $testRoot 'upgrade-baseline-setup.log'
+        Invoke-InstallerProcess (Resolve-Path -LiteralPath $BaselineInstaller).Path ($freshOptions + ('/LOG="{0}"' -f $baselineLog)) $baselineLog
+        Assert-InstalledBuild $BaselineExe $baselineHash
 
-    $releaseHash = (Get-FileHash -LiteralPath $releaseExe -Algorithm SHA256).Hash
-    $installedHash = (Get-FileHash -LiteralPath $installedExe -Algorithm SHA256).Hash
-    if ($installedHash -ne $releaseHash) {
-        throw "Installed EXE SHA-256 $installedHash differs from the release build $releaseHash."
-    }
-
-    $openCommand = '"{0}" "%1"' -f $installedExe
-    Assert-RegistryValue "HKCU:\$progIdKey\shell\open\command" '' $openCommand
-    Assert-RegistryValue "HKCU:\$applicationKey\shell\open\command" '' $openCommand
-    Assert-RegistryValue "HKCU:\$directoryMenuKey\command" '' ('"{0}" "%V"' -f $installedExe)
-    Assert-RegistryValue "HKCU:\$registeredAppsKey" 'Semyra' $capabilitiesKey
-    Assert-RegistryValue "HKCU:\$appPathsKey" '' $installedExe
-    $releaseVersion = (Get-Item -LiteralPath $releaseExe).VersionInfo.ProductVersion
-    if (-not $releaseVersion) {
-        throw "Missing product version on $releaseExe."
-    }
-    Assert-RegistryValue "HKCU:\$uninstallKey" 'DisplayVersion' $releaseVersion
-    foreach ($extension in $extensions) {
-        if (-not (Test-RegistryValue "HKCU:\Software\Classes\$extension\OpenWithProgids" $progId)) {
-            throw "Semyra is missing from OpenWithProgids for $extension."
+        [void](New-Item -ItemType Directory -Path $profileDir)
+        $document = Join-Path $testRoot 'upgrade-notes.md'
+        $prefs = Join-Path $profileDir 'window_prefs.json'
+        $recovery = Join-Path $profileDir 'recovery.json'
+        [IO.File]::WriteAllText($document, '# Saved notes')
+        $windowPrefs = @{
+            width = 1200
+            height = 800
+            maximized = $false
+            lastWorkspaceFolder = $testRoot
+            ui = @{
+                language = 'en'
+                zoomPercent = 125
+                sessionFiles = @($document)
+                pinnedSessionFiles = @($document)
+                activeSessionFile = $document
+            }
         }
-        Assert-RegistryValue "HKCU:\$capabilitiesKey\FileAssociations" $extension $progId
+        [IO.File]::WriteAllText($prefs, ($windowPrefs | ConvertTo-Json -Depth 4))
+        $draft = @{
+            name = 'upgrade-notes.md'
+            path = $document
+            parentDir = $testRoot
+            content = "# Saved notes`n`nUnsaved continuation"
+            savedContent = '# Saved notes'
+            lineEnding = 'LF'
+        }
+        [IO.File]::WriteAllText($recovery, (@{ entries = @($draft) } | ConvertTo-Json -Depth 4))
+        $profileHashes = @{}
+        foreach ($path in @($prefs, $recovery, $document)) {
+            $profileHashes[$path] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        }
+
+        # Allow Setup to reuse the previous install path and task selections.
+        Invoke-InstallerProcess $installer ($setupOptions + ('/LOG="{0}"' -f $setupLog)) $setupLog
+        Assert-InstalledBuild $releaseExe $releaseHash
+        Assert-ProfileFiles $profileHashes
+        Write-Host 'Verified in-place x64 upgrade and preservation of settings, session, and recovery data.'
+    } else {
+        Invoke-InstallerProcess $installer ($freshOptions + ('/LOG="{0}"' -f $setupLog)) $setupLog
+        Assert-InstalledBuild $releaseExe $releaseHash
     }
-    Assert-NoSemyraRegistration 'HKLM:'
-    Write-Host "Verified x64 payload ($installedHash) and per-user Explorer registration."
 }
 finally {
     if (Test-Path -LiteralPath $uninstaller -PathType Leaf) {
@@ -127,4 +209,9 @@ if ((Test-Path -LiteralPath $installedExe) -or (Test-Path -LiteralPath (Join-Pat
 }
 Assert-NoSemyraRegistration 'HKCU:'
 Assert-NoSemyraRegistration 'HKLM:'
+if ($upgrade) {
+    Assert-ProfileFiles $profileHashes
+    Remove-Item -LiteralPath $prefs, $recovery, $document
+    [IO.Directory]::Delete($profileDir)
+}
 Write-Host 'Verified installation and uninstall cleanup.'
