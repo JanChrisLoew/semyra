@@ -67,11 +67,11 @@ Root: HKA; Subkey: "Software\Classes\Semyra.Document\shell\open"; ValueType: str
 Root: HKA; Subkey: "Software\Classes\Semyra.Document\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Tasks: assocmd
 
 ; Dateierweiterungen in OpenWithProgids registrieren
-Root: HKA; Subkey: "Software\Classes\.md\OpenWithProgids"; ValueType: none; ValueName: "Semyra.Document"; Flags: uninsdeletevalue; Tasks: assocmd
-Root: HKA; Subkey: "Software\Classes\.markdown\OpenWithProgids"; ValueType: none; ValueName: "Semyra.Document"; Flags: uninsdeletevalue; Tasks: assocmd
-Root: HKA; Subkey: "Software\Classes\.mdown\OpenWithProgids"; ValueType: none; ValueName: "Semyra.Document"; Flags: uninsdeletevalue; Tasks: assocmd
-Root: HKA; Subkey: "Software\Classes\.mkd\OpenWithProgids"; ValueType: none; ValueName: "Semyra.Document"; Flags: uninsdeletevalue; Tasks: assocmd
-Root: HKA; Subkey: "Software\Classes\.mdx\OpenWithProgids"; ValueType: none; ValueName: "Semyra.Document"; Flags: uninsdeletevalue; Tasks: assocmd
+Root: HKA; Subkey: "Software\Classes\.md\OpenWithProgids"; ValueType: string; ValueName: "Semyra.Document"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assocmd
+Root: HKA; Subkey: "Software\Classes\.markdown\OpenWithProgids"; ValueType: string; ValueName: "Semyra.Document"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assocmd
+Root: HKA; Subkey: "Software\Classes\.mdown\OpenWithProgids"; ValueType: string; ValueName: "Semyra.Document"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assocmd
+Root: HKA; Subkey: "Software\Classes\.mkd\OpenWithProgids"; ValueType: string; ValueName: "Semyra.Document"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assocmd
+Root: HKA; Subkey: "Software\Classes\.mdx\OpenWithProgids"; ValueType: string; ValueName: "Semyra.Document"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assocmd
 
 ; App-Registrierung für Windows "Öffnen mit"-Dialog
 Root: HKA; Subkey: "Software\Classes\Applications\{#MyAppExeName}"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "{#MyAppName}"; Flags: uninsdeletekey; Tasks: assocmd

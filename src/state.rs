@@ -42,11 +42,52 @@ pub struct AppStateInner {
     pub ui_prefs: UiSessionPrefs,
     pub ui_prefs_revision: u64,
     pub workspace_folder: Option<PathBuf>,
-    pub allowed_roots: HashSet<PathBuf>,
+    workspace_change_revision: u64,
+    additional_asset_roots: HashSet<PathBuf>,
     pub watched_paths: HashSet<PathBuf>,
     pub pending_pdf_exports: HashMap<u64, PathBuf>,
     pub next_pdf_token: u64,
     pub watcher: Option<RecommendedWatcher>,
+}
+
+impl AppStateInner {
+    fn begin_workspace_change(&mut self) -> u64 {
+        self.workspace_change_revision += 1;
+        self.workspace_change_revision
+    }
+
+    fn finish_workspace_change(&mut self, revision: u64, folder: PathBuf) -> bool {
+        if revision != self.workspace_change_revision {
+            return false;
+        }
+        if let Some(previous) = self.workspace_folder.replace(folder.clone()) {
+            if previous != folder {
+                if let Some(watcher) = &mut self.watcher {
+                    let _ = watcher.unwatch(&previous);
+                }
+                self.watched_paths.remove(&previous);
+            }
+        }
+        self.watch_path(folder, true);
+        true
+    }
+
+    fn watch_path(&mut self, path: PathBuf, recursive: bool) {
+        if self.watched_paths.contains(&path) {
+            return;
+        }
+        let mode = if recursive { RecursiveMode::Recursive } else { RecursiveMode::NonRecursive };
+        if let Some(watcher) = &mut self.watcher {
+            if watcher.watch(&path, mode).is_ok() {
+                self.watched_paths.insert(path);
+            }
+        }
+    }
+
+    fn is_local_asset_allowed(&self, path: &Path) -> bool {
+        self.workspace_folder.iter().chain(&self.additional_asset_roots)
+            .any(|root| path.starts_with(root))
+    }
 }
 
 #[derive(Clone)]
@@ -63,24 +104,21 @@ impl AppState {
         ui_prefs: UiSessionPrefs,
         proxy: EventLoopProxy<UserEvent>,
     ) -> Self {
-        let mut allowed_roots = HashSet::new();
+        let mut additional_asset_roots = HashSet::new();
+        let initial_folder = initial_folder.as_deref().map(normalize_existing_path);
 
         for file in &initial_files {
             if let Some(parent) = file.parent() {
-                allowed_roots.insert(normalize_existing_path(parent));
+                additional_asset_roots.insert(normalize_existing_path(parent));
             }
         }
         for session_file in &ui_prefs.session_files {
             if let Some(parent) = Path::new(session_file).parent() {
-                allowed_roots.insert(normalize_existing_path(parent));
+                additional_asset_roots.insert(normalize_existing_path(parent));
             }
         }
-        if let Some(ref folder) = initial_folder {
-            allowed_roots.insert(normalize_existing_path(folder));
-        }
-
         let pasted_assets_dir = crate::fs_ops::app_data_dir().join("pasted-assets");
-        allowed_roots.insert(normalize_existing_path(&pasted_assets_dir));
+        additional_asset_roots.insert(normalize_existing_path(&pasted_assets_dir));
 
         let (drafts, recovered_drafts) =
             match DraftStore::open(&crate::fs_ops::app_data_dir().join("drafts")) {
@@ -92,7 +130,7 @@ impl AppState {
             };
         for draft in &recovered_drafts {
             if let Some(ref parent) = draft.parent_dir {
-                allowed_roots.insert(normalize_existing_path(Path::new(parent)));
+                additional_asset_roots.insert(normalize_existing_path(Path::new(parent)));
             }
         }
 
@@ -103,7 +141,7 @@ impl AppState {
                 .collect(),
             initial_folder: initial_folder
                 .as_ref()
-                .map(|p| normalize_existing_path(p).to_string_lossy().into_owned()),
+                .map(|p| p.to_string_lossy().into_owned()),
             recovered_drafts,
             ui_prefs: ui_prefs.clone(),
         };
@@ -113,7 +151,8 @@ impl AppState {
             ui_prefs,
             ui_prefs_revision: 0,
             workspace_folder: initial_folder.clone(),
-            allowed_roots,
+            workspace_change_revision: 0,
+            additional_asset_roots,
             watched_paths: HashSet::new(),
             pending_pdf_exports: HashMap::new(),
             next_pdf_token: 1,
@@ -174,27 +213,25 @@ impl AppState {
         if let Some(parent) = norm.parent() {
             let parent_norm = normalize_existing_path(parent);
             if let Ok(mut guard) = self.inner.lock() {
-                guard.allowed_roots.insert(parent_norm);
+                guard.additional_asset_roots.insert(parent_norm);
             }
         }
         self.watch_path(&norm, false);
     }
 
     pub fn set_workspace_folder(&self, folder_path: &Path) {
-        let norm = normalize_existing_path(folder_path);
-        if let Ok(mut guard) = self.inner.lock() {
-            if let Some(prev) = guard.workspace_folder.take() {
-                if prev != norm {
-                    if let Some(ref mut watcher) = guard.watcher {
-                        let _ = watcher.unwatch(&prev);
-                    }
-                    guard.watched_paths.remove(&prev);
-                }
-            }
-            guard.allowed_roots.insert(norm.clone());
-            guard.workspace_folder = Some(norm.clone());
+        if let Some(revision) = self.begin_workspace_change() {
+            self.finish_workspace_change(revision, folder_path);
         }
-        self.watch_path(&norm, true);
+    }
+
+    pub fn begin_workspace_change(&self) -> Option<u64> {
+        self.inner.lock().ok().map(|mut guard| guard.begin_workspace_change())
+    }
+
+    pub fn finish_workspace_change(&self, revision: u64, folder_path: &Path) -> bool {
+        let norm = normalize_existing_path(folder_path);
+        self.inner.lock().ok().is_some_and(|mut guard| guard.finish_workspace_change(revision, norm))
     }
 
     /// Registers an auxiliary root (such as the persistent AI Library) for asset
@@ -202,7 +239,7 @@ impl AppState {
     pub fn allow_and_watch_root(&self, root_path: &Path) {
         let norm = normalize_existing_path(root_path);
         if let Ok(mut guard) = self.inner.lock() {
-            guard.allowed_roots.insert(norm.clone());
+            guard.additional_asset_roots.insert(norm.clone());
         }
         self.watch_path(&norm, true);
     }
@@ -213,19 +250,7 @@ impl AppState {
             return;
         }
         if let Ok(mut guard) = self.inner.lock() {
-            if guard.watched_paths.contains(&norm) {
-                return;
-            }
-            let mode = if recursive {
-                RecursiveMode::Recursive
-            } else {
-                RecursiveMode::NonRecursive
-            };
-            if let Some(ref mut watcher) = guard.watcher {
-                if watcher.watch(&norm, mode).is_ok() {
-                    guard.watched_paths.insert(norm);
-                }
-            }
+            guard.watch_path(norm, recursive);
         }
     }
 
@@ -234,10 +259,7 @@ impl AppState {
         let Ok(guard) = self.inner.lock() else {
             return false;
         };
-        guard
-            .allowed_roots
-            .iter()
-            .any(|root| norm.starts_with(root))
+        guard.is_local_asset_allowed(&norm)
     }
 
     pub fn get_language(&self) -> String {
@@ -284,6 +306,56 @@ pub(crate) fn is_ignored_watch_path(path: &Path, watched_roots: &[PathBuf]) -> b
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn state_for_workspace(workspace: &str, additional_roots: &[&str]) -> AppStateInner {
+        AppStateInner {
+            startup: StartupPayload {
+                initial_files: Vec::new(),
+                initial_folder: Some(workspace.into()),
+                recovered_drafts: Vec::new(),
+                ui_prefs: UiSessionPrefs::default(),
+            },
+            ui_prefs: UiSessionPrefs::default(),
+            ui_prefs_revision: 0,
+            workspace_folder: Some(PathBuf::from(workspace)),
+            workspace_change_revision: 0,
+            additional_asset_roots: additional_roots.iter().map(PathBuf::from).collect(),
+            watched_paths: HashSet::new(),
+            pending_pdf_exports: HashMap::new(),
+            next_pdf_token: 1,
+            watcher: None,
+        }
+    }
+
+    #[test]
+    fn workspace_switch_revokes_only_the_workspace_asset_grant() {
+        let mut state = state_for_workspace(r"C:\old", &[r"C:\old\document", r"C:\ai-library"]);
+        let old_asset = Path::new(r"C:\old\images\cover.png");
+        let new_asset = Path::new(r"C:\new\images\cover.png");
+        assert!(state.is_local_asset_allowed(old_asset));
+        assert!(!state.is_local_asset_allowed(new_asset));
+
+        let revision = state.begin_workspace_change();
+        assert!(state.finish_workspace_change(revision, PathBuf::from(r"C:\new")));
+
+        assert!(!state.is_local_asset_allowed(old_asset));
+        assert!(state.is_local_asset_allowed(new_asset));
+        assert!(state.is_local_asset_allowed(Path::new(r"C:\old\document\image.png")));
+        assert!(state.is_local_asset_allowed(Path::new(r"C:\ai-library\image.png")));
+        assert!(!state.is_local_asset_allowed(Path::new(r"C:\new-other\image.png")));
+    }
+
+    #[test]
+    fn late_workspace_selection_cannot_restore_an_old_asset_grant() {
+        let mut state = state_for_workspace(r"C:\old", &[]);
+        let pending = state.begin_workspace_change();
+        let latest = state.begin_workspace_change();
+
+        assert!(state.finish_workspace_change(latest, PathBuf::from(r"C:\new")));
+        assert!(!state.finish_workspace_change(pending, PathBuf::from(r"C:\old")));
+        assert!(!state.is_local_asset_allowed(Path::new(r"C:\old\image.png")));
+        assert!(state.is_local_asset_allowed(Path::new(r"C:\new\image.png")));
+    }
 
     #[test]
     fn filters_ignored_directories_from_watcher_paths() {

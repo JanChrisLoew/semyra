@@ -255,6 +255,7 @@ class SemyraApp {
       onTriggerOpenFolderDialog: () => this.triggerOpenFolderDialog(),
       onWorkspaceFolderLoaded: (folderPath, persistPrefs) => {
         this.invalidateLintWorkspaceCache();
+        void this.workspaceSearch.runSearch();
         if (this.sidebarSourceMode === 'workspace') {
           this.lastWorkfolderPath = folderPath;
           this.pushRecentFolder(folderPath);
@@ -2325,6 +2326,7 @@ class SemyraApp {
       await this.explorer.loadFolder(this.lastWorkfolderPath, false);
     } else {
       this.explorer.clearWorkspace(this.recentFolders, this.recentFiles);
+      void this.workspaceSearch.runSearch();
     }
   }
 

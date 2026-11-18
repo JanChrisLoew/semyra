@@ -29,7 +29,7 @@ struct FrontendAssets;
 
 type WorkerJob = Box<dyn FnOnce() + Send + 'static>;
 
-/// Bounded worker pool for off-UI-thread IPC disk, search, render, and dialog work.
+/// Runs IPC jobs off the UI thread with a fixed number of workers and a FIFO queue.
 struct WorkerPool {
     sender: Sender<WorkerJob>,
 }
@@ -42,7 +42,7 @@ fn default_worker_count() -> usize {
 }
 
 impl WorkerPool {
-    fn new(size: usize) -> Self {
+    fn new(name: &str, size: usize) -> Self {
         let count = size.max(1);
         let (sender, receiver) = mpsc::channel::<WorkerJob>();
         let shared_rx = Arc::new(Mutex::new(receiver));
@@ -50,7 +50,7 @@ impl WorkerPool {
         for idx in 0..count {
             let rx = Arc::clone(&shared_rx);
             let _ = std::thread::Builder::new()
-                .name(format!("semyra-ipc-worker-{idx}"))
+                .name(format!("semyra-ipc-{name}-{idx}"))
                 .spawn(move || loop {
                     let job = {
                         let Ok(guard) = rx.lock() else {
@@ -77,7 +77,20 @@ impl WorkerPool {
 
 fn ipc_worker_pool() -> &'static WorkerPool {
     static POOL: OnceLock<WorkerPool> = OnceLock::new();
-    POOL.get_or_init(|| WorkerPool::new(default_worker_count()))
+    POOL.get_or_init(|| WorkerPool::new("general", default_worker_count()))
+}
+
+fn draft_worker_pool() -> &'static WorkerPool {
+    static POOL: OnceLock<WorkerPool> = OnceLock::new();
+    POOL.get_or_init(|| WorkerPool::new("drafts", 1))
+}
+
+fn render_worker_pool(doc_key: Option<&str>) -> &'static WorkerPool {
+    if doc_key == Some("live") {
+        static POOL: OnceLock<WorkerPool> = OnceLock::new();
+        return POOL.get_or_init(|| WorkerPool::new("preview", 1));
+    }
+    ipc_worker_pool()
 }
 
 /// Tracks the latest queued revision token per document key so stale render jobs
@@ -196,6 +209,13 @@ impl Default for SupersededRenderResult {
 #[serde(rename_all = "camelCase")]
 struct PathReq {
     path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ListTreeReq {
+    path: String,
+    activate_workspace: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -541,7 +561,7 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Entwurfsdaten"));
                 return;
             };
-            ipc_worker_pool().execute(move || {
+            draft_worker_pool().execute(move || {
                 let result = state.drafts.lock().map_err(|e| e.to_string()).and_then(|mut store| {
                     store.as_mut().ok_or_else(|| "Entwurfswiederherstellung ist nicht verfügbar.".to_string())?
                         .save(req.revision, req.entries, req.recovery_restored)
@@ -558,17 +578,13 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Render-Anfrage"));
                 return;
             };
-            let coalesce = req
-                .doc_key
-                .as_deref()
-                .map(str::trim)
-                .filter(|key| !key.is_empty())
-                .map(|key| {
-                    let key = key.to_string();
-                    let token = render_coalescer().register(&key, req.revision);
-                    (key, token)
-                });
-            ipc_worker_pool().execute(move || {
+            let doc_key = req.doc_key.as_deref().map(str::trim).filter(|key| !key.is_empty());
+            let worker_pool = render_worker_pool(doc_key);
+            let coalesce = doc_key.map(|key| {
+                let token = render_coalescer().register(key, req.revision);
+                (key.to_owned(), token)
+            });
+            worker_pool.execute(move || {
                 if let Some((ref coalesce_key, token)) = coalesce {
                     if render_coalescer().is_superseded(coalesce_key, token) {
                         responder.respond(ok_json(&SupersededRenderResult::default()));
@@ -628,19 +644,25 @@ fn handle_api_route(
         }
 
         "list-tree" => {
-            let Ok(req) = serde_json::from_slice::<PathReq>(&body) else {
+            let Ok(req) = serde_json::from_slice::<ListTreeReq>(&body) else {
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültiger Ordnerpfad"));
                 return;
             };
+            let activate = req.activate_workspace.unwrap_or(true);
+            let revision = if activate { state.begin_workspace_change() } else { None };
             ipc_worker_pool().execute(move || {
                 let folder = PathBuf::from(&req.path);
                 match build_directory_tree(&folder, 5) {
                     Ok(tree) => {
-                        let ai_lib_root = normalize_existing_path(&app_data_dir().join("ai-library"));
-                        if normalize_existing_path(&folder) == ai_lib_root {
-                            state.allow_and_watch_root(&folder);
-                        } else {
-                            state.set_workspace_folder(&folder);
+                        if activate {
+                            let ai_lib_root = normalize_existing_path(&app_data_dir().join("ai-library"));
+                            let root = Path::new(&tree.path);
+                            if root == ai_lib_root {
+                                state.allow_and_watch_root(root);
+                            } else if !revision.is_some_and(|rev| state.finish_workspace_change(rev, root)) {
+                                responder.respond(err_json(StatusCode::CONFLICT, "Die Auswahl des Arbeitsordners ist veraltet."));
+                                return;
+                            }
                         }
                         responder.respond(ok_json(&tree));
                     }
@@ -885,7 +907,7 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Fenster-Anfrage"));
                 return;
             };
-            ipc_worker_pool().execute(move || {
+            draft_worker_pool().execute(move || {
                 if let Ok(mut guard) = state.drafts.lock() {
                     if let Some(store) = guard.as_mut() {
                         store.close(req.recovery_restored);
@@ -979,6 +1001,7 @@ fn handle_api_route(
             let req_lang = serde_json::from_slice::<DialogLangReq>(&body)
                 .ok()
                 .and_then(|r| r.lang);
+            let revision = state.begin_workspace_change();
             ipc_worker_pool().execute(move || {
                 let is_en = req_lang.as_deref().unwrap_or(&state.get_language()) == "en";
                 let start_dir = state
@@ -1001,7 +1024,9 @@ fn handle_api_route(
                 if let Some(folder) = dlg.pick_folder() {
                     match build_directory_tree(&folder, 5) {
                         Ok(tree) => {
-                            state.set_workspace_folder(&folder);
+                            let tree = revision
+                                .filter(|rev| state.finish_workspace_change(*rev, Path::new(&tree.path)))
+                                .map(|_| tree);
                             responder.respond(ok_json(&serde_json::json!({ "tree": tree })));
                         }
                         Err(err) => responder.respond(err_json(StatusCode::BAD_REQUEST, err)),
@@ -1302,7 +1327,7 @@ mod tests {
 
     #[test]
     fn worker_pool_executes_jobs_and_bounds_threads() {
-        let pool = WorkerPool::new(4);
+        let pool = WorkerPool::new("test", 4);
         let thread_ids = Arc::new(Mutex::new(HashSet::<ThreadId>::new()));
         let completed = Arc::new(AtomicUsize::new(0));
         let (done_tx, done_rx) = mpsc::channel();
@@ -1330,6 +1355,71 @@ mod tests {
     }
 
     #[test]
+    fn draft_save_and_render_complete_while_general_workers_are_busy() {
+        use crate::drafts::DraftStore;
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+        let timeout = Duration::from_secs(5);
+        let (started_tx, started_rx) = mpsc::channel();
+        let mut release_workers = Vec::new();
+        for _ in 0..default_worker_count() {
+            let (release_tx, release_rx) = mpsc::channel::<()>();
+            let started_tx = started_tx.clone();
+            release_workers.push(release_tx);
+            // Model search and modal dialog jobs holding their workers until released.
+            ipc_worker_pool().execute(move || {
+                started_tx.send(()).unwrap();
+                let _ = release_rx.recv();
+            });
+        }
+        for _ in &release_workers {
+            started_rx
+                .recv_timeout(timeout)
+                .expect("general worker should be occupied");
+        }
+
+        let (render_tx, render_rx) = mpsc::channel();
+        render_worker_pool(Some("live")).execute(move || {
+            let rendered = render_markdown("# Current preview", None);
+            let _ = render_tx.send(rendered.html);
+        });
+        let (draft_tx, draft_rx) = mpsc::channel();
+        draft_worker_pool().execute(move || {
+            let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+            let dir = std::env::temp_dir()
+                .join(format!("semyra-ipc-drafts-{}-{timestamp}", std::process::id()));
+            let (mut store, _) = DraftStore::open(&dir).unwrap();
+            let draft = DraftEntry {
+                name: "Draft.md".into(),
+                path: None,
+                parent_dir: None,
+                content: "Unsaved text".into(),
+                saved_content: String::new(),
+                line_ending: "LF".into(),
+                saved_line_ending: None,
+            };
+            store.save(1, vec![draft], true).unwrap();
+            drop(store);
+            let (mut store, recovered) = DraftStore::open(&dir).unwrap();
+            store.close(true);
+            drop(store);
+            fs::remove_dir(&dir).unwrap();
+            let _ = draft_tx.send(recovered);
+        });
+
+        let recovered = draft_rx
+            .recv_timeout(timeout)
+            .expect("draft save should finish while general workers are occupied");
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].content, "Unsaved text");
+        let html = render_rx
+            .recv_timeout(timeout)
+            .expect("render should finish while general workers are occupied");
+        assert!(html.contains("Current preview"));
+        drop(release_workers);
+    }
+
+    #[test]
     fn render_coalescer_skips_stale_revisions_per_key() {
         let coalescer = RenderCoalescer::default();
 
@@ -1353,7 +1443,7 @@ mod tests {
 
     #[test]
     fn render_coalescing_on_worker_pool_skips_superseded_queued_work() {
-        let pool = WorkerPool::new(1);
+        let pool = WorkerPool::new("test", 1);
         let coalescer = Arc::new(RenderCoalescer::default());
         let (gate_tx, gate_rx) = mpsc::channel::<()>();
         let (entered_tx, entered_rx) = mpsc::channel::<()>();

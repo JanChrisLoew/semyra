@@ -51,6 +51,7 @@ export class SidebarExplorerController {
   private workspaceFilesCache: WorkspaceFileEntry[] | null = null;
   private contextTarget: ContextMenuTarget | null = null;
   private loadSeq = 0;
+  private refreshSeq = 0;
   private refreshDebounceTimer: number | undefined;
   private isAiLibraryMode = false;
   private selectedAiKind: 'prompt' | 'skill' = 'prompt';
@@ -106,8 +107,18 @@ export class SidebarExplorerController {
 
   public async refresh(): Promise<void> {
     window.clearTimeout(this.refreshDebounceTimer);
-    if (!this.workspaceTree) return;
-    await this.loadFolder(this.workspaceTree.path, false);
+    const currentTree = this.workspaceTree;
+    if (!currentTree) return;
+    const loadSeq = this.loadSeq;
+    const refreshSeq = ++this.refreshSeq;
+    try {
+      const tree = await backend.listTree(currentTree.path, false);
+      if (loadSeq === this.loadSeq && refreshSeq === this.refreshSeq && this.workspaceTree === currentTree) {
+        this.setTree(tree, false);
+      }
+    } catch (err) {
+      console.error('Ordnerbaum konnte nicht geladen werden:', err);
+    }
   }
 
   public scheduleRefresh(delayMs = 220): void {
@@ -186,6 +197,7 @@ export class SidebarExplorerController {
   }
 
   public clearWorkspace(recentFolders: string[], recentFiles: string[]): void {
+    ++this.loadSeq;
     this.workspaceTree = null;
     this.workspaceFilesCache = null;
     this.deps.workspaceTitleEl.textContent = t('sidebar.noFolder');

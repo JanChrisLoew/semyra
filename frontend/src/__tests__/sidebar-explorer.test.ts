@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { FileTreeNode } from '../api';
+import { backend, FileTreeNode } from '../api';
 import { SidebarExplorerController } from '../sidebar-explorer';
 
 describe('SidebarExplorerController', () => {
-  it('preserves expanded and collapsed subfolder <details> states across tree refreshes', () => {
+  it('refreshes without activating a workspace and preserves expanded subfolders', async () => {
     const fileTreeEl = document.createElement('div');
     const workspaceTitleEl = document.createElement('span');
     const contextPopoverEl = document.createElement('div');
@@ -64,8 +64,13 @@ describe('SidebarExplorerController', () => {
     // User manually opens nested 'ADR' folder and collapses top-level 'Architektur' or keeps it open
     detailsBefore[1].open = true;
 
-    // Simulate background tree refresh (persistPrefs = false)
-    explorer.setTree(sampleTree, false);
+    const listTree = vi.spyOn(backend, 'listTree').mockResolvedValue(structuredClone(sampleTree));
+    try {
+      await explorer.refresh();
+      expect(listTree).toHaveBeenCalledWith(sampleTree.path, false);
+    } finally {
+      listTree.mockRestore();
+    }
 
     // Does not trigger redundant recentFolders churn on same-root background refresh
     expect(onWorkspaceFolderLoaded).toHaveBeenCalledTimes(1);

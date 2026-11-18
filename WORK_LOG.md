@@ -7,6 +7,83 @@ Dieses Dokument dient als fortlaufendes Protokoll über Entwicklungssessions, we
 
 ---
 
+## 2026-11-18 — Installer-Abnahme in PR #1 und Open-With-Korrektur
+
+- **Umfang**: Die Härtungen und der Installer-Test wurden auf `codex/x64-pilot-hardening` in [PR #1](https://github.com/JanChrisLoew/semyra/pull/1) zusammengeführt.
+- **Erster CI-Lauf**: Frontend-Prüfungen, Playwright, Rust-Tests, ARM64-Kompiliercheck und x64-Build erfolgreich. Der Installer-Test schlug bei `OpenWithProgids` fehl. Inno Setup legte mit `ValueType: none` die Schlüssel an, schrieb aber die ProgID-Werte nicht.
+- **Korrektur**: `installer/Semyra.iss` registriert `Semyra.Document` für alle fünf Markdown-Endungen als leeren `REG_SZ`-Wert. `Build-Installer.ps1 -Architecture x64` baute das korrigierte Paket lokal erfolgreich. Die vollständige Prüfung wird auf dem aktualisierten PR-Commit wiederholt.
+
+---
+
+## 2026-11-18 — x64-Installerprüfung in GitHub Actions
+
+- **Änderung**: `.github/workflows/ci.yml` baut und prüft den x64-Inno-Installer bei Pull Requests, Pushes auf `main` und Versions-Tags. Der bestehende Installer-Upload bleibt an Versions-Tags gebunden und folgt nach erfolgreicher Prüfung. Bei Fehlern werden vorhandene Setup- und Uninstall-Logs als Artefakt bereitgestellt.
+- **Prüfung**: `scripts/Test-Installer.ps1` verlangt einen sauberen Windows-Testkontext, installiert im Benutzermodus in einem separaten Zielordner und vergleicht SHA-256 sowie Produktversion. Es prüft OpenWith, Dateizuordnungen, Ordnerkontextmenü, App Paths und Deinstallationsregistrierung. Anschließend ruft es den Uninstaller auf und prüft die Bereinigung.
+- **Verifikation**: Typecheck, 172 Frontend-Tests, Vite-Build, 41 Rust-Tests, 17 Playwright-Tests, x64-Release-Build und `Build-Installer.ps1 -Architecture x64` erfolgreich. Die Schritte von `Build-Release.ps1` wurden einzeln ausgeführt. PowerShell-Parser und Workflow-Reihenfolge geprüft. Ein simulierter Durchlauf bestätigte Erfolgsfall sowie Bereinigung bei einer abweichenden Prüfsumme. Der echte lokale Vorabcheck verweigerte den Test bei vorhandener Installation. Die installierte EXE und ihre Registrierung blieben erhalten.
+- **Offen**: Der vollständige Installations- und Deinstallationslauf mit echter Registry steht auf dem frischen GitHub-Runner aus. Die Workflow-Änderung und das neue Skript liegen im lokalen Arbeitsbaum. Die portable x64-EXE und der Installer wurden aus dem aktuellen Arbeitsbaum neu gebaut.
+
+---
+
+## 2026-11-18 — Workspace-Freigabe für lokale Bilder begrenzt
+
+- **Änderung**: `src/state.rs` prüft für lokale Bilder den aktuellen Workspace separat von zusätzlichen Freigaben für Dokumente, Recovery, eingefügte Bilder und die KI-Bibliothek. Beim Wechsel entfällt dadurch die reine Workspace-Freigabe des alten Ordners. Unabhängige Freigaben gelten weiterhin für die laufende Sitzung.
+- **Nebenläufigkeit**: `src/ipc.rs` verwirft überholte Ordnerauswahlen. `frontend/src/api.ts` und `frontend/src/sidebar-explorer.ts` behandeln die Aktualisierung des Explorer-Baums als lesenden Aufruf. Verspätete Aktualisierungen können keinen neueren Explorer-Stand überschreiben oder einen Workspace erneut freigeben.
+- **Verifikation**: Zwei neue Rust-Tests decken den Entzug der alten Workspace-Freigabe, legitime Bildpfade und überholte Ordnerauswahlen ab. Der Explorer-Test prüft die lesende Aktualisierung und den erhaltenen Aufklappzustand. Typecheck, 172 Frontend-Tests, Vite-Build, 41 Rust-Tests, ARM64-Kompiliercheck und 17 Playwright-Tests erfolgreich. `Build-Release.ps1`, Installer-Build und native WebView2-Abnahme wurden in dieser Sitzung nicht ausgeführt.
+
+---
+
+## 2026-11-18 — Entwurfssicherung und Live-Vorschau unter IPC-Last
+
+- **Befund**: Ein Rust-Test belegt alle allgemeinen IPC-Worker kontrolliert mit simulierten Such- und Dialogaufgaben. Mit dem gemeinsamen Pool blieb der Entwurfsauftrag bis zum Fünf-Sekunden-Timeout in der Warteschlange.
+- **Änderung**: `src/ipc.rs` gibt `drafts/save` und der zugehörigen Bereinigung beim Fensterschließen einen gemeinsamen eigenen Worker. Die Live-Vorschau erhält einen zweiten dedizierten Worker, während Export-Rendering über den allgemeinen Pool läuft. Der Test speichert einen Entwurf, liest ihn über `DraftStore` wieder ein und prüft das gerenderte HTML, bevor die belegten Worker freigegeben werden. Die Warteschlangen sind weiterhin unbeschränkt.
+- **Verifikation**: Gezielt vor der Änderung fehlgeschlagen, danach bestanden. Typecheck, 172 Frontend-Tests, Vite-Build, 39 Rust-Tests, ARM64-Kompiliercheck und 17 Playwright-Tests erfolgreich. Der Lasttest prüft die Rust-Ausführung ohne native WebView2-Dialoge. `Build-Release.ps1` und Installer-Build wurden für diese Änderung nicht ausgeführt.
+
+---
+
+## 2026-11-18 — Ordner-Ersetzen an aktuelle Suchergebnisse gebunden
+
+- **Änderung**: `frontend/src/workspace-search.ts` bindet den Arbeitsordner, den normalisierten Suchbegriff, die Suchoptionen und die ausgewählten Dateipfade zusammen. Änderungen am Suchstand entwerten laufende Antworten und die alte Auswahl. Ohne aktuelle ausgewählte Treffer bleibt Ersetzen auch per Eingabetaste gesperrt. Vor dem IPC-Aufruf prüft der Controller die bestätigten Parameter erneut und verhindert parallele Ersetzungen.
+- **Integration**: `frontend/src/main.ts` aktualisiert die Suche bei einem Ordnerwechsel oder beim Schließen des Arbeitsordners. `frontend/src/i18n.ts` nennt beim Bestätigen in DE/EN die Anzahl der ausgewählten Dateien. Der Rust-Aufruf erhält stets die explizite Dateiliste.
+- **Verifikation**: Sieben neue Regressionsfälle in `frontend/src/__tests__/workspace-search.test.ts` für verspätete Antworten, Debounce, leere Trefferlisten und Änderungen während der Bestätigung. Typecheck, 172 Frontend-Tests, Vite-Build, 17 Playwright-Tests und 38 Rust-Tests erfolgreich. `Build-Release.ps1` und Installer-Build wurden für die Härtung nicht ausgeführt.
+
+---
+
+## 2026-11-18 — Codebase-Review zu Dateisicherheit und Modulgrenzen
+
+- **Umfang**: Frontend- und Rust-Struktur, Dateilebenszyklus, Workspace-Suche und Ersetzen, IPC-Worker, Preview-Sanitizing und Asset-Freigaben geprüft. Lediglich dieses Protokoll geändert.
+- **P1**: `frontend/src/workspace-search.ts` kann beim Ordner-Ersetzen Suchparameter und Dateiauswahl aus unterschiedlichen Suchständen kombinieren. In einem isolierten jsdom-Check mit simuliertem Backend erschienen verspätete Ergebnisse nach dem Leeren erneut und wurden für eine neue Ersetzung weiterverwendet. Dabei wurden keine Dateien geschrieben. Empfohlen ist eine gemeinsame Momentaufnahme für Vorschau, Auswahl und bestätigte Ersetzung.
+- **P2/P3**: Die Dateisystem-, Render-, Dialog- und PDF-Arbeit in `src/ipc.rs` teilt sich einen Pool mit begrenzter Threadzahl und unbeschränkter Warteschlange. Native Dialoge und PDF-Wartezeit können Worker belegen. Die Asset-Freigabeliste in `src/state.rs` wächst über Ordnerwechsel hinweg. Die langlebigen Freigaben sollten nach Herkunft überprüft werden. Für `frontend/src/main.ts` empfiehlt sich nach den Härtungen eine kleine, testgestützte Extraktion der Dokumentzustandslogik; fachlich zusammenhängende Übersetzungen und Markdown-Rendering benötigen keinen Schnitt nach Zeilenzahl.
+- **Verifikation**: `cargo check --locked`, `cargo test --locked` (38 Tests), `npm run typecheck`, `npm test` (165 Tests) und `npm run test:e2e` (17 Tests in headless Edge) erfolgreich. `Build-Release.ps1` für das lesende Review nicht erneut ausgeführt. Keine IPC-Lastmessung oder vollständige Sicherheitsprüfung durchgeführt.
+
+---
+
+## 2026-11-18 — Playwright-Abdeckung für KI-Kontext
+
+- **Änderung**: `frontend/e2e/ai-context.spec.ts` prüft den Mehrdatei-Bundler über die Befehlspalette. Der Test wählt einen bearbeiteten Tab und zwei ungeöffnete Arbeitsordnerdateien aus, prüft den deaktivierten Kopierbutton bei leerer Auswahl und vergleicht den kompletten XML-Inhalt mit relativen Pfaden. Ein zweiter Test prüft, dass `Strg+Umschalt+A` ausschließlich den aktiven Tab als Markdown-Kontext kopiert.
+- **Verifikation**: `npm run typecheck`, gezielte TypeScript-Prüfung der Spec, `npm test` (165 Tests) und `npm run test:e2e` (17 Tests, inklusive beider neuer Fälle) erfolgreich. Playwright lief in headless Edge gegen das vorhandene Produktionsbundle. Der erste gezielte Lauf zeigte den lokalisierten Dialognamen „Befehle“, danach wurde der Locator korrigiert. `cargo test` und `Build-Release.ps1` für diese reine Teständerung nicht erneut ausgeführt.
+- **Testgrenze**: Der Browser führt Befehlspalette, Editor und Bundler aus. Die Tests simulieren die native IPC und erfassen Zwischenablage-Schreibvorgänge im Browser-Kontext.
+
+---
+
+## 2026-11-18 — x64-Pilotbuild und native Stichprobe
+
+- **Stand und Änderungen**: x64-Pilot aus Anwendungsstand `37c1bbd` mit Version `0.2.0` gebaut. `README.md` erklärt jetzt `Strg+Umschalt+A` für den aktiven Tab und nennt Teilen-Menü und Befehlspalette als Einstieg in den Mehrdatei-Bundler.
+- **Build und Tests**: `Build-Release.ps1` erfolgreich mit Typecheck, 165 Frontend-Tests, Vite-Produktionsbundle, 38 Rust-Tests und warnungsfreiem x64-Release-Build. `Build-Installer.ps1 -Architecture x64` erfolgreich mit dem vorhandenen Inno Setup 6.4.1 im lokal installierten Antigravity IDE. Artefakte liegen in `target/release/Semyra.exe` und `target/installer/Semyra-Setup-x64.exe`.
+- **Native Stichprobe**: Bytegleiche Release-Kopie im isolierten App-Profil gestartet. Eine externe Änderung an der Testdatei blieb nach `Strg+S` bytegleich erhalten, während die lokale Änderung im Editor sichtbar blieb. Der native WebView2-PDF-Export enthält auf einer Seite die erwartete Überschrift und beide Mermaid-Knotenbeschriftungen sowie Vektorzeichnungen. Das Test-PDF liegt unter `target/pilot-x64/mermaid-pilot.pdf`.
+- **Offene Abnahme**: Semyra meldete im isolierten Profil, dass der Recovery-Entwurf nicht gespeichert werden konnte. Ein unabhängiger Dateitest bestätigte, dass die Testumgebung das Umbenennen im isolierten App-Datenverzeichnis mit „Zugriff verweigert“ blockiert. Recovery nach Prozessabbruch, Setup und Explorer-Dateizuordnung bleiben auf einem sauberen Windows-Profil zu prüfen. Die vorhandene Host-Installation wurde nicht verwendet oder aktualisiert.
+- **KI-Workflow**: Die Bundler-Funktion lieferte mit `AGENTS.md`, `docs/PRODUCT_CONTEXT.md` und `.agents/skills/semyra-release/SKILL.md` jeweils drei Einträge mit relativen Pfaden in Markdown und XML. Die Auffindbarkeit und der vollständige Ablauf durch die Oberfläche bleiben im Test mit einer unabhängigen Person zu prüfen. Bis zur offenen Abnahme wurde kein Testbuild verteilt.
+
+---
+
+## 2026-11-18 — Produktreview und Prioritäten für den nächsten Meilenstein
+
+- **Umfang und Stand**: Produktkontext, README, Commit-Historie, Anwendungs-Einstiegspunkte, Testabdeckung und lokale Release-Artefakte geprüft. GitHub bestätigte `37c1bbd` als aktuellen `main` des privaten Repositories. Die Issue-Suche ergab keine offenen Treffer. Der Remote-Release- und CI-Status blieben unbestätigt.
+- **Befunde**: Version `0.2.0` im Quellstand. Der lokale x64-Build vom 14.11. ist neuer als die beiden Installer und die ARM64-EXE vom 08.11. CI prüft ARM64 per `cargo check` und baut den Installer bei Tags für x64. Das README ordnet `Strg+Umschalt+A` dem Mehrdatei-Bundler zu, der Handler kopiert den aktiven Tab. Die Startseite demonstriert Markdown-Funktionen und enthält keinen Einstieg in den KI-Workflow. Anwendungscode und Produktdokumentation wurden im Review nicht geändert.
+- **Verifikation**: `npm run typecheck`, `npm test` (165 Tests), `npm run build`, `cargo test --locked` (38 Tests) und `cargo check --locked --target aarch64-pc-windows-msvc` erfolgreich. Rust meldete beim Testlauf einen Fallback von Hardlinks auf Dateikopien im inkrementellen Cache. Playwright listete 15 Tests, der Wiederholungslauf scheiterte am lokalen Preview-Server. Im Work Log sind für den 14.11. 15 bestandene Playwright-Tests dokumentiert. `Build-Release.ps1`, Installer-Build und native Abnahme in dieser Sitzung nicht ausgeführt.
+- **Empfohlene Reihenfolge**: Einen x64-Testbuild mit nativer Abnahme der Datei-, Recovery-, Export- und Installer-Wege vorbereiten. Den bestehenden Ablauf von `AGENTS.md`/`SKILL.md` über Prüfung bis Kontextübergabe mit einem echten Repository erproben und die Einstiegspunkte danach schärfen. ARM64 als eigenständig geprüfte Plattform behandeln. Weitere CLI-Funktionen am beobachteten Bedarf priorisieren.
+
+---
+
 ## 2026-11-14 — UI/UX-Hüllen-Integration & Token-Bereinigung (Sprints 1–5)
 
 - **Umfang & Ziel**: Schwerpunktmäßiges UI/UX-Review und nahtlose Verankerung der Sprint-1–5-Funktionen in der bestehenden UI-Hülle (Menüs, Kontextmenüs, Dialoge, Tastaturhinweise, CSS-Tokens & Kontraste).
