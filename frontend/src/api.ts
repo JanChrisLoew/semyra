@@ -133,7 +133,8 @@ export const backend = {
     path, content, lineEnding, expectedContent, expectedLineEnding,
   }),
 
-  listTree: (path: string) => postJson<FileTreeNode>('list-tree', { path }),
+  listTree: (path: string, activateWorkspace = true) =>
+    postJson<FileTreeNode>('list-tree', { path, activateWorkspace }),
 
   listWorkspaceFiles: (path: string) =>
     postJson<{ files: WorkspaceFileEntry[] }>('workspace-files', { path }),

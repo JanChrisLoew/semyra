@@ -2,6 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vite
 import { backend, SearchFileResult } from '../api';
 import { WorkspaceSearchController } from '../workspace-search';
 
+const guideResult: SearchFileResult = {
+  path: 'C:\\Projekte\\Notes\\Guide.md',
+  relPath: 'Guide.md',
+  name: 'Guide.md',
+  matches: [{ line: 1, column: 1, preview: 'old text' }],
+};
+
 describe('WorkspaceSearchController', () => {
   let searchInputEl: HTMLInputElement;
   let replaceInputEl: HTMLInputElement;
@@ -31,6 +38,7 @@ describe('WorkspaceSearchController', () => {
   });
 
   afterEach(() => {
+    document.getElementById('workspace-replace-dialog')?.remove();
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
@@ -211,6 +219,101 @@ describe('WorkspaceSearchController', () => {
     expect(searchSpy).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps cleared results empty when an earlier search completes', async () => {
+    let finishSearch!: (value: { results: SearchFileResult[] }) => void;
+    vi.spyOn(backend, 'searchWorkspace').mockReturnValue(new Promise((resolve) => {
+      finishSearch = resolve;
+    }));
+    const controller = createController();
+    searchInputEl.value = 'old';
+    const pending = controller.runSearch();
+
+    controller.clearSearch();
+    finishSearch({ results: [guideResult] });
+    await pending;
+
+    expect(resultsContainerEl.textContent).toContain('Suchbegriff eingeben');
+    expect(resultsContainerEl.textContent).not.toContain('Guide.md');
+    expect(statusBadgeEl.textContent).toBe('');
+    expect(replaceAllBtn.disabled).toBe(true);
+  });
+
+  it('blocks replace during the debounce and after a search with no hits', async () => {
+    vi.spyOn(backend, 'searchWorkspace')
+      .mockResolvedValueOnce({ results: [guideResult] })
+      .mockResolvedValueOnce({ results: [] });
+    const replace = vi.spyOn(backend, 'replaceWorkspace').mockRejectedValue(new Error('Unexpected replacement'));
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const controller = createController();
+    searchInputEl.value = 'old';
+    await controller.runSearch();
+    expect(replaceAllBtn.disabled).toBe(false);
+
+    searchInputEl.value = 'new';
+    searchInputEl.dispatchEvent(new Event('input'));
+    expect(replaceAllBtn.disabled).toBe(true);
+    replaceInputEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await vi.advanceTimersByTimeAsync(180);
+    expect(resultsContainerEl.textContent).toContain('Keine Treffer gefunden');
+    expect(replaceAllBtn.disabled).toBe(true);
+    await controller.runReplaceAll();
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it.each(['query', 'workspace', 'option', 'selection', 'replacement'])(
+    'cancels a confirmed replacement if the %s changed while the dialog was open',
+    async (change) => {
+      vi.spyOn(backend, 'searchWorkspace').mockResolvedValue({ results: [guideResult] });
+      const replace = vi.spyOn(backend, 'replaceWorkspace').mockRejectedValue(new Error('Unexpected replacement'));
+      const controller = createController();
+      searchInputEl.value = 'old';
+      replaceInputEl.value = 'replacement';
+      await controller.runSearch();
+
+      const dialog = document.createElement('dialog');
+      dialog.id = 'workspace-replace-dialog';
+      dialog.showModal = vi.fn();
+      const message = document.createElement('p');
+      message.id = 'workspace-replace-dialog-msg';
+      dialog.append(message);
+      document.body.append(dialog);
+
+      const pending = controller.runReplaceAll();
+      await controller.runReplaceAll();
+      expect(dialog.showModal).toHaveBeenCalledTimes(1);
+      expect(message.textContent).toBe('„old“ in der ausgewählten Datei durch „replacement“ ersetzen?');
+
+      switch (change) {
+        case 'query':
+          searchInputEl.value = 'new';
+          searchInputEl.dispatchEvent(new Event('input'));
+          break;
+        case 'workspace':
+          getWorkspaceRootPath.mockReturnValue('C:\\Projekte\\Other');
+          break;
+        case 'option':
+          caseToggleBtn.click();
+          break;
+        case 'selection': {
+          const checkbox = resultsContainerEl.querySelector<HTMLInputElement>('.search-file-checkbox')!;
+          checkbox.checked = false;
+          checkbox.dispatchEvent(new Event('change'));
+          break;
+        }
+        case 'replacement':
+          replaceInputEl.value = 'different replacement';
+          break;
+      }
+      dialog.returnValue = 'confirm';
+      dialog.dispatchEvent(new Event('close'));
+      await pending;
+
+      expect(replace).not.toHaveBeenCalled();
+    },
+  );
+
   it('toggles whole-word and regex modes and surfaces invalid regex errors', async () => {
     const searchSpy = vi.spyOn(backend, 'searchWorkspace').mockResolvedValue({ results: [] });
     const controller = createController();
@@ -255,7 +358,7 @@ describe('WorkspaceSearchController', () => {
         matches: [{ line: 2, column: 1, preview: 'old text' }],
       },
     ];
-    vi.spyOn(backend, 'searchWorkspace').mockResolvedValue({ results: mockResults });
+    const searchSpy = vi.spyOn(backend, 'searchWorkspace').mockResolvedValue({ results: mockResults });
     const replaceSpy = vi.spyOn(backend, 'replaceWorkspace').mockResolvedValue({
       filesUpdated: 1,
       totalReplacements: 1,
@@ -265,7 +368,7 @@ describe('WorkspaceSearchController', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     const controller = createController();
-    searchInputEl.value = 'old';
+    searchInputEl.value = ' old ';
     replaceInputEl.value = 'new';
     await controller.runSearch();
 
@@ -293,6 +396,7 @@ describe('WorkspaceSearchController', () => {
     checkboxes[1].dispatchEvent(new Event('change'));
     await controller.runReplaceAll();
 
+    expect(searchSpy).toHaveBeenCalledWith('C:\\Projekte\\Notes', 'old', false, false, false);
     expect(replaceSpy).toHaveBeenCalledWith(
       'C:\\Projekte\\Notes',
       'old',

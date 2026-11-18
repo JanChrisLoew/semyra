@@ -12,7 +12,7 @@ env:
 
 jobs:
   build-windows-x64:
-    name: Build & Test (Windows 11 x64 + ARM64 Check)
+    name: Build, Test & Verify Installer (Windows x64 + ARM64 Check)
     runs-on: windows-latest
 
     steps:
@@ -58,12 +58,22 @@ jobs:
       - name: Build standalone Semyra.exe (Release)
         run: cargo build --release --locked
 
-      - name: Build x64 Inno Setup Installer (on tag release)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Build x64 Inno Setup Installer
         shell: pwsh
-        run: |
-          choco install innosetup -y --no-progress
-          & .\scripts\Build-Installer.ps1 -Architecture x64
+        run: .\scripts\Build-Installer.ps1 -Architecture x64
+
+      - name: Verify x64 Installer and Uninstaller
+        shell: pwsh
+        timeout-minutes: 3
+        run: .\scripts\Test-Installer.ps1
+
+      - name: Upload installer diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Semyra-Installer-Test-Logs
+          path: target/installer-test/*.log
+          if-no-files-found: ignore
 
       - name: Upload Semyra.exe artifact
         uses: actions/upload-artifact@v4

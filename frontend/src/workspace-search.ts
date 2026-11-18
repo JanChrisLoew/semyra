@@ -17,6 +17,19 @@ export interface WorkspaceSearchDeps {
   onReplaceError?: () => void;
 }
 
+interface SearchCriteria {
+  rootPath: string;
+  query: string;
+  caseSensitive: boolean;
+  useRegex: boolean;
+  wholeWord: boolean;
+}
+
+interface SearchSelection {
+  criteria: SearchCriteria;
+  files: Set<string>;
+}
+
 /**
  * Sidebar full-text search controller across Markdown files in the active workspace.
  */
@@ -27,9 +40,8 @@ export class WorkspaceSearchController {
   private useRegex = false;
   private wholeWordBtn: HTMLElement;
   private regexBtn: HTMLElement;
-  private selectedFiles = new Set<string>();
-  private lastResultPaths: string[] = [];
-  private hasRenderedResults = false;
+  private selection: SearchSelection | null = null;
+  private replacePending = false;
   private debounceTimer: number | undefined;
   private searchSeq = 0;
 
@@ -84,94 +96,88 @@ export class WorkspaceSearchController {
   }
 
   public async runSearch(): Promise<void> {
-    const rawQuery = this.deps.searchInputEl.value;
-    const query = this.useRegex ? rawQuery : rawQuery.trim();
-    const rootPath = this.deps.getWorkspaceRootPath();
-    this.updateClearBtnState();
-
-    if (!rootPath) {
-      this.resetSelectionState();
-      if (this.deps.statusBadgeEl) {
-        this.deps.statusBadgeEl.textContent = '';
-      }
-      this.deps.resultsContainerEl.replaceChildren();
-      const hint = document.createElement('p');
-      hint.className = 'muted-hint';
-      hint.textContent = t('search.openFolderPrompt');
-      this.deps.resultsContainerEl.appendChild(hint);
+    window.clearTimeout(this.debounceTimer);
+    this.invalidateResults();
+    const seq = this.searchSeq;
+    const criteria = this.getSearchCriteria();
+    if (!criteria) {
+      this.renderHint(t(this.deps.getWorkspaceRootPath() ? 'sidebar.searchHint' : 'search.openFolderPrompt'));
       return;
     }
 
-    if (!rawQuery.trim()) {
-      this.resetSelectionState();
-      if (this.deps.statusBadgeEl) {
-        this.deps.statusBadgeEl.textContent = '';
-      }
-      this.deps.resultsContainerEl.replaceChildren();
-      const hint = document.createElement('p');
-      hint.className = 'muted-hint';
-      hint.textContent = t('sidebar.searchHint');
-      this.deps.resultsContainerEl.appendChild(hint);
-      return;
-    }
-
-    const seq = ++this.searchSeq;
+    const { rootPath, query, caseSensitive, useRegex, wholeWord } = criteria;
     try {
-      const { results } = await backend.searchWorkspace(
-        rootPath,
-        query,
-        this.caseSensitive,
-        this.useRegex,
-        this.wholeWord,
-      );
-      if (seq !== this.searchSeq) return;
-      this.renderResults(results);
+      const { results } = await backend.searchWorkspace(rootPath, query, caseSensitive, useRegex, wholeWord);
+      if (seq !== this.searchSeq || !this.isCurrentSearch(criteria)) return;
+      this.renderResults(criteria, results);
     } catch (err) {
-      if (seq !== this.searchSeq) return;
+      if (seq !== this.searchSeq || !this.isCurrentSearch(criteria)) return;
       console.error('Ordnersuche fehlgeschlagen:', err);
-      this.resetSelectionState();
-      if (this.deps.statusBadgeEl) {
-        this.deps.statusBadgeEl.textContent = '';
-        this.deps.statusBadgeEl.title = '';
-      }
-      this.deps.resultsContainerEl.replaceChildren();
-      const hint = document.createElement('p');
-      hint.className = 'muted-hint search-error-hint';
-      hint.textContent =
-        err instanceof Error ? err.message : t('search.searchFailed', { err: String(err) });
-      this.deps.resultsContainerEl.appendChild(hint);
+      this.renderHint(
+        err instanceof Error ? err.message : t('search.searchFailed', { err: String(err) }),
+        'muted-hint search-error-hint',
+      );
     }
   }
 
-  private resetSelectionState(): void {
-    this.selectedFiles.clear();
-    this.lastResultPaths = [];
-    this.hasRenderedResults = false;
-    this.updateClearBtnState();
+  private getSearchCriteria(): SearchCriteria | null {
+    const rootPath = this.deps.getWorkspaceRootPath();
+    const rawQuery = this.deps.searchInputEl.value;
+    const trimmedQuery = rawQuery.trim();
+    if (!rootPath || !trimmedQuery) return null;
+    return {
+      rootPath,
+      query: this.useRegex ? rawQuery : trimmedQuery,
+      caseSensitive: this.caseSensitive,
+      useRegex: this.useRegex,
+      wholeWord: this.wholeWord,
+    };
   }
 
-  private updateClearBtnState(): void {
+  private isCurrentSearch(criteria: SearchCriteria): boolean {
+    const current = this.getSearchCriteria();
+    return current !== null && current.rootPath === criteria.rootPath && current.query === criteria.query
+      && current.caseSensitive === criteria.caseSensitive && current.useRegex === criteria.useRegex
+      && current.wholeWord === criteria.wholeWord;
+  }
+
+  private invalidateResults(): void {
+    ++this.searchSeq;
+    this.selection = null;
+    this.deps.resultsContainerEl.replaceChildren();
+    if (this.deps.statusBadgeEl) {
+      this.deps.statusBadgeEl.textContent = '';
+      this.deps.statusBadgeEl.title = '';
+    }
+    this.updateButtons();
+  }
+
+  private renderHint(message: string, className = 'muted-hint'): void {
+    const hint = document.createElement('p');
+    hint.className = className;
+    hint.textContent = message;
+    this.deps.resultsContainerEl.replaceChildren(hint);
+  }
+
+  private canReplace(selection: SearchSelection | null): selection is SearchSelection {
+    return !this.replacePending && selection !== null && selection.files.size > 0
+      && this.isCurrentSearch(selection.criteria);
+  }
+
+  private updateButtons(): void {
     if (this.deps.clearBtn) {
       this.deps.clearBtn.hidden = !this.deps.searchInputEl.value;
     }
     if (this.deps.replaceAllBtn) {
-      const hasQuery = Boolean(this.deps.searchInputEl.value.trim());
-      const hasSelection = !this.hasRenderedResults || this.selectedFiles.size > 0;
-      this.deps.replaceAllBtn.disabled = !hasQuery || !hasSelection;
+      this.deps.replaceAllBtn.disabled = !this.canReplace(this.selection);
     }
   }
 
   public clearSearch(): void {
+    window.clearTimeout(this.debounceTimer);
     this.deps.searchInputEl.value = '';
-    this.resetSelectionState();
-    if (this.deps.statusBadgeEl) {
-      this.deps.statusBadgeEl.textContent = '';
-    }
-    this.deps.resultsContainerEl.replaceChildren();
-    const hint = document.createElement('p');
-    hint.className = 'muted-hint';
-    hint.textContent = t('sidebar.searchHint');
-    this.deps.resultsContainerEl.appendChild(hint);
+    this.invalidateResults();
+    this.renderHint(t('sidebar.searchHint'));
     this.deps.searchInputEl.focus();
   }
 
@@ -188,7 +194,7 @@ export class WorkspaceSearchController {
 
   private bindEvents(): void {
     this.deps.searchInputEl.addEventListener('input', () => {
-      this.updateClearBtnState();
+      this.invalidateResults();
       window.clearTimeout(this.debounceTimer);
       this.debounceTimer = window.setTimeout(() => {
         void this.runSearch();
@@ -236,42 +242,48 @@ export class WorkspaceSearchController {
       }
     });
 
-    this.updateClearBtnState();
+    this.updateButtons();
   }
 
   public async runReplaceAll(): Promise<void> {
-    const query = this.deps.searchInputEl.value;
+    const selection = this.selection;
+    if (!this.canReplace(selection)) return;
+    const { criteria, files } = selection;
+    const { rootPath, query, caseSensitive, useRegex, wholeWord } = criteria;
     const replacement = this.deps.replaceInputEl?.value ?? '';
-    const rootPath = this.deps.getWorkspaceRootPath();
-    if (!rootPath || !query.trim()) return;
-    if (this.hasRenderedResults && this.selectedFiles.size === 0) return;
+    const includeFiles = Array.from(files);
 
-    const confirmed = await this.confirmReplace(
-      t('search.replaceConfirm', { query, replacement }),
-    );
-    if (!confirmed) return;
-
-    const includeFiles = this.hasRenderedResults
-      ? Array.from(this.selectedFiles)
-      : undefined;
-
+    this.replacePending = true;
     try {
+      const confirmed = await this.confirmReplace(
+        t(includeFiles.length === 1 ? 'search.replaceConfirmOne' : 'search.replaceConfirm', {
+          query, replacement, count: includeFiles.length,
+        }),
+      );
+      if (!confirmed || this.selection !== selection || !this.isCurrentSearch(criteria)
+        || (this.deps.replaceInputEl?.value ?? '') !== replacement
+        || files.size !== includeFiles.length || includeFiles.some((path) => !files.has(path))) return;
+
+      this.updateButtons();
       const res = await backend.replaceWorkspace(
         rootPath,
         query,
         replacement,
-        this.caseSensitive,
-        this.useRegex,
-        this.wholeWord,
+        caseSensitive,
+        useRegex,
+        wholeWord,
         includeFiles,
       );
       if (this.deps.onFilesReplaced) {
         await this.deps.onFilesReplaced(res);
       }
-      await this.runSearch();
+      if (this.isCurrentSearch(criteria)) await this.runSearch();
     } catch (err) {
       console.error('Ordner-Ersetzen fehlgeschlagen:', err);
       this.deps.onReplaceError?.();
+    } finally {
+      this.replacePending = false;
+      this.updateButtons();
     }
   }
 
@@ -296,25 +308,20 @@ export class WorkspaceSearchController {
     });
   }
 
-  private renderResults(results: SearchFileResult[]): void {
-    this.deps.resultsContainerEl.replaceChildren();
+  private renderResults(criteria: SearchCriteria, results: SearchFileResult[]): void {
     if (results.length === 0) {
-      this.resetSelectionState();
       if (this.deps.statusBadgeEl) {
         this.deps.statusBadgeEl.textContent = '0';
         this.deps.statusBadgeEl.title = t('search.noMatches');
       }
-      const hint = document.createElement('p');
-      hint.className = 'muted-hint';
-      hint.textContent = t('search.noMatches');
-      this.deps.resultsContainerEl.appendChild(hint);
+      this.renderHint(t('search.noMatches'));
       return;
     }
 
-    this.lastResultPaths = results.map((f) => f.path);
-    this.selectedFiles = new Set(this.lastResultPaths);
-    this.hasRenderedResults = true;
-    this.updateClearBtnState();
+    const resultPaths = results.map((f) => f.path);
+    const selectedFiles = new Set(resultPaths);
+    this.selection = { criteria, files: selectedFiles };
+    this.updateButtons();
 
     const isEn = getLanguage() === 'en';
     const totalHits = results.reduce((acc, f) => acc + f.matches.length, 0);
@@ -337,7 +344,7 @@ export class WorkspaceSearchController {
     selectToggleBtn.className = 'search-select-toggle-btn';
 
     const syncSelectToggleBtn = () => {
-      const allSelected = this.selectedFiles.size === this.lastResultPaths.length;
+      const allSelected = selectedFiles.size === resultPaths.length;
       selectToggleBtn.textContent = allSelected
         ? isEn
           ? 'None'
@@ -357,17 +364,17 @@ export class WorkspaceSearchController {
 
     const fileCheckboxes: HTMLInputElement[] = [];
     selectToggleBtn.addEventListener('click', () => {
-      const selectAll = this.selectedFiles.size < this.lastResultPaths.length;
+      const selectAll = selectedFiles.size < resultPaths.length;
       if (selectAll) {
-        this.selectedFiles = new Set(this.lastResultPaths);
+        for (const path of resultPaths) selectedFiles.add(path);
       } else {
-        this.selectedFiles.clear();
+        selectedFiles.clear();
       }
       for (const cb of fileCheckboxes) {
         cb.checked = selectAll;
       }
       syncSelectToggleBtn();
-      this.updateClearBtnState();
+      this.updateButtons();
     });
 
     summary.append(summaryTextEl, selectToggleBtn);
@@ -393,12 +400,12 @@ export class WorkspaceSearchController {
       );
       checkbox.addEventListener('change', () => {
         if (checkbox.checked) {
-          this.selectedFiles.add(fileRes.path);
+          selectedFiles.add(fileRes.path);
         } else {
-          this.selectedFiles.delete(fileRes.path);
+          selectedFiles.delete(fileRes.path);
         }
         syncSelectToggleBtn();
-        this.updateClearBtnState();
+        this.updateButtons();
       });
       fileCheckboxes.push(checkbox);
 

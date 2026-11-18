@@ -42,7 +42,7 @@ Entwickelt für den täglichen Workflow von Software-Ingenieuren, Prompt-Designe
   - **Amber Status-Indikator** (`#D0A774` Dark / `#986C3D` Light): Ein dezenter, runder Statuspunkt im Tab signalisiert ungespeicherte Änderungen sofort – völlig ohne Layout-Jitter oder Breitenänderungen.
 
 ### 🧠 3. Entwickelt für die KI-Ära
-- **Perfekt für Agent-Workflows**: Optimiert für das Verfassen und Pflegen von `AGENTS.md`, `PROMPT.md`, `SKILL.md`, Copilot-Regeln und Kontextdateien – inklusive **AI Context Bundler** (`Strg+Umschalt+A`), persistenter **AI-Library & Templates**, **YAML-/Markdown-Linting**, **Markdown-Formatter** (`Strg+Umschalt+L`) und Workspace-Skill-Vorlagen.
+- **Perfekt für Agent-Workflows**: Optimiert für das Verfassen und Pflegen von `AGENTS.md`, `PROMPT.md`, `SKILL.md`, Copilot-Regeln und Kontextdateien – inklusive **AI Context Bundler**, persistenter **AI-Library & Templates**, **YAML-/Markdown-Linting**, **Markdown-Formatter** (`Strg+Umschalt+L`) und Workspace-Skill-Vorlagen. `Strg+Umschalt+A` kopiert den aktiven Tab als KI-Kontext. Für mehrere Dateien wähle im Teilen-Menü **Mehrere Tabs für KI bündeln…** oder in der Befehlspalette **Teilen: Mehrere Tabs für KI bündeln…**.
 - **Strukturierte Blöcke**: Erstklassige Darstellung von YAML-Frontmatter-Metadaten, GitHub-Alerts (`[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`), Task-Listen und Fußnoten.
 - **Mathematik & Diagramme**: Schnelles, flackerfreies Rendering von **KaTeX**-Formeln (`$...$` / `$$...$$`) und interaktiven **Mermaid**-Diagrammen mit Großansicht-Dialog (SVG-Zoom von 50–800 %, Einpassen und Maus-Panning).
 
