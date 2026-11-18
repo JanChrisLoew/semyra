@@ -3,6 +3,41 @@ import { backend, FileTreeNode } from '../api';
 import { SidebarExplorerController } from '../sidebar-explorer';
 
 describe('SidebarExplorerController', () => {
+  it.each(['switch', 'refresh', 'clear'])('drops a pending index after %s', async (action) => {
+    const explorer = new SidebarExplorerController({
+      fileTreeEl: document.createElement('div'),
+      workspaceTitleEl: document.createElement('span'),
+      contextPopoverEl: document.createElement('div'),
+      getActiveFilePath: () => null,
+      onOpenFilePath: vi.fn(),
+      onOpenCreatedFile: vi.fn(),
+      onTriggerOpenFolderDialog: vi.fn(),
+      onWorkspaceFolderLoaded: vi.fn(),
+      onEntryRenamed: vi.fn(),
+      onEntryDeleted: vi.fn(),
+    });
+    const tree = { name: 'Notes', path: 'C:/Notes', isDir: true, isMarkdown: false };
+    const nextTree = action === 'switch' ? { ...tree, path: 'C:/Other' } : tree;
+    const oldFile = { path: 'C:/Notes/Old.md', relPath: 'Old.md', name: 'Old.md' };
+    const newFile = { path: `${nextTree.path}/New.md`, relPath: 'New.md', name: 'New.md' };
+    let finish!: (result: { files: typeof oldFile[] }) => void;
+    const index = vi.spyOn(backend, 'listWorkspaceFiles')
+      .mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }))
+      .mockResolvedValueOnce({ files: [newFile] });
+    try {
+      explorer.setTree(tree);
+      const pending = explorer.getWorkspaceFiles();
+      if (action === 'clear') explorer.clearWorkspace([], []);
+      else explorer.setTree(nextTree, false);
+      finish({ files: [oldFile] });
+
+      await expect(pending).resolves.toBeNull();
+      await expect(explorer.getWorkspaceFiles()).resolves.toEqual(action === 'clear' ? [] : [newFile]);
+    } finally {
+      index.mockRestore();
+    }
+  });
+
   it('refreshes without activating a workspace and preserves expanded subfolders', async () => {
     const fileTreeEl = document.createElement('div');
     const workspaceTitleEl = document.createElement('span');

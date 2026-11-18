@@ -79,6 +79,50 @@ test('an external change cancels an already scheduled auto-save', async ({ page 
   expect(writes).toBe(0);
 });
 
+test('a workspace watch event disables replace until fresh matches arrive', async ({ page }) => {
+  const root = 'C:\\Notes';
+  await page.route('**/api/**', async (route) => {
+    const endpoint = new URL(route.request().url()).pathname;
+    const responses: Record<string, unknown> = {
+      '/api/startup': {
+        initialFiles: [],
+        initialFolder: root,
+        recoveredDrafts: [],
+        uiPrefs: { language: 'de' },
+      },
+      '/api/list-tree': { path: root, name: 'Notes', isDir: true },
+      '/api/render': { html: '', outline: [], stats: { words: 0, chars: 0, lines: 0, readingTimeSec: 0 } },
+    };
+    await route.fulfill({ json: responses[endpoint] ?? { ok: true } });
+  });
+  let searches = 0;
+  let finishSearch!: () => void;
+  await page.route('**/api/search-workspace', async (route) => {
+    const version = ++searches;
+    if (version > 1) await new Promise<void>((resolve) => { finishSearch = resolve; });
+    await route.fulfill({ json: { results: [{
+      path, name: 'Draft.md', relPath: 'Draft.md', contentVersion: `version-${version}`,
+      matches: [{ line: 1, column: 1, preview: `needle version ${version}` }],
+    }] } });
+  });
+
+  await page.goto('/');
+  await expect(page.locator('#workspace-title')).toHaveText('Notes');
+  await page.locator('#sidebar-tab-search').click();
+  await page.locator('#workspace-search-input').fill('needle');
+  const replace = page.locator('#btn-workspace-replace-all');
+  await expect(page.getByText('needle version 1')).toBeVisible();
+  await expect(replace).toBeEnabled();
+
+  await page.evaluate((filePath) => window.__semyraReceive?.('fs-changed', { paths: [filePath] }), path);
+  await expect(replace).toBeDisabled();
+  await expect(page.getByText('needle version 1')).toBeHidden();
+  await expect.poll(() => searches).toBe(2);
+  finishSearch();
+  await expect(page.getByText('needle version 2')).toBeVisible();
+  await expect(replace).toBeEnabled();
+});
+
 test('pinning a dirty tab preserves its scheduled auto-save', async ({ page }) => {
   const { editor, setDisk } = await openDraft(page, true);
   const writes: string[] = [];

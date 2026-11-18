@@ -4,9 +4,10 @@ use super::{
     normalize_existing_path, IGNORED_DIRS,
 };
 use regex::{NoExpand, Regex, RegexBuilder};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -25,6 +26,22 @@ pub struct SearchFileResult {
     pub name: String,
     pub rel_path: String,
     pub matches: Vec<SearchMatchItem>,
+    pub content_version: String,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub enum ReplaceTarget {
+    Versioned {
+        path: String,
+        #[serde(rename = "contentVersion")]
+        content_version: String,
+    },
+    Path(String),
+}
+
+fn content_version(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
 }
 
 fn build_search_regex(
@@ -178,6 +195,7 @@ pub fn search_workspace_with_options(
                 name,
                 rel_path,
                 matches: file_matches,
+                content_version: content_version(&bytes),
             });
         }
     }
@@ -286,7 +304,7 @@ pub fn replace_in_workspace_with_options(
     case_sensitive: bool,
     use_regex: bool,
     whole_word: bool,
-    include_files: Option<Vec<String>>,
+    include_files: Option<Vec<ReplaceTarget>>,
 ) -> Result<WorkspaceReplaceResult, String> {
     if query.is_empty() {
         return Err("Suchbegriff darf nicht leer sein.".to_string());
@@ -297,10 +315,16 @@ pub fn replace_in_workspace_with_options(
     }
 
     let compiled_regex = build_search_regex(query, case_sensitive, use_regex, whole_word)?;
-    let include_set: Option<HashSet<PathBuf>> = include_files.map(|paths| {
-        paths
+    let mut targets: Option<HashMap<PathBuf, Option<String>>> = include_files.map(|files| {
+        files
             .into_iter()
-            .map(|p| clean_windows_path(&normalize_existing_path(Path::new(&p))))
+            .map(|target| {
+                let (path, version) = match target {
+                    ReplaceTarget::Versioned { path, content_version } => (path, Some(content_version)),
+                    ReplaceTarget::Path(path) => (path, None),
+                };
+                (normalize_existing_path(Path::new(&path)), version)
+            })
             .collect()
     });
 
@@ -314,17 +338,23 @@ pub fn replace_in_workspace_with_options(
 
     for file_path in scan.files {
         let clean_path = clean_windows_path(&file_path);
-        if let Some(ref allowed) = include_set {
-            if !allowed.contains(&clean_path) {
-                continue;
-            }
-        }
-        if let Ok(meta) = fs::metadata(&file_path) {
-            if meta.len() > 5 * 1024 * 1024 {
-                continue;
-            }
-        }
+        let expected = match &mut targets {
+            Some(targets) => match targets.remove(&file_path) {
+                Some(version) => version,
+                None => continue,
+            },
+            None => None,
+        };
         let path = clean_path.to_string_lossy().into_owned();
+        if fs::metadata(&file_path).is_ok_and(|meta| meta.len() > 5 * 1024 * 1024) {
+            if expected.is_some() {
+                failures.push(WorkspaceReplaceFailure {
+                    path,
+                    error: "Datei ist für die Ordnersuche zu groß geworden.".into(),
+                });
+            }
+            continue;
+        }
         let bytes = match fs::read(&file_path) {
             Ok(bytes) => bytes,
             Err(err) => {
@@ -335,6 +365,13 @@ pub fn replace_in_workspace_with_options(
                 continue;
             }
         };
+        if expected.is_some_and(|version| version != content_version(&bytes)) {
+            failures.push(WorkspaceReplaceFailure {
+                path,
+                error: "Datei wurde seit der Suche geändert.".into(),
+            });
+            continue;
+        }
         let (content, _) = decode_text_bytes(&bytes);
         let prefer_crlf = content.contains("\r\n");
 
@@ -370,6 +407,17 @@ pub fn replace_in_workspace_with_options(
                     updated_paths.push(path);
                 }
                 Err(error) => failures.push(WorkspaceReplaceFailure { path, error }),
+            }
+        }
+    }
+
+    if let Some(targets) = targets {
+        for (path, version) in targets {
+            if version.is_some() {
+                failures.push(WorkspaceReplaceFailure {
+                    path: clean_windows_path(&path).to_string_lossy().into_owned(),
+                    error: "Datei wurde im Arbeitsordner nicht mehr gefunden.".into(),
+                });
             }
         }
     }
@@ -719,6 +767,44 @@ mod tests {
     }
 
     #[test]
+    fn replace_skips_files_changed_or_removed_after_search() {
+        let dir = std::env::temp_dir().join(format!(
+            "semyra_replace_versions_{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let unchanged = dir.join("unchanged.md");
+        let changed = dir.join("changed.md");
+        let removed = dir.join("removed.md");
+        for path in [&unchanged, &changed, &removed] {
+            fs::write(path, "needle\n").unwrap();
+        }
+        let targets = search_workspace_files(&dir, "needle", true)
+            .unwrap()
+            .into_iter()
+            .map(|result| ReplaceTarget::Versioned {
+                path: result.path,
+                content_version: result.content_version,
+            })
+            .collect();
+        fs::write(&changed, "needle\nnew needle\n").unwrap();
+        fs::remove_file(&removed).unwrap();
+
+        let result =
+            replace_in_workspace_with_options(&dir, "needle", "updated", true, false, false, Some(targets))
+                .unwrap();
+        assert_eq!(result.files_updated, 1);
+        assert_eq!(result.total_replacements, 1);
+        assert_eq!(result.failures.len(), 2);
+        assert_eq!(fs::read_to_string(&unchanged).unwrap(), "updated\n");
+        assert_eq!(fs::read_to_string(&changed).unwrap(), "needle\nnew needle\n");
+        assert!(!removed.exists());
+        fs::remove_file(unchanged).unwrap();
+        fs::remove_file(changed).unwrap();
+        fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
     fn replace_respects_include_files_filter() {
         let dir = std::env::temp_dir().join(format!(
             "semyra_include_files_{}",
@@ -746,7 +832,7 @@ mod tests {
         assert_eq!(empty_res.files_updated, 0);
         assert_eq!(empty_res.total_replacements, 0);
 
-        let selected = vec![clean_windows_path(&file_a).to_string_lossy().into_owned()];
+        let selected = vec![ReplaceTarget::Path(clean_windows_path(&file_a).to_string_lossy().into_owned())];
         let res = replace_in_workspace_with_options(
             &dir,
             "alpha",

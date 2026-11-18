@@ -131,6 +131,42 @@ describe('DocumentFileOperations', () => {
     expect(callbacks.onError).not.toHaveBeenCalled();
   });
 
+  it.each([null, 'C:\\Notes\\Renamed.md'])(
+    'keeps local edits dirty when a write completes after the path changes to %s',
+    async (newPath) => {
+      const document = openDocument();
+      document.currentContent = 'Local edit\n';
+      document.isDirty = true;
+      const { operations, onSaved } = fileOperations();
+      const write = deferred<{ saved: boolean }>();
+      vi.spyOn(backend, 'writeFile').mockReturnValueOnce(write.promise);
+
+      const saving = operations.save(document);
+      document.path = newPath;
+      write.resolve({ saved: true });
+
+      await expect(saving).resolves.toBe(false);
+      expect(document.savedContent).toBe('Saved\n');
+      expect(document.isDirty).toBe(true);
+      expect(onSaved).not.toHaveBeenCalled();
+    },
+  );
+
+  it('ignores Save As completion after another action changes the tab path', async () => {
+    const document = openDocument();
+    const { operations, onSaved } = fileOperations();
+    const dialog = deferred<{ saved: boolean; path: string }>();
+    vi.spyOn(backend, 'saveFileDialog').mockReturnValueOnce(dialog.promise);
+
+    const saving = operations.save(document, true);
+    document.path = 'C:\\Notes\\Renamed.md';
+    dialog.resolve({ saved: true, path: 'C:\\Workspace\\Copy.md' });
+
+    await expect(saving).resolves.toBe(false);
+    expect(document.path).toBe('C:\\Notes\\Renamed.md');
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
   it('updates a document location only when Save As succeeds', async () => {
     const document = openDocument();
     const { operations, onSaved } = fileOperations();

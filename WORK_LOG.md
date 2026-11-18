@@ -7,11 +7,34 @@ Dieses Dokument dient als fortlaufendes Protokoll über Entwicklungssessions, we
 
 ---
 
+## 2026-11-18 — Dateilebenszyklus, Ordnersuche und Upgrade-Test gehärtet
+
+- **Speichern**: `document-file-operations.ts` prüft nach der Antwort, ob der Tab noch offen ist und denselben Pfad hat. Das Backend verwendet beim Umbenennen und Verschieben in den Papierkorb dieselbe Sperre wie beim Schreiben.
+- **Dateiindex**: `sidebar-explorer.ts` verwirft verspätete oder inzwischen entwertete Indexantworten. Schnellwahl und Linting berücksichtigen verworfene Antworten.
+- **Ordner-Ersetzen**: Dateisystemereignisse entwerten die Treffer sofort. Bei der Aktualisierung bleibt die Dateiauswahl erhalten. Die UI sendet die SHA-256-Prüfsummen der angezeigten Versionen. Rust überspringt geänderte, zu groß gewordene oder verschwundene Dateien und meldet sie im Ergebnis.
+- **Installer**: Der Windows-Upgrade-Test prüft einen Entwurf in `%LOCALAPPDATA%/Semyra/drafts/` vor und nach Upgrade und Deinstallation.
+- **Verifikation**: Typecheck, 201 Frontend-Tests, Vite-Build, 19 Playwright-Tests, 43 Rust-Tests, ARM64-Kompilierung und PowerShell-Parser-Prüfung erfolgreich. Der korrigierte Installer-Upgrade-Test läuft auf einem frischen Windows-Runner. `Build-Release.ps1` wurde lokal nicht ausgeführt.
+
+---
+
+## 2026-11-18 — Code-Review nach den Pilot-Merges
+
+- **Umfang**: `37c1bbd..e7f71e6` auf `main` geprüft. Schwerpunkt auf Dateilebenszyklus, Recovery, Arbeitsordner, Hintergrundaktualisierung und Installer-CI.
+- **P1**: Eine Schreibantwort für den alten Pfad setzt den Tab auch dann auf gespeichert, wenn er durch eine Löschung inzwischen pfadlos geworden ist. Der simulierte Fall schlug in Vitest fehl. Speicherbestätigung an die aktuelle Dateizuordnung binden und Dateimutationen mit aktiven Schreibvorgängen abstimmen.
+- **P2**: Ein verspäteter Dateiindex kann den Cache des neuen Arbeitsordners füllen. Der simulierte Ordnerwechsel schlug in Vitest fehl. Cache und Antworten an die Arbeitsordnergeneration binden. Nach einem Dateisystemereignis aktualisiert die Explorer-Aktualisierung außerdem keine laufende Ordnersuche mehr. Suchergebnisse bei Dateisystemänderungen gesondert entwerten und neu laden.
+- **P2**: Der Installer-Test prüft `Semyra/recovery.json`. Beide getesteten Builds lesen Entwürfe aus `Semyra/drafts/`. Testdatei in den tatsächlichen Profilpfad legen und nach Upgrade sowie Deinstallation prüfen.
+- **Verifikation**: Typecheck, 193 Frontend-Tests, Vite-Produktionsbuild, `cargo check --locked`, 42 Rust-Tests und 18 Playwright-Tests erfolgreich. Playwright lief nach dem Timeout am Standardport mit einem separaten Preview-Port. Die zwei temporären Reproduktionstests lieferten die erwarteten Fehler und wurden entfernt. Der lokale Rust-Testbuild meldete einen Kopier-Fallback beim inkrementellen Cache. `Build-Release.ps1` wurde für das Review nicht ausgeführt. Der bestehende Windows-Lauf für `e7f71e6` ist grün.
+- **Entscheidung**: Anwendungscode unverändert. Zuerst die falsche Speicherbestätigung korrigieren. Die Modulgrenzen für Dokumentzustand, Speichern, Auto-Save und Schließen bieten bereits geeignete Testpunkte.
+
+---
+
 ## 2026-11-18 — Windows-CI für x64-Installer-Upgrades
 
 - **Änderung**: `.github/workflows/ci.yml` baut als Upgrade-Basis den fest gepinnten Pilotstand `8c2cd1e` in einem separaten Checkout. Der bestehende Test für Neuinstallation und Deinstallation bleibt erhalten.
 - **Prüfung**: `scripts/Test-Installer.ps1` installiert zuerst die Basis und dann das aktuelle Setup über denselben Eintrag. Der neue Installer übernimmt Zielordner und Explorer-Aufgaben. Unterschiedliche EXE-Hashes belegen den Austausch trotz gleicher Produktversion. Der Test prüft bytegenau, dass Einstellungen, Tabs, Recovery-Entwurf und Markdown-Datei Update und Deinstallation überstehen.
-- **Verifikation**: PowerShell-Parser, Workflow-YAML und `git diff --check` erfolgreich. Frontend-Tests, Rust-Tests, Release-Build und Installation laufen in der Windows-CI. `Build-Release.ps1` wurde lokal nicht aufgerufen.
+- **Verifikation**: PowerShell-Parser, Workflow-YAML und `git diff --check` erfolgreich. Die [Windows-CI für PR #4](https://github.com/JanChrisLoew/semyra/actions/runs/44336420020) bestätigte Typecheck, 193 Frontend-Tests, Vite-Build, 18 Playwright-Tests, 42 Rust-Tests, ARM64-Kompilierung, Release-Build, x64-Neuinstallation und Upgrade einschließlich Deinstallation. `Build-Release.ps1` wurde lokal nicht aufgerufen. Der geprüfte PR-Commit ist `fe6abb5`.
+- **Review und Merge**: Baseline-Pin, isolierter Build, Übernahme des Installationsordners, Explorer-Registrierung, Prüfsummen der Profildaten und Bereinigung geprüft. [PR #4](https://github.com/JanChrisLoew/semyra/pull/4) wurde als `e7f71e6` übernommen. Der Quellbaum von `main` entspricht dem getesteten PR-Commit.
+- **Abschluss**: Die [Windows-CI für `e7f71e6` auf `main`](https://github.com/JanChrisLoew/semyra/actions/runs/44339976876) war vollständig erfolgreich, einschließlich Neuinstallation, Upgrade, Prüfung der Profildaten und Deinstallation.
 
 ---
 

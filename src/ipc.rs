@@ -297,7 +297,7 @@ struct ReplaceWorkspaceReq {
     #[serde(default)]
     whole_word: bool,
     #[serde(default)]
-    include_files: Option<Vec<String>>,
+    include_files: Option<Vec<crate::fs_ops::search::ReplaceTarget>>,
 }
 
 #[derive(Deserialize)]

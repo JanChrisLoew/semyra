@@ -154,9 +154,11 @@ try {
         Assert-InstalledBuild $BaselineExe $baselineHash
 
         [void](New-Item -ItemType Directory -Path $profileDir)
+        $draftsDir = Join-Path $profileDir 'drafts'
+        [void](New-Item -ItemType Directory -Path $draftsDir)
         $document = Join-Path $testRoot 'upgrade-notes.md'
         $prefs = Join-Path $profileDir 'window_prefs.json'
-        $recovery = Join-Path $profileDir 'recovery.json'
+        $recovery = Join-Path $draftsDir 'recovery-4242-1.json'
         [IO.File]::WriteAllText($document, '# Saved notes')
         $windowPrefs = @{
             width = 1200
@@ -212,6 +214,7 @@ Assert-NoSemyraRegistration 'HKLM:'
 if ($upgrade) {
     Assert-ProfileFiles $profileHashes
     Remove-Item -LiteralPath $prefs, $recovery, $document
+    [IO.Directory]::Delete($draftsDir)
     [IO.Directory]::Delete($profileDir)
 }
 Write-Host 'Verified installation and uninstall cleanup.'

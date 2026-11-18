@@ -375,7 +375,7 @@ class SemyraApp {
             tabs: this.tabs,
             activeTabId: this.activeTabId,
             workspaceRootPath: this.explorer.rootPath,
-            getWorkspaceFiles: () => this.explorer.getWorkspaceFiles(),
+            getWorkspaceFiles: async () => (await this.explorer.getWorkspaceFiles()) ?? [],
             recentFiles: this.recentFiles,
             recentFolders: this.recentFolders,
             onActivateTab: (tabId) => this.activateTab(tabId),
@@ -2262,7 +2262,7 @@ class SemyraApp {
     this.lintWorkspaceRefreshInFlight = workspaceRoot;
     try {
       const files = await this.explorer.getWorkspaceFiles();
-      if (this.sidebarSourceMode !== 'workspace' || this.explorer.rootPath !== workspaceRoot) return;
+      if (!files || this.sidebarSourceMode !== 'workspace' || this.explorer.rootPath !== workspaceRoot) return;
       this.cachedWorkspaceRootForLint = workspaceRoot;
       this.cachedWorkspaceRelPaths = files.map((f) => f.relPath);
       if (this.activeTab) {
@@ -4114,6 +4114,8 @@ class SemyraApp {
     });
 
     onBackendEvent('fs-changed', async ({ paths }) => {
+      this.workspaceSearch.refreshAfterFileChanges(paths);
+      if (this.explorer.hasWorkspace) this.explorer.invalidateFilesCache();
       const changedLower = new Set(paths.map((p) => p.toLowerCase()));
       await Promise.all(this.tabs
         .filter((tab) => tab.path && changedLower.has(tab.path.toLowerCase()))

@@ -46,25 +46,27 @@ export class DocumentFileOperations<T extends FileDocument> {
   private async writeSnapshot(document: T, forceSaveAs: boolean, automatic: boolean): Promise<boolean> {
     const { path, currentContent: content, lineEnding } = document;
     const savedAs = !path || forceSaveAs;
+    const stillAtOriginalPath = () => this.deps.isOpen(document) && document.path === path;
     try {
       if (savedAs) {
         const result = await backend.saveFileDialog(
           content, document.name, document.parentDir ?? this.deps.getWorkspaceRoot(), lineEnding, getLanguage(),
         );
-        if (!result.saved || !result.path) return false;
+        if (!result.saved || !result.path || !stillAtOriginalPath()) return false;
         document.path = result.path;
         document.name = result.name ?? document.name;
         document.parentDir = result.parentDir ?? document.parentDir;
       } else {
         const expected = expectedDiskVersion(document, automatic);
         const result = await backend.writeFile(path, content, lineEnding, expected.content, expected.lineEnding);
+        if (!stillAtOriginalPath()) return false;
         if (!result.saved) {
           this.deps.onSaveConflict(document);
           return false;
         }
       }
     } catch (err) {
-      this.deps.onSaveError(err);
+      if (stillAtOriginalPath()) this.deps.onSaveError(err);
       return false;
     }
 
