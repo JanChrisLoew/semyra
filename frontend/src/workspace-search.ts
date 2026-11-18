@@ -1,5 +1,6 @@
 import { backend, SearchFileResult, WorkspaceReplaceResult } from './api';
 import { getLanguage, t } from './i18n';
+import { isSameOrDescendantPath } from './path-utils';
 
 export interface WorkspaceSearchDeps {
   searchInputEl: HTMLInputElement;
@@ -28,6 +29,7 @@ interface SearchCriteria {
 interface SearchSelection {
   criteria: SearchCriteria;
   files: Set<string>;
+  versions: Map<string, string>;
 }
 
 /**
@@ -44,6 +46,7 @@ export class WorkspaceSearchController {
   private replacePending = false;
   private debounceTimer: number | undefined;
   private searchSeq = 0;
+  private refreshSelection: ReadonlySet<string> | undefined;
 
   constructor(deps: WorkspaceSearchDeps) {
     this.deps = deps;
@@ -95,9 +98,21 @@ export class WorkspaceSearchController {
     }
   }
 
-  public async runSearch(): Promise<void> {
+  public refreshAfterFileChanges(paths: readonly string[]): void {
+    const criteria = this.getSearchCriteria();
+    if (!criteria || !paths.some((path) => isSameOrDescendantPath(path, criteria.rootPath))) return;
+
+    const selected = this.selection?.files ?? this.refreshSelection;
+    this.invalidateResults();
+    this.refreshSelection = selected;
+    window.clearTimeout(this.debounceTimer);
+    this.debounceTimer = window.setTimeout(() => { void this.runSearch(selected); }, 180);
+  }
+
+  public async runSearch(selected?: ReadonlySet<string>): Promise<void> {
     window.clearTimeout(this.debounceTimer);
     this.invalidateResults();
+    this.refreshSelection = selected;
     const seq = this.searchSeq;
     const criteria = this.getSearchCriteria();
     if (!criteria) {
@@ -109,7 +124,8 @@ export class WorkspaceSearchController {
     try {
       const { results } = await backend.searchWorkspace(rootPath, query, caseSensitive, useRegex, wholeWord);
       if (seq !== this.searchSeq || !this.isCurrentSearch(criteria)) return;
-      this.renderResults(criteria, results);
+      this.refreshSelection = undefined;
+      this.renderResults(criteria, results, selected);
     } catch (err) {
       if (seq !== this.searchSeq || !this.isCurrentSearch(criteria)) return;
       console.error('Ordnersuche fehlgeschlagen:', err);
@@ -144,6 +160,7 @@ export class WorkspaceSearchController {
   private invalidateResults(): void {
     ++this.searchSeq;
     this.selection = null;
+    this.refreshSelection = undefined;
     this.deps.resultsContainerEl.replaceChildren();
     if (this.deps.statusBadgeEl) {
       this.deps.statusBadgeEl.textContent = '';
@@ -272,12 +289,14 @@ export class WorkspaceSearchController {
         caseSensitive,
         useRegex,
         wholeWord,
-        includeFiles,
+        includeFiles.map((path) => ({ path, contentVersion: selection.versions.get(path)! })),
       );
       if (this.deps.onFilesReplaced) {
         await this.deps.onFilesReplaced(res);
       }
-      if (this.isCurrentSearch(criteria)) await this.runSearch();
+      if (this.isCurrentSearch(criteria)) {
+        await this.runSearch(this.selection?.files ?? this.refreshSelection ?? files);
+      }
     } catch (err) {
       console.error('Ordner-Ersetzen fehlgeschlagen:', err);
       this.deps.onReplaceError?.();
@@ -308,7 +327,11 @@ export class WorkspaceSearchController {
     });
   }
 
-  private renderResults(criteria: SearchCriteria, results: SearchFileResult[]): void {
+  private renderResults(
+    criteria: SearchCriteria,
+    results: SearchFileResult[],
+    selected?: ReadonlySet<string>,
+  ): void {
     if (results.length === 0) {
       if (this.deps.statusBadgeEl) {
         this.deps.statusBadgeEl.textContent = '0';
@@ -319,8 +342,9 @@ export class WorkspaceSearchController {
     }
 
     const resultPaths = results.map((f) => f.path);
-    const selectedFiles = new Set(resultPaths);
-    this.selection = { criteria, files: selectedFiles };
+    const selectedFiles = new Set(resultPaths.filter((path) => !selected || selected.has(path)));
+    const versions = new Map(results.map(({ path, contentVersion }) => [path, contentVersion]));
+    this.selection = { criteria, files: selectedFiles, versions };
     this.updateButtons();
 
     const isEn = getLanguage() === 'en';
@@ -391,7 +415,7 @@ export class WorkspaceSearchController {
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.className = 'search-file-checkbox';
-      checkbox.checked = true;
+      checkbox.checked = selectedFiles.has(fileRes.path);
       checkbox.setAttribute(
         'aria-label',
         isEn

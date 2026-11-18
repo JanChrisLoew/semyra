@@ -6,6 +6,7 @@ const guideResult: SearchFileResult = {
   path: 'C:\\Projekte\\Notes\\Guide.md',
   relPath: 'Guide.md',
   name: 'Guide.md',
+  contentVersion: 'guide-v1',
   matches: [{ line: 1, column: 1, preview: 'old text' }],
 };
 
@@ -74,6 +75,7 @@ describe('WorkspaceSearchController', () => {
         path: 'C:\\Projekte\\Notes\\Guide.md',
         relPath: 'Guide.md',
         name: 'Guide.md',
+        contentVersion: 'guide-v1',
         matches: [
           { line: 5, column: 3, preview: 'Semyra rocks' },
           { line: 12, column: 1, preview: 'Use Semyra daily' },
@@ -83,6 +85,7 @@ describe('WorkspaceSearchController', () => {
         path: 'C:\\Projekte\\Notes\\TODO.md',
         relPath: 'TODO.md',
         name: 'TODO.md',
+        contentVersion: 'todo-v1',
         matches: [{ line: 2, column: 7, preview: 'Test Semyra' }],
       },
     ];
@@ -188,6 +191,7 @@ describe('WorkspaceSearchController', () => {
           path: 'C:\\B.md',
           relPath: 'B.md',
           name: 'B.md',
+          contentVersion: 'ab-v1',
           matches: [{ line: 1, column: 1, preview: 'AB match' }],
         },
       ],
@@ -205,6 +209,7 @@ describe('WorkspaceSearchController', () => {
           path: 'C:\\A.md',
           relPath: 'A.md',
           name: 'A.md',
+          contentVersion: 'stale-v1',
           matches: [{ line: 1, column: 1, preview: 'A stale match' }],
         },
       ],
@@ -262,7 +267,7 @@ describe('WorkspaceSearchController', () => {
     expect(replace).not.toHaveBeenCalled();
   });
 
-  it.each(['query', 'workspace', 'option', 'selection', 'replacement'])(
+  it.each(['query', 'workspace', 'option', 'selection', 'replacement', 'filesystem'])(
     'cancels a confirmed replacement if the %s changed while the dialog was open',
     async (change) => {
       vi.spyOn(backend, 'searchWorkspace').mockResolvedValue({ results: [guideResult] });
@@ -305,6 +310,10 @@ describe('WorkspaceSearchController', () => {
         case 'replacement':
           replaceInputEl.value = 'different replacement';
           break;
+        case 'filesystem':
+          controller.refreshAfterFileChanges([guideResult.path]);
+          expect(replaceAllBtn.disabled).toBe(true);
+          break;
       }
       dialog.returnValue = 'confirm';
       dialog.dispatchEvent(new Event('close'));
@@ -343,18 +352,47 @@ describe('WorkspaceSearchController', () => {
     expect(statusBadgeEl.textContent).toBe('');
   });
 
+  it('refreshes edited results while keeping the previously selected files', async () => {
+    const second = { ...guideResult, path: 'C:/Projekte/Notes/Second.md', name: 'Second.md', relPath: 'Second.md' };
+    const added = { ...second, path: 'C:/Projekte/Notes/Added.md', name: 'Added.md', relPath: 'Added.md' };
+    const updated = { ...guideResult, contentVersion: 'guide-v2', matches: [{ line: 2, column: 1, preview: 'updated' }] };
+    const search = vi.spyOn(backend, 'searchWorkspace')
+      .mockResolvedValueOnce({ results: [guideResult, second] })
+      .mockResolvedValueOnce({ results: [updated, second, added] });
+    const controller = createController();
+    searchInputEl.value = 'old';
+    await controller.runSearch();
+    const unchecked = resultsContainerEl.querySelectorAll<HTMLInputElement>('.search-file-checkbox')[1];
+    unchecked.checked = false;
+    unchecked.dispatchEvent(new Event('change'));
+
+    controller.refreshAfterFileChanges(['C:/Projekte/Notes-other/Outside.md']);
+    expect(replaceAllBtn.disabled).toBe(false);
+    controller.refreshAfterFileChanges([guideResult.path]);
+    controller.refreshAfterFileChanges([added.path]);
+    expect(replaceAllBtn.disabled).toBe(true);
+    await vi.advanceTimersByTimeAsync(180);
+
+    expect(search).toHaveBeenCalledTimes(2);
+    expect(resultsContainerEl.textContent).toContain('updated');
+    expect([...resultsContainerEl.querySelectorAll<HTMLInputElement>('.search-file-checkbox')]
+      .map((checkbox) => checkbox.checked)).toEqual([true, false, false]);
+  });
+
   it('supports per-file checkboxes, Select All/None, and selective replaceWorkspace', async () => {
     const mockResults: SearchFileResult[] = [
       {
         path: 'C:\\Projekte\\Notes\\A.md',
         relPath: 'A.md',
         name: 'A.md',
+        contentVersion: 'a-v1',
         matches: [{ line: 1, column: 1, preview: 'old text' }],
       },
       {
         path: 'C:\\Projekte\\Notes\\B.md',
         relPath: 'B.md',
         name: 'B.md',
+        contentVersion: 'b-v1',
         matches: [{ line: 2, column: 1, preview: 'old text' }],
       },
     ];
@@ -404,7 +442,7 @@ describe('WorkspaceSearchController', () => {
       false,
       false,
       false,
-      ['C:\\Projekte\\Notes\\A.md'],
+      [{ path: 'C:\\Projekte\\Notes\\A.md', contentVersion: 'a-v1' }],
     );
   });
 });

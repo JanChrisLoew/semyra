@@ -46,6 +46,7 @@ import { buildPaletteCommandItems, buildPaletteFileItems } from './palette-items
 import {
   baseNameOfPath,
   isMarkdownPath,
+  isSameOrDescendantPath,
   parentDirOfPath,
   resolveRelativeMarkdownPath,
 } from './path-utils';
@@ -375,7 +376,7 @@ class SemyraApp {
             tabs: this.tabs,
             activeTabId: this.activeTabId,
             workspaceRootPath: this.explorer.rootPath,
-            getWorkspaceFiles: () => this.explorer.getWorkspaceFiles(),
+            getWorkspaceFiles: async () => (await this.explorer.getWorkspaceFiles()) ?? [],
             recentFiles: this.recentFiles,
             recentFolders: this.recentFolders,
             onActivateTab: (tabId) => this.activateTab(tabId),
@@ -2262,7 +2263,7 @@ class SemyraApp {
     this.lintWorkspaceRefreshInFlight = workspaceRoot;
     try {
       const files = await this.explorer.getWorkspaceFiles();
-      if (this.sidebarSourceMode !== 'workspace' || this.explorer.rootPath !== workspaceRoot) return;
+      if (!files || this.sidebarSourceMode !== 'workspace' || this.explorer.rootPath !== workspaceRoot) return;
       this.cachedWorkspaceRootForLint = workspaceRoot;
       this.cachedWorkspaceRelPaths = files.map((f) => f.relPath);
       if (this.activeTab) {
@@ -4114,15 +4115,18 @@ class SemyraApp {
     });
 
     onBackendEvent('fs-changed', async ({ paths }) => {
+      const root = this.explorer.rootPath;
+      const workspaceChanged = root !== null && paths.some((path) => isSameOrDescendantPath(path, root));
+      if (workspaceChanged) {
+        this.workspaceSearch.refreshAfterFileChanges(paths);
+        this.explorer.invalidateFilesCache();
+        this.invalidateLintWorkspaceCache();
+        this.explorer.scheduleRefresh();
+      }
       const changedLower = new Set(paths.map((p) => p.toLowerCase()));
       await Promise.all(this.tabs
         .filter((tab) => tab.path && changedLower.has(tab.path.toLowerCase()))
         .map((tab) => this.syncTabFromDisk(tab)));
-
-      if (this.explorer.hasWorkspace) {
-        this.invalidateLintWorkspaceCache();
-        this.explorer.scheduleRefresh();
-      }
     });
 
     onBackendEvent('close-requested', () => this.documentClose.closeWindow());

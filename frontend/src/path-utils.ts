@@ -3,6 +3,13 @@
  * Markdown link resolution without Node `path` runtime dependencies.
  */
 
+export function isSameOrDescendantPath(path: string, root: string): boolean {
+  const normalize = (value: string) => value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const normalizedRoot = normalize(root);
+  const normalizedPath = normalize(path);
+  return normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}/`);
+}
+
 export function parentDirOfPath(filePath: string): string | null {
   const idx = Math.max(filePath.lastIndexOf('\\'), filePath.lastIndexOf('/'));
   if (idx <= 0) return null;

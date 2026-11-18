@@ -49,6 +49,7 @@ export class SidebarExplorerController {
   private deps: SidebarExplorerDeps;
   private workspaceTree: FileTreeNode | null = null;
   private workspaceFilesCache: WorkspaceFileEntry[] | null = null;
+  private workspaceFilesRevision = 0;
   private contextTarget: ContextMenuTarget | null = null;
   private loadSeq = 0;
   private refreshSeq = 0;
@@ -79,19 +80,23 @@ export class SidebarExplorerController {
 
   public invalidateFilesCache(): void {
     this.workspaceFilesCache = null;
+    ++this.workspaceFilesRevision;
   }
 
-  public async getWorkspaceFiles(): Promise<WorkspaceFileEntry[]> {
-    if (!this.workspaceTree) return [];
-    if (!this.workspaceFilesCache) {
-      try {
-        const res = await backend.listWorkspaceFiles(this.workspaceTree.path);
-        this.workspaceFilesCache = res.files;
-      } catch {
-        this.workspaceFilesCache = [];
-      }
+  public async getWorkspaceFiles(): Promise<WorkspaceFileEntry[] | null> {
+    const root = this.rootPath;
+    if (!root) return [];
+    while (this.rootPath === root) {
+      if (this.workspaceFilesCache) return this.workspaceFilesCache;
+      const revision = this.workspaceFilesRevision;
+      const files = await backend.listWorkspaceFiles(root)
+        .then((result) => result.files, () => null);
+      if (revision !== this.workspaceFilesRevision) continue;
+      if (!files) return [];
+      this.workspaceFilesCache = files;
+      return files;
     }
-    return this.workspaceFilesCache;
+    return null;
   }
 
   public async loadFolder(path: string, persistPrefs = true): Promise<void> {
@@ -136,7 +141,7 @@ export class SidebarExplorerController {
     const preservedOpenDirs = isSameRoot ? this.collectOpenDirStates() : null;
 
     this.workspaceTree = tree;
-    this.workspaceFilesCache = null;
+    this.invalidateFilesCache();
     if (persistPrefs || !isSameRoot) {
       this.deps.onWorkspaceFolderLoaded(tree.path, persistPrefs);
     }
@@ -199,7 +204,7 @@ export class SidebarExplorerController {
   public clearWorkspace(recentFolders: string[], recentFiles: string[]): void {
     ++this.loadSeq;
     this.workspaceTree = null;
-    this.workspaceFilesCache = null;
+    this.invalidateFilesCache();
     this.deps.workspaceTitleEl.textContent = t('sidebar.noFolder');
     this.deps.workspaceTitleEl.title = t('sidebar.noFolder');
     const newFileBtn = document.getElementById('btn-new-folder-file');

@@ -371,6 +371,7 @@ pub fn create_new_folder(parent_dir: &Path, folder_name: &str) -> Result<String,
 
 pub fn rename_fs_entry(target_path: &Path, new_name: &str) -> Result<(String, String), String> {
     let valid = validate_entry_name(new_name)?;
+    let _guard = super::encoding::lock_text_writes()?;
     let norm = normalize_existing_path(target_path);
     let Some(parent) = norm.parent() else {
         return Err("Stammverzeichnis kann nicht umbenannt werden.".to_string());
@@ -391,6 +392,7 @@ pub fn rename_fs_entry(target_path: &Path, new_name: &str) -> Result<(String, St
 }
 
 pub fn move_to_recycle_bin(target_path: &Path) -> Result<(), String> {
+    let _guard = super::encoding::lock_text_writes()?;
     let norm = normalize_existing_path(target_path);
     if !norm.exists() {
         return Err("Datei oder Ordner existiert nicht mehr.".to_string());

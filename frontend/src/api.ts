@@ -70,6 +70,7 @@ export interface SearchFileResult {
   name: string;
   relPath: string;
   matches: SearchMatchItem[];
+  contentVersion: string;
 }
 
 export interface UiSessionPrefs {
@@ -198,7 +199,7 @@ export const backend = {
     caseSensitive: boolean,
     useRegex = false,
     wholeWord = false,
-    includeFiles?: string[],
+    includeFiles?: Array<string | Pick<SearchFileResult, 'path' | 'contentVersion'>>,
   ) =>
     postJson<WorkspaceReplaceResult>('replace-workspace', {
       root,

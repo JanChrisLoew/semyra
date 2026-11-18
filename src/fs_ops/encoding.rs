@@ -149,7 +149,7 @@ pub fn write_text_file(path: &Path, content: &str, prefer_crlf: bool) -> Result<
 }
 
 #[cfg(not(test))]
-fn lock_text_writes() -> Result<fs::File, String> {
+pub(super) fn lock_text_writes() -> Result<fs::File, String> {
     // Keep the expected-content check and replacement together across Semyra windows.
     let lock = (|| -> std::io::Result<fs::File> {
         let dir = super::app_data_dir();
@@ -167,7 +167,7 @@ fn lock_text_writes() -> Result<fs::File, String> {
 }
 
 #[cfg(test)]
-fn lock_text_writes() -> Result<std::sync::MutexGuard<'static, ()>, String> {
+pub(super) fn lock_text_writes() -> Result<std::sync::MutexGuard<'static, ()>, String> {
     static TEXT_WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
     TEXT_WRITES.lock().map_err(|e| e.to_string())
 }
