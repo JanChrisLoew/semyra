@@ -7,6 +7,14 @@ Dieses Dokument dient als fortlaufendes Protokoll über Entwicklungssessions, we
 
 ---
 
+## 2026-11-18 — Installer-Abnahme in PR #1 und Open-With-Korrektur
+
+- **Umfang**: Die Härtungen und der Installer-Test wurden auf `codex/x64-pilot-hardening` in [PR #1](https://github.com/JanChrisLoew/semyra/pull/1) zusammengeführt.
+- **Erster CI-Lauf**: Frontend-Prüfungen, Playwright, Rust-Tests, ARM64-Kompiliercheck und x64-Build erfolgreich. Der Installer-Test schlug bei `OpenWithProgids` fehl. Inno Setup legte mit `ValueType: none` die Schlüssel an, schrieb aber die ProgID-Werte nicht.
+- **Korrektur**: `installer/Semyra.iss` registriert `Semyra.Document` für alle fünf Markdown-Endungen als leeren `REG_SZ`-Wert. `Build-Installer.ps1 -Architecture x64` baute das korrigierte Paket lokal erfolgreich. Die vollständige Prüfung wird auf dem aktualisierten PR-Commit wiederholt.
+
+---
+
 ## 2026-11-18 — x64-Installerprüfung in GitHub Actions
 
 - **Änderung**: `.github/workflows/ci.yml` baut und prüft den x64-Inno-Installer bei Pull Requests, Pushes auf `main` und Versions-Tags. Der bestehende Installer-Upload bleibt an Versions-Tags gebunden und folgt nach erfolgreicher Prüfung. Bei Fehlern werden vorhandene Setup- und Uninstall-Logs als Artefakt bereitgestellt.
