@@ -7,6 +7,46 @@ Dieses Dokument dient als fortlaufendes Protokoll über Entwicklungssessions, we
 
 ---
 
+## 2026-11-18 — Merge-Review des Dokumentlebenszyklus
+
+- **Recovery**: [PR #2](https://github.com/JanChrisLoew/semyra/pull/2) wurde nach erfolgreicher Windows-CI als `7aa2c0a` nach `main` übernommen.
+- **Review-Fix**: Der neue Fall in `frontend/e2e/file-safety.spec.ts` zeigte, dass beim Anheften eines bearbeiteten Tabs dessen Auto-Save ausblieb. `frontend/src/tab-utils.ts` behält beim Anheften und Lösen dieselbe Tab-Instanz, damit laufende Dateioperationen und geplante Timer zugeordnet bleiben. `frontend/src/__tests__/tab-utils.test.ts` prüft diese Objektidentität.
+- **Verifikation vor PR**: Der neue Playwright-Test schlug vor der Korrektur fehl und bestand danach. Typecheck, 193 Frontend-Tests, Vite-Build und alle 18 Playwright-Tests erfolgreich. Der vollständige Windows- und Installer-Lauf folgt im Refactoring-PR.
+
+---
+
+## 2026-11-18 — Refactoring des Speicherns und Schließens abgeschlossen
+
+- **Änderung**: `frontend/src/document-file-operations.ts` übernimmt jetzt das Schreiben, „Speichern unter“, den gespeicherten Versionsstand und die Invalidierung laufender Leseantworten nach erfolgreichem Speichern. `frontend/src/document-close.ts` koordiniert das Schließen von Tabs und Fenstern, einschließlich laufender Speicheraufträge, revidierter Dokumente und Wiederaufnahme von Auto-Save nach Abbruch. `frontend/src/document-state.ts` enthält auch die Regeln für Editoränderungen, Zeilenenden, Konfliktstatus und wiederhergestellte Entwürfe. `frontend/src/main.ts` verbindet die Module mit Editor, Dialogen, Navigation, Sitzungsdaten und Fenster-IPC.
+- **Verifikation**: Sieben zusätzliche Testfälle decken Abbruch und Erfolg von „Speichern unter“, externe Schreibkonflikte, gespeicherte und abgebrochene Schließabläufe sowie ältere Recovery-Drafts ab. Typecheck, 193 Frontend-Tests, Vite-Build, 17 Playwright-Tests, 42 Rust-Tests und ARM64-Kompiliercheck erfolgreich. `Build-Release.ps1` und Installer-Build wurden für das Refactoring nicht erneut ausgeführt.
+- **Stand**: Das Refactoring liegt lokal auf `codex/document-version-refactor`, basierend auf dem grünen Recovery-PR #2.
+
+---
+
+## 2026-11-18 — Auto-Save-Regeln und Timer ausgelagert
+
+- **Änderung**: `frontend/src/document-auto-save.ts` verwaltet Einstellung und 900-ms-Timer pro Dokument. Dieselbe Prüfung für Pfad, ungespeicherte Änderungen, Dateikonflikt und Schließzustand gilt beim Planen und unmittelbar vor dem automatischen Schreiben nach einem laufenden Speicherauftrag.
+- **Integration**: `frontend/src/main.ts` übergibt Konflikt-, Editor- und Schließereignisse an den Auto-Save-Controller. Beim Deaktivieren werden ausstehende Timer aller Tabs verworfen. Status, Einstellungen und Befehlspalette lesen den gemeinsamen Zustand. Der Stand liegt lokal auf `codex/document-version-refactor`.
+- **Verifikation**: Vier neue Tests in `frontend/src/__tests__/document-auto-save.test.ts` für unabhängige Timer, Deaktivierung, Ausschlussbedingungen und einen Konflikt während eines laufenden Schreibvorgangs. Typecheck, 186 Frontend-Tests, Vite-Build, 17 Playwright-Tests und 42 Rust-Tests erfolgreich. `Build-Release.ps1` wurde in diesem Schritt nicht ausgeführt.
+
+---
+
+## 2026-11-18 — Asynchrone Dokument-Operationen ausgelagert
+
+- **Änderung**: `frontend/src/document-file-operations.ts` verwaltet laufende Speichervorgänge pro Dokument und die Gültigkeit von Festplatten-Leseantworten. Speicheraufträge warten auf laufende Vorgänge, bevor sie den aktuellen Stand erfassen. Eine Leseantwort wird bei einem neueren Leseauftrag, nach erfolgreichem Speichern, beim Schließen oder bei einem Pfadwechsel verworfen. Die Entscheidung zum Umgang mit einer gültigen Antwort kommt aus `document-state.ts`.
+- **Integration**: `frontend/src/main.ts` verbindet Dateioperationen mit Editor, Auto-Save, Status und Schließdialogen. Die Zeitpunkte, an denen laufende Speichervorgänge beim Schließen abgewartet werden, bleiben erhalten. Der Refactoring-Stand liegt lokal auf `codex/document-version-refactor`.
+- **Verifikation**: Vier gezielte Fälle in `frontend/src/__tests__/document-file-operations.test.ts` prüfen aufeinanderfolgende Speicheraufträge, Lesen nach einem laufenden Speichern, veraltete Antworten nach Invalidierung und einen Pfadwechsel während des Lesens. Typecheck, 182 Frontend-Tests, Vite-Build, 17 Playwright-Tests und 42 Rust-Tests erfolgreich. `Build-Release.ps1` wurde für diesen Refactoring-Schritt nicht erneut ausgeführt.
+
+---
+
+## 2026-11-18 — Pilot-Härtungen zusammengeführt und Dokumentzustand ausgelagert
+
+- **GitHub**: [PR #1](https://github.com/JanChrisLoew/semyra/pull/1) wurde als `8c2cd1e` nach `main` übernommen. [PR #2](https://github.com/JanChrisLoew/semyra/pull/2) enthält den separaten Recovery-Test. [Windows-CI](https://github.com/JanChrisLoew/semyra/actions/runs/44298091024) bestätigte den Test nach hartem Prozessabbruch und die x64-Installer-Abnahme. PR #2 bleibt offen.
+- **Refactoring**: Der lokale Folgebranch `codex/document-version-refactor` lagert aus `frontend/src/main.ts` die Versionsfortschreibung, den gespeicherten Stand, den erwarteten Festplattenstand und die Entscheidung bei einem erneuten Lesen aus. `frontend/src/document-state.ts` enthält diese Regeln unabhängig von UI und IPC. `main.ts` steuert weiterhin asynchrone Dateiaufrufe, Editor, Dialoge und Auto-Save-Timer.
+- **Verifikation**: Sechs gezielte Fälle in `frontend/src/__tests__/document-state.test.ts`. Typecheck, 178 Frontend-Tests, Vite-Build, 17 Playwright-Tests und 42 Rust-Tests erfolgreich. `Build-Release.ps1` wurde für den lokalen Refactoring-Schritt nicht erneut ausgeführt.
+
+---
+
 ## 2026-11-18 — Recovery nach hartem Prozessabbruch automatisiert
 
 - **Änderung**: `src/drafts.rs` enthält einen Rust-Regressionstest mit zwei Kindprozessen und temporärem Profil. Der erste schreibt über `DraftStore` und signalisiert den abgeschlossenen Speichervorgang bei weiterhin gehaltener Dateisperre. Der Elternprozess beendet ihn hart. Ein zweiter Prozess öffnet den Speicher neu und vergleicht den gesamten wiederhergestellten Entwurf einschließlich Unicode-Text, Dateipfad, gespeichertem Stand und Zeilenendungsmetadaten.
