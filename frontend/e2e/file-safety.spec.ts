@@ -160,7 +160,9 @@ test('cancelling tab close resumes auto-save', async ({ page }) => {
 });
 
 test('discard confirmation does not include later edits', async ({ page }) => {
+  const startupPrefs = page.waitForResponse('**/api/prefs/save');
   const { editor } = await openDraft(page);
+  await startupPrefs;
   let finishPrefs: (() => void) | undefined;
   await page.route('**/api/prefs/save', async (route) => {
     await new Promise<void>((resolve) => { finishPrefs = resolve; });
@@ -169,7 +171,6 @@ test('discard confirmation does not include later edits', async ({ page }) => {
   await page.route('**/api/window/force-close', async (route) => {
     await route.fulfill({ json: { ok: true } });
   });
-  await page.clock.install();
   await editor.fill('Discard this');
   await page.evaluate(() => window.__semyraReceive?.('close-requested', {}));
   const discard = page.locator('#unsaved-dialog button[value="discard"]');

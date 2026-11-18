@@ -14,6 +14,7 @@ Dieses Dokument dient als fortlaufendes Protokoll über Entwicklungssessions, we
 - **Ordner-Ersetzen**: Dateisystemereignisse entwerten die Treffer sofort. Bei der Aktualisierung bleibt die Dateiauswahl erhalten. Die UI sendet die SHA-256-Prüfsummen der angezeigten Versionen. Rust überspringt geänderte, zu groß gewordene oder verschwundene Dateien und meldet sie im Ergebnis.
 - **Installer**: Der Windows-Upgrade-Test prüft einen Entwurf in `%LOCALAPPDATA%/Semyra/drafts/` vor und nach Upgrade und Deinstallation.
 - **Verifikation**: Typecheck, 201 Frontend-Tests, Vite-Build, 19 Playwright-Tests, 43 Rust-Tests, ARM64-Kompilierung und PowerShell-Parser-Prüfung erfolgreich. Der korrigierte Installer-Upgrade-Test läuft auf einem frischen Windows-Runner. `Build-Release.ps1` wurde lokal nicht ausgeführt.
+- **CI-Nachlauf**: Der Windows-Lauf `44353005003` bestand den neuen Playwright-Fall für die Ordnersuche, stoppte aber im älteren Schließtest. Der Test wartet nun auf die Einstellungsantwort vom Start, bevor er die Einstellungsanfrage beim Schließen gezielt verzögert.
 
 ---
 
