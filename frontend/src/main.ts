@@ -46,6 +46,7 @@ import { buildPaletteCommandItems, buildPaletteFileItems } from './palette-items
 import {
   baseNameOfPath,
   isMarkdownPath,
+  isSameOrDescendantPath,
   parentDirOfPath,
   resolveRelativeMarkdownPath,
 } from './path-utils';
@@ -4114,17 +4115,18 @@ class SemyraApp {
     });
 
     onBackendEvent('fs-changed', async ({ paths }) => {
-      this.workspaceSearch.refreshAfterFileChanges(paths);
-      if (this.explorer.hasWorkspace) this.explorer.invalidateFilesCache();
+      const root = this.explorer.rootPath;
+      const workspaceChanged = root !== null && paths.some((path) => isSameOrDescendantPath(path, root));
+      if (workspaceChanged) {
+        this.workspaceSearch.refreshAfterFileChanges(paths);
+        this.explorer.invalidateFilesCache();
+        this.invalidateLintWorkspaceCache();
+        this.explorer.scheduleRefresh();
+      }
       const changedLower = new Set(paths.map((p) => p.toLowerCase()));
       await Promise.all(this.tabs
         .filter((tab) => tab.path && changedLower.has(tab.path.toLowerCase()))
         .map((tab) => this.syncTabFromDisk(tab)));
-
-      if (this.explorer.hasWorkspace) {
-        this.invalidateLintWorkspaceCache();
-        this.explorer.scheduleRefresh();
-      }
     });
 
     onBackendEvent('close-requested', () => this.documentClose.closeWindow());

@@ -3,7 +3,7 @@ import { backend, FileTreeNode } from '../api';
 import { SidebarExplorerController } from '../sidebar-explorer';
 
 describe('SidebarExplorerController', () => {
-  it.each(['switch', 'refresh', 'clear'])('drops a pending index after %s', async (action) => {
+  it.each(['switch', 'refresh', 'clear'])('handles a pending index after %s', async (action) => {
     const explorer = new SidebarExplorerController({
       fileTreeEl: document.createElement('div'),
       workspaceTitleEl: document.createElement('span'),
@@ -31,7 +31,7 @@ describe('SidebarExplorerController', () => {
       else explorer.setTree(nextTree, false);
       finish({ files: [oldFile] });
 
-      await expect(pending).resolves.toBeNull();
+      await expect(pending).resolves.toEqual(action === 'refresh' ? [newFile] : null);
       await expect(explorer.getWorkspaceFiles()).resolves.toEqual(action === 'clear' ? [] : [newFile]);
     } finally {
       index.mockRestore();

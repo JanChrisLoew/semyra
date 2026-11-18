@@ -86,16 +86,17 @@ export class SidebarExplorerController {
   public async getWorkspaceFiles(): Promise<WorkspaceFileEntry[] | null> {
     const root = this.rootPath;
     if (!root) return [];
-    if (this.workspaceFilesCache) return this.workspaceFilesCache;
-    const revision = this.workspaceFilesRevision;
-    try {
-      const { files } = await backend.listWorkspaceFiles(root);
-      if (revision !== this.workspaceFilesRevision) return null;
+    while (this.rootPath === root) {
+      if (this.workspaceFilesCache) return this.workspaceFilesCache;
+      const revision = this.workspaceFilesRevision;
+      const files = await backend.listWorkspaceFiles(root)
+        .then((result) => result.files, () => null);
+      if (revision !== this.workspaceFilesRevision) continue;
+      if (!files) return [];
       this.workspaceFilesCache = files;
       return files;
-    } catch {
-      return [];
     }
+    return null;
   }
 
   public async loadFolder(path: string, persistPrefs = true): Promise<void> {

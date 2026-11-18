@@ -1,5 +1,6 @@
 import { backend, SearchFileResult, WorkspaceReplaceResult } from './api';
 import { getLanguage, t } from './i18n';
+import { isSameOrDescendantPath } from './path-utils';
 
 export interface WorkspaceSearchDeps {
   searchInputEl: HTMLInputElement;
@@ -99,13 +100,7 @@ export class WorkspaceSearchController {
 
   public refreshAfterFileChanges(paths: readonly string[]): void {
     const criteria = this.getSearchCriteria();
-    if (!criteria) return;
-    const normalize = (path: string) => path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
-    const root = normalize(criteria.rootPath);
-    if (!paths.some((path) => {
-      const normalized = normalize(path);
-      return normalized === root || normalized.startsWith(`${root}/`);
-    })) return;
+    if (!criteria || !paths.some((path) => isSameOrDescendantPath(path, criteria.rootPath))) return;
 
     const selected = this.selection?.files ?? this.refreshSelection;
     this.invalidateResults();

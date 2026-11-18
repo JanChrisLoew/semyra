@@ -7,6 +7,22 @@ Dieses Dokument dient als fortlaufendes Protokoll über Entwicklungssessions, we
 
 ---
 
+## 2026-11-18 — Schnellsuche nach Dateisystemereignissen stabilisiert
+
+- **Änderung**: `frontend/src/main.ts` verwendet denselben Pfadvergleich wie die Ordnersuche. Änderungen außerhalb des aktuellen Arbeitsordners entwerten dessen Index und Baum nicht mehr. `sidebar-explorer.ts` wiederholt eine entwertete Indexanfrage für denselben Ordner. Beim Wechsel oder Schließen des Ordners liefert die frühere Anfrage weiterhin keine Treffer.
+- **Verifikation**: Beide neuen Fälle in `frontend/e2e/quick-open.spec.ts` schlugen vor der Korrektur fehl und bestanden danach. Typecheck, 201 Frontend-Tests, Vite-Build und 21 Playwright-Tests waren lokal erfolgreich. Die Windows-CI führt Rust-Tests, ARM64-Kompiliercheck, x64-Build sowie Neuinstallation und Upgrade aus. `Build-Release.ps1` wurde für diese Frontend-Korrektur lokal nicht ausgeführt.
+
+---
+
+## 2026-11-18 — Abschlussreview von PR #5
+
+- **Umfang**: `e3dba32` gegen `e7f71e6` geprüft. Der PR enthält die Korrekturen für alte Schreibantworten, veraltete Ordnerdaten, versionsgebundenes Ersetzen und den tatsächlichen Recovery-Pfad im Installer-Test.
+- **P2**: `main.ts` entwertet den Arbeitsordnerindex auch bei einer Änderung einer geöffneten Datei außerhalb des Arbeitsordners. Läuft beim Öffnen der Schnellsuche gerade eine Indexanfrage, liefert `getWorkspaceFiles()` danach `null`. Die Palette zeigt für diesen Aufruf keine Arbeitsordnerdateien und startet keine weitere Anfrage. Im temporären Playwright-Vergleich erschien die erwartete Datei ohne das Ereignis und fehlte mit dem Ereignis.
+- **Verifikation**: Typecheck, 201 Frontend-Tests, Vite-Build, 19 reguläre Playwright-Tests, `cargo check --locked` und 43 Rust-Tests lokal erfolgreich. Die [Windows-CI für PR #5](https://github.com/JanChrisLoew/semyra/actions/runs/44354230079) bestätigte zusätzlich ARM64-Kompilierung sowie x64-Installation, Upgrade und Deinstallation. `Build-Release.ps1` wurde für das Review nicht ausgeführt.
+- **Entscheidung**: Vor dem Merge Ereignisse auf den aktiven Arbeitsordner begrenzen und entwertete Indexanfragen desselben Ordners für die geöffnete Schnellsuche wiederholen. Der temporäre Test wurde entfernt.
+
+---
+
 ## 2026-11-18 — Dateilebenszyklus, Ordnersuche und Upgrade-Test gehärtet
 
 - **Speichern**: `document-file-operations.ts` prüft nach der Antwort, ob der Tab noch offen ist und denselben Pfad hat. Das Backend verwendet beim Umbenennen und Verschieben in den Papierkorb dieselbe Sperre wie beim Schreiben.
@@ -15,6 +31,7 @@ Dieses Dokument dient als fortlaufendes Protokoll über Entwicklungssessions, we
 - **Installer**: Der Windows-Upgrade-Test prüft einen Entwurf in `%LOCALAPPDATA%/Semyra/drafts/` vor und nach Upgrade und Deinstallation.
 - **Verifikation**: Typecheck, 201 Frontend-Tests, Vite-Build, 19 Playwright-Tests, 43 Rust-Tests, ARM64-Kompilierung und PowerShell-Parser-Prüfung erfolgreich. Der korrigierte Installer-Upgrade-Test läuft auf einem frischen Windows-Runner. `Build-Release.ps1` wurde lokal nicht ausgeführt.
 - **CI-Nachlauf**: Der Windows-Lauf `44353005003` bestand den neuen Playwright-Fall für die Ordnersuche, stoppte aber im älteren Schließtest. Der Test wartet nun auf die Einstellungsantwort vom Start, bevor er die Einstellungsanfrage beim Schließen gezielt verzögert.
+- **Abschluss**: Der Schließtest bestand zehn lokale Wiederholungen. Die [Windows-CI für PR #5](https://github.com/JanChrisLoew/semyra/actions/runs/44354230079) für `e3dba32` war vollständig erfolgreich. Sie bestätigte Neuinstallation und x64-Upgrade mit bytegenauer Prüfung des Entwurfs im echten `drafts`-Ordner sowie Deinstallation.
 
 ---
 
