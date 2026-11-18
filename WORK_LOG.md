@@ -7,11 +7,21 @@ Dieses Dokument dient als fortlaufendes Protokoll über Entwicklungssessions, we
 
 ---
 
+## 2026-11-18 — Windows-CI für x64-Installer-Upgrades
+
+- **Änderung**: `.github/workflows/ci.yml` baut als Upgrade-Basis den fest gepinnten Pilotstand `8c2cd1e` in einem separaten Checkout. Der bestehende Test für Neuinstallation und Deinstallation bleibt erhalten.
+- **Prüfung**: `scripts/Test-Installer.ps1` installiert zuerst die Basis und dann das aktuelle Setup über denselben Eintrag. Der neue Installer übernimmt Zielordner und Explorer-Aufgaben. Unterschiedliche EXE-Hashes belegen den Austausch trotz gleicher Produktversion. Der Test prüft bytegenau, dass Einstellungen, Tabs, Recovery-Entwurf und Markdown-Datei Update und Deinstallation überstehen.
+- **Verifikation**: PowerShell-Parser, Workflow-YAML und `git diff --check` erfolgreich. Frontend-Tests, Rust-Tests, Release-Build und Installation laufen in der Windows-CI. `Build-Release.ps1` wurde lokal nicht aufgerufen.
+
+---
+
 ## 2026-11-18 — Merge-Review des Dokumentlebenszyklus
 
 - **Recovery**: [PR #2](https://github.com/JanChrisLoew/semyra/pull/2) wurde nach erfolgreicher Windows-CI als `7aa2c0a` nach `main` übernommen.
 - **Review-Fix**: Der neue Fall in `frontend/e2e/file-safety.spec.ts` zeigte, dass beim Anheften eines bearbeiteten Tabs dessen Auto-Save ausblieb. `frontend/src/tab-utils.ts` behält beim Anheften und Lösen dieselbe Tab-Instanz, damit laufende Dateioperationen und geplante Timer zugeordnet bleiben. `frontend/src/__tests__/tab-utils.test.ts` prüft diese Objektidentität.
-- **Verifikation vor PR**: Der neue Playwright-Test schlug vor der Korrektur fehl und bestand danach. Typecheck, 193 Frontend-Tests, Vite-Build und alle 18 Playwright-Tests erfolgreich. Der vollständige Windows- und Installer-Lauf folgt im Refactoring-PR.
+- **Verifikation vor dem Merge**: Der neue Playwright-Test schlug vor der Korrektur fehl und bestand danach. Typecheck, 193 Frontend-Tests, Vite-Build und alle 18 Playwright-Tests erfolgreich. Die [Windows-CI für PR #3](https://github.com/JanChrisLoew/semyra/actions/runs/44323264026) bestätigte zusätzlich 42 Rust-Tests, die ARM64-Kompilierung sowie Installation, Explorer-Registrierung und Deinstallation unter x64. [PR #3](https://github.com/JanChrisLoew/semyra/pull/3) wurde als `45ad425` nach `main` übernommen.
+- **Pilot-Build**: Typecheck, Frontend-Tests, Vite-Build, `cargo test --locked` und `cargo build --release --locked` waren auf `main` erfolgreich. `scripts/Build-Installer.ps1 -Architecture x64` erstellte den Installer. Die Release-Schritte liefen einzeln, damit `Build-Release.ps1` keine laufende Semyra-Instanz beendet. `target/release/Semyra.exe` und `target/installer/Semyra-Setup-x64.exe` tragen Produktversion `0.2.0`.
+- **Abschluss**: Die [Windows-CI für `45ad425` auf `main`](https://github.com/JanChrisLoew/semyra/actions/runs/44324107687) war ebenfalls vollständig erfolgreich, einschließlich x64-Installation und Deinstallation.
 
 ---
 
