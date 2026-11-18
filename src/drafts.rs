@@ -121,6 +121,13 @@ impl DraftStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{self, Read};
+    use std::process::{Child, Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    const RECOVERY_TEST_PROFILE: &str = "SEMYRA_TEST_RECOVERY_PROFILE";
+    const RECOVERY_TEST_ROLE: &str = "SEMYRA_TEST_RECOVERY_ROLE";
+    const UNSAVED_TEXT: &str = "# Ungespeicherter Entwurf\n\nGrüße aus Semyra 📝\n";
 
     fn draft(content: &str) -> DraftEntry {
         DraftEntry {
@@ -131,6 +138,99 @@ mod tests {
             saved_content: String::new(),
             line_ending: "LF".to_string(),
             saved_line_ending: None,
+        }
+    }
+
+    fn recovery_process(profile: &Path, role: &str) -> Command {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args(["--ignored", "--exact", "drafts::tests::recovery_subprocess"])
+            .env(RECOVERY_TEST_PROFILE, profile)
+            .env(RECOVERY_TEST_ROLE, role);
+        command
+    }
+
+    fn wait_until_saved(writer: &mut Child, ready_file: &Path) -> Result<(), String> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if ready_file.is_file() {
+                return Ok(());
+            }
+            if let Some(status) = writer.try_wait().map_err(|err| err.to_string())? {
+                return Err(format!("draft writer exited before saving: {status}"));
+            }
+            if Instant::now() >= deadline {
+                return Err("draft writer did not confirm the save within 10 seconds".into());
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn recovers_exact_draft_after_writer_process_is_killed() {
+        let profile = std::env::temp_dir().join(format!(
+            "semyra-recovery-crash-{}-{}",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir(&profile).unwrap();
+
+        let mut writer = recovery_process(&profile, "write")
+            .stdin(Stdio::piped())
+            .spawn()
+            .expect("start draft writer");
+        let saved = wait_until_saved(&mut writer, &profile.join("saved"));
+
+        // Keep the writer's stdin open so only terminating the process releases its draft lock.
+        let terminated = writer.kill();
+        let status = writer.wait().expect("wait for terminated draft writer");
+        saved.expect("writer must publish a persisted draft before termination");
+        terminated.expect("terminate the draft writer without a clean shutdown");
+        assert!(!status.success(), "draft writer must have exited abnormally");
+
+        let reader = recovery_process(&profile, "read")
+            .output()
+            .expect("start draft reader in a separate process");
+        fs::remove_dir_all(&profile).unwrap();
+        assert!(
+            reader.status.success(),
+            "draft reader failed: {}\n{}",
+            String::from_utf8_lossy(&reader.stdout),
+            String::from_utf8_lossy(&reader.stderr),
+        );
+    }
+
+    #[test]
+    #[ignore = "subprocess entry point for recovers_exact_draft_after_writer_process_is_killed"]
+    fn recovery_subprocess() {
+        let Some(profile) = std::env::var_os(RECOVERY_TEST_PROFILE).map(PathBuf::from) else {
+            return;
+        };
+        let mut expected = draft(UNSAVED_TEXT);
+        expected.path = Some(profile.join("Draft.md").to_string_lossy().into_owned());
+        expected.parent_dir = Some(profile.to_string_lossy().into_owned());
+        expected.saved_content = "# Gespeicherter Stand\n".into();
+        expected.line_ending = "CRLF".into();
+        expected.saved_line_ending = Some("LF".into());
+
+        let (mut store, recovered) = DraftStore::open(&profile).unwrap();
+        match std::env::var(RECOVERY_TEST_ROLE).as_deref() {
+            Ok("write") => {
+                assert!(recovered.is_empty());
+                store.save(1, vec![expected], true).unwrap();
+                fs::write(profile.join("saved"), []).unwrap();
+                // The parent keeps this pipe open until after it has terminated us.
+                let _ = io::stdin().read(&mut [0]).unwrap();
+                store.close(true);
+            }
+            Ok("read") => {
+                assert_eq!(
+                    serde_json::to_value(&recovered).unwrap(),
+                    serde_json::to_value([expected]).unwrap(),
+                );
+                store.close(true);
+            }
+            role => panic!("unexpected recovery test role: {role:?}"),
         }
     }
 

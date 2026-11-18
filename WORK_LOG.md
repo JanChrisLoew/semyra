@@ -7,11 +7,20 @@ Dieses Dokument dient als fortlaufendes Protokoll über Entwicklungssessions, we
 
 ---
 
+## 2026-11-18 — Recovery nach hartem Prozessabbruch automatisiert
+
+- **Änderung**: `src/drafts.rs` enthält einen Rust-Regressionstest mit zwei Kindprozessen und temporärem Profil. Der erste schreibt über `DraftStore` und signalisiert den abgeschlossenen Speichervorgang bei weiterhin gehaltener Dateisperre. Der Elternprozess beendet ihn hart. Ein zweiter Prozess öffnet den Speicher neu und vergleicht den gesamten wiederhergestellten Entwurf einschließlich Unicode-Text, Dateipfad, gespeichertem Stand und Zeilenendungsmetadaten.
+- **Verifikation**: Der neue Test bestand einzeln und in zehn Wiederholungen. `cargo test --locked` meldete 42 bestandene Tests. Der als Hilfseinstieg markierte Test wird von den Kindprozessen gezielt aufgerufen. Typecheck, 172 Frontend-Tests und Vite-Build erfolgreich. `Build-Release.ps1` und der Installer-Build wurden für diese reine Teständerung nicht ausgeführt.
+- **Integration**: Der bestehende CI-Schritt `cargo test --locked` führt den Test aus, sobald der Patch auf GitHub vorliegt. Der Test nutzt den produktiven Entwurfsspeicher ohne WebView2 oder Desktop-Automation. Der Recovery-Patch liegt lokal vor. PR #1 behält seinen geprüften Stand.
+
+---
+
 ## 2026-11-18 — Installer-Abnahme in PR #1 und Open-With-Korrektur
 
 - **Umfang**: Die Härtungen und der Installer-Test wurden auf `codex/x64-pilot-hardening` in [PR #1](https://github.com/JanChrisLoew/semyra/pull/1) zusammengeführt.
 - **Erster CI-Lauf**: Frontend-Prüfungen, Playwright, Rust-Tests, ARM64-Kompiliercheck und x64-Build erfolgreich. Der Installer-Test schlug bei `OpenWithProgids` fehl. Inno Setup legte mit `ValueType: none` die Schlüssel an, schrieb aber die ProgID-Werte nicht.
-- **Korrektur**: `installer/Semyra.iss` registriert `Semyra.Document` für alle fünf Markdown-Endungen als leeren `REG_SZ`-Wert. `Build-Installer.ps1 -Architecture x64` baute das korrigierte Paket lokal erfolgreich. Die vollständige Prüfung wird auf dem aktualisierten PR-Commit wiederholt.
+- **Korrektur**: `installer/Semyra.iss` registriert `Semyra.Document` für alle fünf Markdown-Endungen als leeren `REG_SZ`-Wert. `Build-Installer.ps1 -Architecture x64` baute das korrigierte Paket lokal erfolgreich.
+- **Erneuter CI-Lauf**: [GitHub Actions](https://github.com/JanChrisLoew/semyra/actions/runs/44286949706) war für `a01d041` vollständig grün. Die Job-Logs bestätigen die identische SHA-256 der installierten x64-EXE, die Explorer-Registrierung im Benutzerprofil und die Bereinigung nach der Deinstallation. Der PR bleibt zur Prüfung offen.
 
 ---
 
