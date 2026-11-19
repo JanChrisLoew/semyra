@@ -973,6 +973,11 @@
         <span id="ai-bundle-token-total" class="doc-stat-badge accent">0 Dateien · ~0 Tokens gesamt</span>
       </div>
       <div id="ai-bundle-list" class="ai-bundle-list scroller"></div>
+      <div id="ai-bundle-load-error" class="ai-bundle-message" hidden>
+        <p id="ai-bundle-load-alert" role="alert"></p>
+        <button type="button" id="btn-ai-bundle-retry" class="dialog-btn" data-i18n="aiBundle.retryLoad">Erneut laden</button>
+      </div>
+      <p id="ai-bundle-action-error" class="ai-bundle-message" role="alert" hidden></p>
       <div class="dialog-actions ai-bundle-footer">
         <button type="button" class="dialog-btn" command="close" commandfor="ai-bundle-dialog" data-i18n="aiBundle.cancelBtn">Abbrechen</button>
         <button type="button" id="btn-ai-bundle-copy" class="dialog-btn primary" data-i18n="aiBundle.copyBtn">Kontext kopieren</button>

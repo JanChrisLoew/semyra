@@ -2763,30 +2763,23 @@ class SemyraApp {
 
   private openAiBundleDialog(workspaceOnlyRoot?: string): void {
     const workspaceRootPath = workspaceOnlyRoot ?? this.explorer.rootPath;
-    void openAiBundleDialogModal({
+    openAiBundleDialogModal({
       tabs: workspaceOnlyRoot
         ? this.tabs.filter((tab) => tab.path && isSameOrDescendantPath(tab.path, workspaceOnlyRoot))
         : this.tabs,
       workspaceRootPath,
       onShowToast: (msg) => this.showToast(msg),
       onSaveBundle: async (bundleText) => {
-        try {
-          const res = await backend.saveFileDialog(
-            bundleText,
-            'ai-context.md',
-            workspaceRootPath,
-            this.activeTab?.lineEnding ?? 'LF',
-            getLanguage(),
-          );
-          if (res.saved && res.path) {
-            this.showToast(
-              t('toast.aiBundleSaved', { name: res.name ?? baseNameOfPath(res.path) }),
-            );
-          }
-        } catch (err) {
-          console.error('KI-Kontext-Bündel konnte nicht gespeichert werden:', err);
-          this.showToast(t('toast.saveFailed'));
-        }
+        const res = await backend.saveFileDialog(
+          bundleText,
+          'ai-context.md',
+          workspaceRootPath,
+          this.activeTab?.lineEnding ?? 'LF',
+          getLanguage(),
+        );
+        return res.saved && res.path
+          ? t('toast.aiBundleSaved', { name: res.name ?? baseNameOfPath(res.path) })
+          : null;
       },
     });
   }

@@ -63,6 +63,14 @@ async function openWorkspace(page: Page) {
   await expect(editor).toHaveText(editedInstructions);
 }
 
+async function openWorkspaceBundle(page: Page) {
+  await page.locator('#workspace-title').click({ button: 'right' });
+  await page.locator('#tree-context-menu').getByRole('button', { name: 'KI-Kontext bündeln…' }).click();
+  const bundle = page.getByRole('dialog', { name: 'KI-Kontext bündeln' });
+  await expect(bundle).toBeVisible();
+  return bundle;
+}
+
 test('bundles the selected tab and workspace files as XML from the command palette', async ({ page }) => {
   await openWorkspace(page);
 
@@ -96,9 +104,7 @@ test('bundles unopened workspace documents from the workspace context menu', asy
   await loadWorkspace(page, []);
   await expect(page.getByRole('tab', { name: 'Willkommen.md', exact: true })).toBeVisible();
 
-  await page.locator('#workspace-title').click({ button: 'right' });
-  await page.locator('#tree-context-menu').getByRole('button', { name: 'KI-Kontext bündeln…' }).click();
-  const bundle = page.getByRole('dialog', { name: 'KI-Kontext bündeln' });
+  const bundle = await openWorkspaceBundle(page);
   const copy = bundle.getByRole('button', { name: 'Kontext kopieren' });
 
   await expect(bundle.getByRole('checkbox', { name: /Willkommen\.md/ })).toHaveCount(0);
@@ -114,6 +120,94 @@ test('bundles unopened workspace documents from the workspace context menu', asy
     '<file path="AGENTS.md">', agents.content, '</file>', '',
     '<file path="docs/PRODUCT_CONTEXT.md">', productContext.content, '</file>', '',
   ].join('\n'));
+});
+
+test('retries a failed workspace listing inside the bundle dialog', async ({ page }) => {
+  await loadWorkspace(page, []);
+  await expect(page.getByRole('tab', { name: 'Willkommen.md', exact: true })).toBeVisible();
+  await page.route('**/api/workspace-files', (route) => route.fulfill({
+    status: 500, json: { error: 'Test listing failure' },
+  }), { times: 1 });
+  const bundle = await openWorkspaceBundle(page);
+  await expect(bundle.getByRole('alert')).toHaveText('Die Dateien aus dem Arbeitsordner konnten nicht geladen werden.');
+  await expect(bundle.getByText('Keine Dateien zum Bündeln verfügbar.')).toHaveCount(0);
+
+  await bundle.getByRole('button', { name: 'Erneut laden' }).click();
+  await expect(bundle.getByRole('checkbox', { name: /^AGENTS\.md/ })).toBeVisible();
+  await expect(bundle.getByRole('alert')).toHaveCount(0);
+});
+
+test('preserves selection after a clipboard error and copies on retry', async ({ page }) => {
+  await loadWorkspace(page, []);
+  await expect(page.getByRole('tab', { name: 'Willkommen.md', exact: true })).toBeVisible();
+  await page.evaluate(() => {
+    const writeText = navigator.clipboard.writeText;
+    let attempts = 0;
+    navigator.clipboard.writeText = async (text) => {
+      if (++attempts === 1) throw new Error('Test clipboard unavailable');
+      await writeText(text);
+    };
+  });
+  const bundle = await openWorkspaceBundle(page);
+  const selected = bundle.getByRole('checkbox', { name: /^AGENTS\.md/ });
+  const copy = bundle.getByRole('button', { name: 'Kontext kopieren' });
+  await selected.check();
+  await copy.click();
+  await expect(bundle.getByRole('alert')).toContainText('konnte nicht in die Zwischenablage kopiert werden');
+  await expect(selected).toBeChecked();
+
+  await copy.click();
+  await expect(bundle).toBeHidden();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(agents.content);
+});
+
+test('reports unreadable selected files and leaves the selection available for retry', async ({ page }) => {
+  await loadWorkspace(page, []);
+  let readable = false;
+  await page.route('**/api/read-file', async (route) => {
+    if (readable) await route.fallback();
+    else await route.fulfill({ status: 500, json: { error: 'Test file unavailable' } });
+  });
+  const bundle = await openWorkspaceBundle(page);
+  const selected = bundle.getByRole('checkbox', { name: /^AGENTS\.md/ });
+  const copy = bundle.getByRole('button', { name: 'Kontext kopieren' });
+  await selected.check();
+  await copy.click();
+  await expect(bundle.getByRole('alert')).toContainText('Eine ausgewählte Datei konnte nicht gelesen werden');
+  await expect(selected).toBeChecked();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('');
+
+  readable = true;
+  await copy.click();
+  await expect(bundle).toBeHidden();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(agents.content);
+});
+
+test('keeps the bundle open after a canceled or failed save', async ({ page }) => {
+  await loadWorkspace(page, []);
+  let attempts = 0;
+  await page.route('**/api/dialog/save-file', (route) => {
+    switch (++attempts) {
+      case 1: return route.fulfill({ json: { saved: false } });
+      case 2: return route.fulfill({ status: 500, json: { error: 'Test write failure' } });
+      default: return route.fulfill({ json: { saved: true, path: workspace + '\\ai-context.md' } });
+    }
+  });
+  const bundle = await openWorkspaceBundle(page);
+  const selected = bundle.getByRole('checkbox', { name: /^AGENTS\.md/ });
+  const save = bundle.getByRole('button', { name: 'Als Datei speichern' });
+  await selected.check();
+  await save.click();
+  await expect.poll(() => attempts).toBe(1);
+  await expect(save).toBeEnabled();
+  await expect(selected).toBeChecked();
+  await expect(bundle.getByRole('alert')).toHaveCount(0);
+
+  await save.click();
+  await expect(bundle.getByRole('alert')).toContainText('Der KI-Kontext konnte nicht gespeichert werden');
+  await save.click();
+  await expect(bundle).toBeHidden();
+  await expect(page.getByText('KI-Kontext-Bündel gespeichert: ai-context.md')).toBeVisible();
 });
 
 test('Control+Shift+A copies only the active tab as Markdown context', async ({ page }) => {

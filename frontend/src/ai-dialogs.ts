@@ -22,7 +22,7 @@ export interface AiBundleDialogDeps {
   tabs: AiBundleTabInfo[];
   workspaceRootPath: string | null;
   onShowToast: (msg: string) => void;
-  onSaveBundle?: (bundleText: string) => Promise<void> | void;
+  onSaveBundle?: (bundleText: string) => Promise<string | null>;
 }
 
 export interface PromptVariablesDialogOptions {
@@ -68,14 +68,31 @@ function bindDialogReturnValueReset(dialog: HTMLDialogElement): void {
  * Opens the Multi-File AI Context Bundler modal allowing selection, ordering,
  * filtering, formatting, and token-budget inspection of open tabs and workspace files.
  */
-export async function openAiBundleDialogModal(deps: AiBundleDialogDeps): Promise<void> {
+const aiBundleSessions = new WeakMap<HTMLDialogElement, symbol>();
+
+export function openAiBundleDialogModal(deps: AiBundleDialogDeps): void {
   const dialog = document.getElementById('ai-bundle-dialog') as HTMLDialogElement | null;
   const listEl = document.getElementById('ai-bundle-list');
   const totalEl = document.getElementById('ai-bundle-token-total');
   const copyBtn = document.getElementById('btn-ai-bundle-copy') as HTMLButtonElement | null;
+  const loadError = document.getElementById('ai-bundle-load-error');
+  const loadAlert = document.getElementById('ai-bundle-load-alert');
+  const retryBtn = document.getElementById('btn-ai-bundle-retry') as HTMLButtonElement | null;
+  const actionError = document.getElementById('ai-bundle-action-error');
   const selectAllBtn = document.getElementById('btn-ai-bundle-select-all');
   const selectNoneBtn = document.getElementById('btn-ai-bundle-select-none');
-  if (!dialog || !listEl || !totalEl || !copyBtn) return;
+  if (!dialog || dialog.open || !listEl || !totalEl || !copyBtn
+      || !loadError || !loadAlert || !retryBtn || !actionError) return;
+
+  const session = Symbol();
+  aiBundleSessions.set(dialog, session);
+  const isCurrent = () => dialog.open && aiBundleSessions.get(dialog) === session;
+  loadError.hidden = true;
+  loadAlert.textContent = '';
+  actionError.hidden = true;
+  actionError.textContent = '';
+  let listing = false;
+  let outputPending = false;
 
   bindDialogReturnValueReset(dialog);
   const isEn = getLanguage() === 'en';
@@ -287,29 +304,6 @@ export async function openAiBundleDialogModal(deps: AiBundleDialogDeps): Promise
     tokensText: `~${estimateTokens(tab.currentContent).toLocaleString(locale)} Tokens`,
   }));
 
-  if (deps.workspaceRootPath) {
-    try {
-      const openPaths = new Set(
-        deps.tabs.map((tab) => tab.path?.toLowerCase()).filter((p): p is string => Boolean(p)),
-      );
-      const { files: wsFiles } = await backend.listWorkspaceFiles(deps.workspaceRootPath);
-      for (const wf of wsFiles) {
-        if (openPaths.has(wf.path.toLowerCase())) continue;
-        items.push({
-          key: `ws:${wf.path}`,
-          name: wf.name,
-          subtitle: wf.relPath,
-          content: null,
-          filePath: wf.path,
-          checked: false,
-          tokensText: isEn ? 'Workspace' : 'Ordner',
-        });
-      }
-    } catch {
-      // Non-fatal: continue with open tabs only
-    }
-  }
-
   const getBundleLabel = (item: SelectableItem): string =>
     toWorkspaceRelativeLabel(item.filePath, deps.workspaceRootPath, item.name);
 
@@ -331,8 +325,8 @@ export async function openAiBundleDialogModal(deps: AiBundleDialogDeps): Promise
       count: String(selected.length),
       tokens: knownTokens.toLocaleString(locale),
     });
-    copyBtn.disabled = selected.length === 0;
-    if (saveBtn) saveBtn.disabled = selected.length === 0;
+    copyBtn.disabled = outputPending || selected.length === 0;
+    if (saveBtn) saveBtn.disabled = copyBtn.disabled;
 
     // Update token budget meter (strictly neutral / Steel Blue / subtle Teal — never Amber)
     const budgetLimit = Number(budgetSelect?.value ?? 128000) || 128000;
@@ -362,6 +356,7 @@ export async function openAiBundleDialogModal(deps: AiBundleDialogDeps): Promise
     if (item.content !== null || !item.filePath) return;
     try {
       const file = await backend.readFile(item.filePath);
+      if (!isCurrent()) return;
       item.content = file.content;
       item.tokensText = `~${estimateTokens(file.content).toLocaleString(locale)} Tokens`;
       const el = itemTokEls.get(item.key);
@@ -388,9 +383,10 @@ export async function openAiBundleDialogModal(deps: AiBundleDialogDeps): Promise
 
     const visibleItems = getFilteredItems();
     if (items.length === 0) {
+      if (!loadError.hidden) return;
       const empty = document.createElement('p');
       empty.className = 'lint-empty-state';
-      empty.textContent = t('aiBundle.empty');
+      empty.textContent = t(listing ? 'aiBundle.loading' : 'aiBundle.empty');
       listEl.appendChild(empty);
       return;
     }
@@ -548,6 +544,7 @@ export async function openAiBundleDialogModal(deps: AiBundleDialogDeps): Promise
 
   const buildSelectedBundle = async () => {
     const chosen = items.filter((item) => item.checked);
+    const options = getBundleOptions();
     const entries = await Promise.all(
       chosen.map(async (item) => {
         const label = getBundleLabel(item);
@@ -562,51 +559,106 @@ export async function openAiBundleDialogModal(deps: AiBundleDialogDeps): Promise
         return { label, content: '' };
       }),
     );
-    return buildAiContextBundle(entries, getBundleOptions());
+    return buildAiContextBundle(entries, options);
   };
 
-  copyBtn.onclick = async () => {
-    const chosen = items.filter((item) => item.checked);
-    if (chosen.length === 0) return;
+  const loadWorkspaceFiles = async () => {
+    const root = deps.workspaceRootPath;
+    if (!root || listing || !isCurrent()) return;
+    listing = true;
+    if (document.activeElement === retryBtn) filterInput?.focus();
+    loadError.hidden = true;
+    loadAlert.textContent = '';
+    listEl.setAttribute('aria-busy', 'true');
+    renderList();
+    try {
+      const { files } = await backend.listWorkspaceFiles(root);
+      if (!isCurrent()) return;
+      const openPaths = new Set(items.map((item) => item.filePath?.toLowerCase()));
+      for (const file of files) {
+        if (openPaths.has(file.path.toLowerCase())) continue;
+        items.push({
+          key: `ws:${file.path}`,
+          name: file.name,
+          subtitle: file.relPath,
+          content: null,
+          filePath: file.path,
+          checked: false,
+          tokensText: isEn ? 'Workspace' : 'Ordner',
+        });
+      }
+    } catch (err) {
+      if (!isCurrent()) return;
+      console.error('Could not list workspace files for AI context:', err);
+      loadError.hidden = false;
+      loadAlert.textContent = t('aiBundle.loadFailed');
+    } finally {
+      listing = false;
+      if (isCurrent()) {
+        listEl.removeAttribute('aria-busy');
+        renderList();
+        refreshSummary();
+      }
+    }
+  };
+  retryBtn.onclick = () => { void loadWorkspaceFiles(); };
+
+  const runOutput = async (
+    output: (bundle: ReturnType<typeof buildAiContextBundle>) => Promise<string | null>,
+    outputErrorKey: string,
+  ) => {
+    if (outputPending || !items.some((item) => item.checked)) return;
+    outputPending = true;
+    actionError.hidden = true;
+    actionError.textContent = '';
+    refreshSummary();
+    let errorKey = 'aiBundle.readFailed';
     try {
       const bundle = await buildSelectedBundle();
-      await navigator.clipboard.writeText(bundle.payload);
-      dialog.close();
-      deps.onShowToast(
-        t('toast.bundleAiSuccess', {
-          count: String(bundle.fileCount),
-          tokens: bundle.totalTokens.toLocaleString(locale),
-        }),
-      );
+      if (!isCurrent()) return;
+      errorKey = outputErrorKey;
+      const message = await output(bundle);
+      if (isCurrent() && message) {
+        dialog.close();
+        deps.onShowToast(message);
+      }
     } catch (err) {
-      console.error('KI-Kontext-Bundle konnte nicht kopiert werden:', err);
-      deps.onShowToast(t('toast.copyFailed'));
+      if (!isCurrent()) return;
+      console.error('Could not export AI context:', err);
+      actionError.hidden = false;
+      actionError.textContent = t(errorKey);
+    } finally {
+      outputPending = false;
+      if (isCurrent()) refreshSummary();
     }
   };
 
+  copyBtn.onclick = () => runOutput(async (bundle) => {
+    await navigator.clipboard.writeText(bundle.payload);
+    return t('toast.bundleAiSuccess', {
+      count: String(bundle.fileCount),
+      tokens: bundle.totalTokens.toLocaleString(locale),
+    });
+  }, 'aiBundle.copyFailed');
+
+  const saveBundle = deps.onSaveBundle;
   if (saveBtn) {
-    saveBtn.onclick = async () => {
-      const chosen = items.filter((item) => item.checked);
-      if (chosen.length === 0 || !deps.onSaveBundle) return;
-      try {
-        const bundle = await buildSelectedBundle();
-        await deps.onSaveBundle(bundle.payload);
-        dialog.close();
-      } catch (err) {
-        console.error('KI-Kontext-Bundle konnte nicht gespeichert werden:', err);
-        deps.onShowToast(isEn ? 'Could not save bundle.' : 'Bundle konnte nicht gespeichert werden.');
-      }
-    };
+    saveBtn.onclick = saveBundle
+      ? () => runOutput((bundle) => saveBundle(bundle.payload), 'aiBundle.saveFailed')
+      : null;
   }
 
+  listEl.removeAttribute('aria-busy');
   renderList();
   refreshSummary();
   try {
     dialog.showModal();
     const initialFocus =
       listEl.querySelector<HTMLElement>('input[type="checkbox"]:not(:disabled)') ??
+      filterInput ??
       dialog.querySelector<HTMLElement>('button:not(:disabled)');
     initialFocus?.focus();
+    void loadWorkspaceFiles();
   } catch {}
 }
 

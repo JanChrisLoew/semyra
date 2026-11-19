@@ -906,6 +906,15 @@ dialog.modal-dialog.external-diff-dialog {
   background: var(--color-teal-subtle);
 }
 
+.ai-bundle-message {
+  margin: 0 18px 8px;
+  color: var(--danger);
+}
+
+.ai-bundle-message p {
+  margin: 0 0 6px;
+}
+
 .ai-bundle-list {
   display: flex;
   flex-direction: column;

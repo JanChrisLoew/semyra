@@ -62,6 +62,7 @@ try {
         Write-Host ""
         Write-Host "==> [6/6] Inno-Setup Installer bauen (-Installer aktiviert)..." -ForegroundColor Cyan
         & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "Build-Installer.ps1")
+        if ($LASTEXITCODE -ne 0) { throw "Installer-Build fehlgeschlagen (Exitcode $LASTEXITCODE)." }
     }
 }
 finally {
