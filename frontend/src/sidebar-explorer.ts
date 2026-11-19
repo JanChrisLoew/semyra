@@ -37,6 +37,7 @@ export interface SidebarExplorerDeps {
   onCopyAtPath?: (entryPath: string) => Promise<void> | void;
   onScaffoldAgents?: (targetDir: string) => Promise<void> | void;
   onScaffoldSkill?: (targetDir: string) => Promise<void> | void;
+  onBundleWorkspace?: (rootPath: string) => void;
 }
 
 export type SidebarExplorerCallbacks = SidebarExplorerDeps;
@@ -600,6 +601,9 @@ export class SidebarExplorerController {
     this.deps.fileTreeEl.addEventListener('contextmenu', (e) => {
       this.openContextMenu(e);
     });
+    this.deps.workspaceTitleEl.addEventListener('contextmenu', (e) => {
+      this.openContextMenu(e);
+    });
 
     this.deps.contextPopoverEl.addEventListener('toggle', (evt: Event) => {
       const toggleEvt = evt as unknown as { newState?: string };
@@ -660,7 +664,7 @@ export class SidebarExplorerController {
 
     this.deps.contextPopoverEl.addEventListener('click', (e) => {
       const actionBtn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-ctx-action]');
-      if (!actionBtn || actionBtn.disabled || !this.contextTarget) return;
+      if (!actionBtn || actionBtn.disabled || actionBtn.hidden || !this.contextTarget) return;
 
       const target = this.contextTarget;
       const action = actionBtn.dataset.ctxAction;
@@ -680,6 +684,9 @@ export class SidebarExplorerController {
         void this.deps.onScaffoldAgents?.(target.parentDir);
       } else if (action === 'scaffold-skill') {
         void this.deps.onScaffoldSkill?.(target.parentDir);
+      } else if (action === 'bundle-workspace' && target.isWorkspaceRoot
+          && !this.isAiLibraryMode && target.path === this.rootPath) {
+        this.deps.onBundleWorkspace?.(target.path);
       } else if (action === 'delete' && !target.isWorkspaceRoot) {
         void this.confirmMoveToRecycleBin(target);
       }
@@ -790,6 +797,10 @@ export class SidebarExplorerController {
     const deleteBtn = document.getElementById('ctx-btn-delete') as HTMLButtonElement | null;
     if (renameBtn) renameBtn.disabled = this.contextTarget.isWorkspaceRoot;
     if (deleteBtn) deleteBtn.disabled = this.contextTarget.isWorkspaceRoot;
+    const bundleBtn = this.deps.contextPopoverEl.querySelector<HTMLButtonElement>('[data-ctx-action="bundle-workspace"]');
+    if (bundleBtn) {
+      bundleBtn.hidden = !this.contextTarget.isWorkspaceRoot || this.isAiLibraryMode || !this.deps.onBundleWorkspace;
+    }
 
     this.deps.contextPopoverEl.style.left = `${e.clientX}px`;
     this.deps.contextPopoverEl.style.top = `${e.clientY}px`;
@@ -803,7 +814,7 @@ export class SidebarExplorerController {
       this.deps.contextPopoverEl.style.top = `${clampedTop}px`;
 
       const firstItem = this.deps.contextPopoverEl.querySelector<HTMLButtonElement>(
-        '[focusgroup~="menu"] > button:not(:disabled)',
+        '[focusgroup~="menu"] > button:not(:disabled, [hidden])',
       );
       firstItem?.focus();
     });

@@ -7,10 +7,38 @@ Dieses Dokument dient als fortlaufendes Protokoll über Entwicklungssessions, we
 
 ---
 
+## 2026-11-19 — Fehlermeldungen im KI-Kontext und Installer-Exitcode
+
+- **Dialog**: `frontend/src/ai-dialogs.ts`, `main.ts`, `index.html`, `i18n.ts` und `styles/dialogs-print.css` zeigen DE/EN-Fehlermeldungen direkt im Dialog. Die Ordnerliste kann dort erneut geladen werden. Lese-, Kopier- und Schreibfehler sowie ein abgebrochener Speicherdialog lassen die Auswahl bestehen. Späte Antworten wirken nur auf ihren ursprünglichen Dialogaufruf.
+- **Release**: `scripts/Build-Release.ps1` prüft den Exitcode des Installer-Kindprozesses. Ein temporärer Test mit Kind-Exitcode 23 bestätigte einen fehlgeschlagenen Release-Aufruf und die Ausgabe des ursprünglichen Codes.
+- **Verifikation**: `Build-Release.ps1 -Installer` mit explizitem ISCC-Verzeichnis im Prozesspfad erfolgreich einschließlich Typecheck, 201 Frontend-Tests, Vite-Build, 43 Rust-Tests, x64-EXE und x64-Installer. Alle 26 Playwright-Tests bestanden, darunter vier neue Tests für Ordnerliste, Lesen, Kopieren und Speichern. Windows-CI prüft den aktualisierten PR.
+
+---
+
+## 2026-11-19 — Sprint-Review zum KI-Kontext
+
+- **Ergebnis**: Der neue Arbeitsordner-Einstieg erfüllt den vereinbarten Ablauf. Der Test prüft zwei ungeöffnete Dateien, die gewählte Teilmenge, relative Pfade und exakte Inhalte. Der lokale Pilot enthält die Produktänderung. Die tatsächliche Auffindbarkeit für neue Nutzer wurde in diesem Sprint nicht gemessen.
+- **P2**: Bei einem Fehler beim Lesen einer ausgewählten Datei oder Schreiben in die Zwischenablage bleibt der Bündel-Dialog ohne sichtbare Fehlermeldung offen. `main.ts` blendet globale Toasts bei geöffnetem Dialog aus. Eine simulierte Ablehnung der Zwischenablage bestätigte den Befund. Auch ein fehlgeschlagener Arbeitsordnerindex wird derzeit wie eine leere Dateiliste behandelt. Vor dem Merge Fehlermeldungen im Dialog anzeigen und einen erneuten Versuch ermöglichen.
+- **Build-Folgepunkt**: `Build-Release.ps1 -Installer` gab trotz fehlgeschlagenem Inno-Kindprozess Exitcode 0 zurück. Der separate Installer-Build mit explizitem Compilerpfad lief anschließend erfolgreich. Installer-Exitcode künftig im Release-Skript prüfen.
+- **Verifikation**: Typecheck, 201 Frontend-Tests, Vite-Build, 22 reguläre Playwright-Tests, `cargo check --locked` und 43 Rust-Tests beim Review erneut erfolgreich. Die grüne Windows-CI gehört zu `5a98d20`. Der Pilot wurde für das Review nicht neu gebaut. Der temporäre Fehlertest wurde entfernt.
+
+---
+
+## 2026-11-19 — KI-Kontext aus dem Arbeitsordner
+
+- **Änderung**: Teilen-Menü und Befehlspalette verwenden „KI-Kontext bündeln…“. Der Arbeitsordner bietet dieselbe Aktion im Kontextmenü seines Namens und der freien Fläche im Dateibaum. Dieser Einstieg zeigt Dateien aus dem Arbeitsordner und übernimmt den aktuellen Inhalt offener Arbeitsordner-Tabs. Willkommen und Tabs aus anderen Ordnern bleiben außerhalb dieser Auswahl.
+- **Integration**: `frontend/index.html`, `main.ts`, `sidebar-explorer.ts`, `palette-items.ts`, `i18n.ts` und `styles/sidebar.css` verwenden den bestehenden Dialog und die gemeinsame DE/EN-Beschriftung. Das README nennt die drei Einstiege.
+- **Verifikation**: Typecheck, 201 Frontend-Tests, Vite-Build, 22 Playwright-Tests und 43 Rust-Tests erfolgreich. Der neue Headless-Fall in `frontend/e2e/ai-context.spec.ts` kopiert zwei ungeöffnete Dateien als XML und prüft die exakten relativen Pfade und Inhalte.
+- **Pilot**: `Build-Release.ps1 -Installer` baute die x64-EXE, der Installer-Schritt fand ISCC im Kindprozess nicht. Mit explizitem Compiler-Verzeichnis im Prozesspfad lief `Build-Installer.ps1 -Architecture x64` erfolgreich. EXE und Setup wurden lokal auf Produktversion `0.2.0`, Zeitstempel und SHA-256 geprüft.
+- **Abschluss**: Die [Windows-CI für PR #6](https://github.com/JanChrisLoew/semyra/actions/runs/44479442539) bestätigte `5a98d20` einschließlich 22 Playwright-Tests, 43 Rust-Tests, ARM64-Kompilierung sowie x64-Neuinstallation, Upgrade und Deinstallation. Der lokale ARM64-Kompiliercheck war ebenfalls erfolgreich.
+
+---
+
 ## 2026-11-18 — Schnellsuche nach Dateisystemereignissen stabilisiert
 
 - **Änderung**: `frontend/src/main.ts` verwendet denselben Pfadvergleich wie die Ordnersuche. Änderungen außerhalb des aktuellen Arbeitsordners entwerten dessen Index und Baum nicht mehr. `sidebar-explorer.ts` wiederholt eine entwertete Indexanfrage für denselben Ordner. Beim Wechsel oder Schließen des Ordners liefert die frühere Anfrage weiterhin keine Treffer.
-- **Verifikation**: Beide neuen Fälle in `frontend/e2e/quick-open.spec.ts` schlugen vor der Korrektur fehl und bestanden danach. Typecheck, 201 Frontend-Tests, Vite-Build und 21 Playwright-Tests waren lokal erfolgreich. Die Windows-CI führt Rust-Tests, ARM64-Kompiliercheck, x64-Build sowie Neuinstallation und Upgrade aus. `Build-Release.ps1` wurde für diese Frontend-Korrektur lokal nicht ausgeführt.
+- **Verifikation**: Beide neuen Fälle in `frontend/e2e/quick-open.spec.ts` schlugen vor der Korrektur fehl und bestanden danach jeweils fünf weitere Wiederholungen. Typecheck, 201 Frontend-Tests, Vite-Build, 21 Playwright-Tests, 43 Rust-Tests und ARM64-Kompiliercheck waren lokal erfolgreich. Die [Windows-CI](https://github.com/JanChrisLoew/semyra/actions/runs/44358329265) bestätigte zusätzlich x64-Neuinstallation, Upgrade mit Recovery-Entwurf und Deinstallation. `Build-Release.ps1` wurde lokal nicht ausgeführt.
+- **Merge**: [PR #5](https://github.com/JanChrisLoew/semyra/pull/5) wurde als `0336733` nach `main` übernommen. Der lokale Stand wurde per Fast-forward aktualisiert und entspricht dem in CI geprüften Quellbaum von `ef3cb81`.
 
 ---
 

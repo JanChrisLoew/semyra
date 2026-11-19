@@ -327,6 +327,7 @@ class SemyraApp {
       onScaffoldSkill: (targetDir) => {
         this.scaffoldWorkspaceSkill(targetDir);
       },
+      onBundleWorkspace: (rootPath) => this.openAiBundleDialog(rootPath),
     });
 
     this.workspaceSearch = new WorkspaceSearchController({
@@ -2760,29 +2761,25 @@ class SemyraApp {
     this.explorer.openNewSkillDialog(`${cleanRoot}${sep}.agents${sep}skills`);
   }
 
-  private openAiBundleDialog(): void {
-    void openAiBundleDialogModal({
-      tabs: this.tabs,
-      workspaceRootPath: this.explorer.rootPath,
+  private openAiBundleDialog(workspaceOnlyRoot?: string): void {
+    const workspaceRootPath = workspaceOnlyRoot ?? this.explorer.rootPath;
+    openAiBundleDialogModal({
+      tabs: workspaceOnlyRoot
+        ? this.tabs.filter((tab) => tab.path && isSameOrDescendantPath(tab.path, workspaceOnlyRoot))
+        : this.tabs,
+      workspaceRootPath,
       onShowToast: (msg) => this.showToast(msg),
       onSaveBundle: async (bundleText) => {
-        try {
-          const res = await backend.saveFileDialog(
-            bundleText,
-            'ai-context.md',
-            this.explorer.rootPath,
-            this.activeTab?.lineEnding ?? 'LF',
-            getLanguage(),
-          );
-          if (res.saved && res.path) {
-            this.showToast(
-              t('toast.aiBundleSaved', { name: res.name ?? baseNameOfPath(res.path) }),
-            );
-          }
-        } catch (err) {
-          console.error('KI-Kontext-Bündel konnte nicht gespeichert werden:', err);
-          this.showToast(t('toast.saveFailed'));
-        }
+        const res = await backend.saveFileDialog(
+          bundleText,
+          'ai-context.md',
+          workspaceRootPath,
+          this.activeTab?.lineEnding ?? 'LF',
+          getLanguage(),
+        );
+        return res.saved && res.path
+          ? t('toast.aiBundleSaved', { name: res.name ?? baseNameOfPath(res.path) })
+          : null;
       },
     });
   }

@@ -341,6 +341,10 @@
         <span data-i18n="treeCtx.copyAtPath">Relativen @Pfad kopieren</span>
       </button>
       <hr>
+      <button type="button" data-ctx-action="bundle-workspace" hidden>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="4" width="7" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M4 11H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v1" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
+        <span data-i18n="share.bundleAi">KI-Kontext bündeln…</span>
+      </button>
       <button type="button" data-ctx-action="scaffold-agents" id="tree-ctx-scaffold-agents">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h5l3 3v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1zm4.5 0v3h3M5.5 8.5h5M5.5 11h3.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
         <span data-i18n="treeCtx.scaffoldAgents">AGENTS.md anlegen</span>
@@ -797,9 +801,9 @@
         <span class="menu-item-text" data-i18n="share.copyAi">Für KI kopieren (mit Metadaten)</span>
         <kbd class="menu-item-shortcut">Strg+Umschalt+A</kbd>
       </button>
-      <button type="button" id="btn-share-bundle-ai" class="menu-item" title="Mehrere geöffnete Dokumente gebündelt mit Token-Summe für ein LLM kopieren" data-i18n-title="share.bundleAiTitle">
+      <button type="button" id="btn-share-bundle-ai" class="menu-item" title="Offene Tabs und Dateien aus dem Arbeitsordner als KI-Kontext zusammenstellen" data-i18n-title="share.bundleAiTitle">
         <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3.5" width="7.5" height="9" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6 2.5h5.5a1.2 1.2 0 0 1 1.2 1.2v7.8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M4.5 6.5h3.5M4.5 9h2.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
-        <span class="menu-item-text" data-i18n="share.bundleAi">Mehrere Tabs für KI bündeln…</span>
+        <span class="menu-item-text" data-i18n="share.bundleAi">KI-Kontext bündeln…</span>
       </button>
       <button type="button" id="btn-share-fill-prompt-vars" class="menu-item" title="{{variable}}-Platzhalter im Dokument ausfüllen und Prompt kopieren" data-i18n-title="share.fillPromptVarsTitle">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3.5c-1 0-1.5.5-1.5 1.5v1.8c0 .7-.4 1.2-1 1.2.6 0 1 .5 1 1.2V11c0 1 .5 1.5 1.5 1.5M10.5 3.5c1 0 1.5.5 1.5 1.5v1.8c0 .7.4 1.2 1 1.2-.6 0-1 .5-1 1.2V11c0 1-.5 1.5-1.5 1.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
@@ -957,7 +961,7 @@
       <div class="settings-header">
         <div>
           <h3 id="ai-bundle-title" data-i18n="aiBundle.title">KI-Kontext bündeln</h3>
-          <p class="lint-dialog-sub" data-i18n="aiBundle.subtitle">Wähle geöffnete Dokumente aus, um sie als kombinierten Prompt-Kontext in die Zwischenablage zu kopieren.</p>
+          <p class="lint-dialog-sub" data-i18n="aiBundle.subtitle">Wähle die Dateien aus, die du als KI-Kontext kopieren möchtest.</p>
         </div>
         <button type="button" class="mini-icon-btn" command="close" commandfor="ai-bundle-dialog" aria-label="Schließen" data-i18n-aria="settings.close">✕</button>
       </div>
@@ -969,6 +973,11 @@
         <span id="ai-bundle-token-total" class="doc-stat-badge accent">0 Dateien · ~0 Tokens gesamt</span>
       </div>
       <div id="ai-bundle-list" class="ai-bundle-list scroller"></div>
+      <div id="ai-bundle-load-error" class="ai-bundle-message" hidden>
+        <p id="ai-bundle-load-alert" role="alert"></p>
+        <button type="button" id="btn-ai-bundle-retry" class="dialog-btn" data-i18n="aiBundle.retryLoad">Erneut laden</button>
+      </div>
+      <p id="ai-bundle-action-error" class="ai-bundle-message" role="alert" hidden></p>
       <div class="dialog-actions ai-bundle-footer">
         <button type="button" class="dialog-btn" command="close" commandfor="ai-bundle-dialog" data-i18n="aiBundle.cancelBtn">Abbrechen</button>
         <button type="button" id="btn-ai-bundle-copy" class="dialog-btn primary" data-i18n="aiBundle.copyBtn">Kontext kopieren</button>

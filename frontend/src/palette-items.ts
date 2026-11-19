@@ -1,7 +1,7 @@
 import { WorkspaceFileEntry } from './api';
 import type { PaletteHeading, PaletteItem } from './palette';
 import { baseNameOfPath } from './path-utils';
-import { getLanguage } from './i18n';
+import { getLanguage, t } from './i18n';
 import { AiTemplateId, listAiTemplates } from './ai-templates';
 
 export interface PaletteTabSummary {
@@ -362,7 +362,7 @@ export function buildPaletteCommandItems(ctx: PaletteCommandContext): PaletteIte
           {
             id: 'cmd:bundle-ai-context',
             kind: 'command' as const,
-            label: isEn ? 'Share: Bundle Multiple Tabs for AI…' : 'Teilen: Mehrere Tabs für KI bündeln…',
+            label: `${isEn ? 'Share' : 'Teilen'}: ${t('share.bundleAi')}`,
             run: ctx.onOpenAiBundle,
           },
         ]
