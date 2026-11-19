@@ -10,7 +10,7 @@ const files = [
 const [agents, notes, productContext, skill] = files;
 const editedInstructions = '# Updated instructions in the editor';
 
-async function openWorkspace(page: Page) {
+async function loadWorkspace(page: Page, initialFiles: string[]) {
   // Capture clipboard writes inside this page without using the shared OS clipboard.
   await page.addInitScript(() => {
     let clipboardText = '';
@@ -37,7 +37,7 @@ async function openWorkspace(page: Page) {
 
     const responses: Record<string, unknown> = {
       '/api/startup': {
-        initialFiles: [agents.path, notes.path],
+        initialFiles,
         initialFolder: workspace,
         recoveredDrafts: [],
         uiPrefs: { autoSave: false, language: 'de' },
@@ -50,6 +50,11 @@ async function openWorkspace(page: Page) {
   });
 
   await page.goto('/');
+  await expect(page.locator('#workspace-title')).toHaveText('PilotWorkspace');
+}
+
+async function openWorkspace(page: Page) {
+  await loadWorkspace(page, [agents.path, notes.path]);
   await expect(page.getByRole('tab', { name: 'NOTES.md', exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'AGENTS.md', exact: true }).click();
   const editor = page.getByRole('textbox', { name: 'Markdown-Editor', exact: true });
@@ -64,8 +69,8 @@ test('bundles the selected tab and workspace files as XML from the command palet
   await page.keyboard.press('Control+Shift+P');
   const palette = page.getByRole('dialog', { name: 'Befehle', exact: true });
   await expect(palette).toBeVisible();
-  await palette.getByRole('searchbox', { name: 'Datei oder Befehl suchen' }).fill('> KI bündeln');
-  await palette.getByRole('option', { name: 'Teilen: Mehrere Tabs für KI bündeln…' }).click();
+  await palette.getByRole('searchbox', { name: 'Datei oder Befehl suchen' }).fill('> KI-Kontext bündeln');
+  await palette.getByRole('option', { name: 'Teilen: KI-Kontext bündeln…' }).click();
 
   const bundle = page.getByRole('dialog', { name: 'KI-Kontext bündeln' });
   const copy = bundle.getByRole('button', { name: 'Kontext kopieren' });
@@ -84,6 +89,30 @@ test('bundles the selected tab and workspace files as XML from the command palet
     '<file path="AGENTS.md">', editedInstructions, '</file>', '',
     '<file path="docs/PRODUCT_CONTEXT.md">', productContext.content, '</file>', '',
     '<file path=".agents/skills/review/SKILL.md">', skill.content, '</file>', '',
+  ].join('\n'));
+});
+
+test('bundles unopened workspace documents from the workspace context menu', async ({ page }) => {
+  await loadWorkspace(page, []);
+  await expect(page.getByRole('tab', { name: 'Willkommen.md', exact: true })).toBeVisible();
+
+  await page.locator('#workspace-title').click({ button: 'right' });
+  await page.locator('#tree-context-menu').getByRole('button', { name: 'KI-Kontext bündeln…' }).click();
+  const bundle = page.getByRole('dialog', { name: 'KI-Kontext bündeln' });
+  const copy = bundle.getByRole('button', { name: 'Kontext kopieren' });
+
+  await expect(bundle.getByRole('checkbox', { name: /Willkommen\.md/ })).toHaveCount(0);
+  await expect(copy).toBeDisabled();
+  await bundle.getByRole('checkbox', { name: /^AGENTS\.md/ }).check();
+  await bundle.getByRole('checkbox', { name: /^PRODUCT_CONTEXT\.md/ }).check();
+  await bundle.getByRole('button', { name: 'XML (<file>)' }).click();
+  await copy.click();
+
+  await expect(bundle).toBeHidden();
+  await expect(page.getByText(/^2 Dateien .* als KI-Kontext kopiert$/)).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe([
+    '<file path="AGENTS.md">', agents.content, '</file>', '',
+    '<file path="docs/PRODUCT_CONTEXT.md">', productContext.content, '</file>', '',
   ].join('\n'));
 });
 

@@ -777,7 +777,7 @@ details[open] > summary .tree-chevron {
   grid-column: 1 / -1;
 }
 
-[focusgroup~="menu"] > button {
+[focusgroup~="menu"] > button:not([hidden]) {
   display: grid;
   grid-template-columns: subgrid;
   align-items: center;

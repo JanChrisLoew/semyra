@@ -327,6 +327,7 @@ class SemyraApp {
       onScaffoldSkill: (targetDir) => {
         this.scaffoldWorkspaceSkill(targetDir);
       },
+      onBundleWorkspace: (rootPath) => this.openAiBundleDialog(rootPath),
     });
 
     this.workspaceSearch = new WorkspaceSearchController({
@@ -2760,17 +2761,20 @@ class SemyraApp {
     this.explorer.openNewSkillDialog(`${cleanRoot}${sep}.agents${sep}skills`);
   }
 
-  private openAiBundleDialog(): void {
+  private openAiBundleDialog(workspaceOnlyRoot?: string): void {
+    const workspaceRootPath = workspaceOnlyRoot ?? this.explorer.rootPath;
     void openAiBundleDialogModal({
-      tabs: this.tabs,
-      workspaceRootPath: this.explorer.rootPath,
+      tabs: workspaceOnlyRoot
+        ? this.tabs.filter((tab) => tab.path && isSameOrDescendantPath(tab.path, workspaceOnlyRoot))
+        : this.tabs,
+      workspaceRootPath,
       onShowToast: (msg) => this.showToast(msg),
       onSaveBundle: async (bundleText) => {
         try {
           const res = await backend.saveFileDialog(
             bundleText,
             'ai-context.md',
-            this.explorer.rootPath,
+            workspaceRootPath,
             this.activeTab?.lineEnding ?? 'LF',
             getLanguage(),
           );

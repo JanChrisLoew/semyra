@@ -7,10 +7,20 @@ Dieses Dokument dient als fortlaufendes Protokoll über Entwicklungssessions, we
 
 ---
 
+## 2026-11-19 — KI-Kontext aus dem Arbeitsordner
+
+- **Änderung**: Teilen-Menü und Befehlspalette verwenden „KI-Kontext bündeln…“. Der Arbeitsordner bietet dieselbe Aktion im Kontextmenü seines Namens und der freien Fläche im Dateibaum. Dieser Einstieg zeigt Dateien aus dem Arbeitsordner und übernimmt den aktuellen Inhalt offener Arbeitsordner-Tabs. Willkommen und Tabs aus anderen Ordnern bleiben außerhalb dieser Auswahl.
+- **Integration**: `frontend/index.html`, `main.ts`, `sidebar-explorer.ts`, `palette-items.ts`, `i18n.ts` und `styles/sidebar.css` verwenden den bestehenden Dialog und die gemeinsame DE/EN-Beschriftung. Das README nennt die drei Einstiege.
+- **Verifikation**: Typecheck, 201 Frontend-Tests, Vite-Build, 22 Playwright-Tests und 43 Rust-Tests erfolgreich. Der neue Headless-Fall in `frontend/e2e/ai-context.spec.ts` kopiert zwei ungeöffnete Dateien als XML und prüft die exakten relativen Pfade und Inhalte.
+- **Pilot**: `Build-Release.ps1 -Installer` baute die x64-EXE, der Installer-Schritt fand ISCC im Kindprozess nicht. Mit explizitem Compiler-Verzeichnis im Prozesspfad lief `Build-Installer.ps1 -Architecture x64` erfolgreich. EXE und Setup wurden lokal auf Produktversion `0.2.0`, Zeitstempel und SHA-256 geprüft. Die Installer-Abnahme erfolgt in Windows-CI.
+
+---
+
 ## 2026-11-18 — Schnellsuche nach Dateisystemereignissen stabilisiert
 
 - **Änderung**: `frontend/src/main.ts` verwendet denselben Pfadvergleich wie die Ordnersuche. Änderungen außerhalb des aktuellen Arbeitsordners entwerten dessen Index und Baum nicht mehr. `sidebar-explorer.ts` wiederholt eine entwertete Indexanfrage für denselben Ordner. Beim Wechsel oder Schließen des Ordners liefert die frühere Anfrage weiterhin keine Treffer.
-- **Verifikation**: Beide neuen Fälle in `frontend/e2e/quick-open.spec.ts` schlugen vor der Korrektur fehl und bestanden danach. Typecheck, 201 Frontend-Tests, Vite-Build und 21 Playwright-Tests waren lokal erfolgreich. Die Windows-CI führt Rust-Tests, ARM64-Kompiliercheck, x64-Build sowie Neuinstallation und Upgrade aus. `Build-Release.ps1` wurde für diese Frontend-Korrektur lokal nicht ausgeführt.
+- **Verifikation**: Beide neuen Fälle in `frontend/e2e/quick-open.spec.ts` schlugen vor der Korrektur fehl und bestanden danach jeweils fünf weitere Wiederholungen. Typecheck, 201 Frontend-Tests, Vite-Build, 21 Playwright-Tests, 43 Rust-Tests und ARM64-Kompiliercheck waren lokal erfolgreich. Die [Windows-CI](https://github.com/JanChrisLoew/semyra/actions/runs/44358329265) bestätigte zusätzlich x64-Neuinstallation, Upgrade mit Recovery-Entwurf und Deinstallation. `Build-Release.ps1` wurde lokal nicht ausgeführt.
+- **Merge**: [PR #5](https://github.com/JanChrisLoew/semyra/pull/5) wurde als `0336733` nach `main` übernommen. Der lokale Stand wurde per Fast-forward aktualisiert und entspricht dem in CI geprüften Quellbaum von `ef3cb81`.
 
 ---
 
