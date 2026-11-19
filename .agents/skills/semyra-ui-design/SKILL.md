@@ -24,6 +24,7 @@ description: >-
 
 - **Never** add `content-visibility: auto` to `.markdown-body` blocks (breaks `SyncScrollController` pixel height interpolation).
 - Use native `<dialog>` (`closedby="any"` or `closedby="none"` with `cancel` guard, resetting `dialog.returnValue = ''` on `close`) without redundant `role="dialog"` or `aria-modal`.
+- Show failures inside an open dialog because the app suppresses global toasts while a dialog is open. Preserve the user's input and selection when a retry is possible.
 - Use declarative Invoker Commands (`command="show-modal" commandfor="..."`) for static modal triggers.
 - Wrap search inputs in `<search>` with an explicit `<label class="visually-hidden">`.
 - Keep tab close buttons as siblings of `<button role="tab">` inside `.tab-slot` (never nested inside `[role="tab"]`) and preserve roving `tabindex` in `frontend/src/navigation-a11y.ts`.

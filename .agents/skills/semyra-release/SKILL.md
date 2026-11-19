@@ -10,25 +10,17 @@ description: >-
 
 ## 1. Version Synchronization (if bumping version)
 
-Keep the version string identical across all three manifests:
-1. `Cargo.toml` (`version = "x.y.z"`)
-2. `frontend/package.json` (`"version": "x.y.z"`)
-3. `installer/Semyra.iss` (`#define MyAppVersion "x.y.z"`)
+Keep `Cargo.toml`, `frontend/package.json`, `installer/Semyra.iss`, and the PowerShell installer's registry `DisplayVersion` in sync. Update `Cargo.lock` and `frontend/package-lock.json` with the manifest changes.
 
-## 2. End-to-End Build & Verification
+## 2. Build and verify
 
-`rust-embed` embeds `frontend/dist` at compile time (`build.rs` fails `--release` if `frontend/dist/assets` is missing). Always run the unified release script from the repo root:
+Follow the build order in [AGENTS.md](../../../AGENTS.md#build-and-verify). With Semyra closed, run the release script from the repository root. The script forcibly stops running Semyra processes. Use the individual checks in AGENTS.md while a user session is open.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\Build-Release.ps1
 ```
 
-This executes in order:
-1. `npm run typecheck` (`tsc --noEmit`)
-2. `npm test` (`vitest run`)
-3. `npm run build` (`vite build` -> `frontend/dist`)
-4. `cargo test`
-5. `cargo build --release` -> `target\release\Semyra.exe`
+This produces `target\release\Semyra.exe`. Run Playwright separately after the frontend build.
 
 ## 3. Windows Installer (Inno Setup 6)
 
@@ -44,6 +36,6 @@ This executes in order:
 
 ## 4. Post-Build Checks
 
-- Confirm zero test failures and zero compiler warnings.
-- Confirm `target\release\Semyra.exe` (and `target\installer\Semyra-Setup-*.exe` if built) exists with current timestamp.
-- Document the release/build in `WORK_LOG.md`.
+- Confirm exit status, test results, artifact timestamps, and product version.
+- Use the [Windows CI](../../../.github/workflows/ci.yml) results for x64 installation, upgrade, and deinstallation. The ARM64 CI step checks compilation.
+- Record the release and verification in [WORK_LOG.md](../../../WORK_LOG.md).

@@ -1,10 +1,6 @@
 # Semyra — Produktkontext & Designidentität
 
-> **Status:** Lebende Produktreferenz für Entwicklung und Design  
-> **Stand:** 08.11.2026  
-> **Produktname:** Semyra  
-> **Claim:** *Markdown for the AI era.*  
-> **Zielablage im Repository:** `docs/PRODUCT_CONTEXT.md`
+> Produktreferenz für Entwicklung und Design. Stand 19.11.2026.
 
 ## 1. Zweck dieses Dokuments
 
@@ -57,12 +53,12 @@ Die folgende Übersicht bildet die Kernfähigkeiten von Semyra ab:
 | **Datei- und Projektarbeit** | Dateiexplorer, Ordnernavigation, mehrere Tabs, Multi-Window-Unterstützung, Drag & Drop sowie Dateiaktionen. |
 | **Navigation** | Befehlspalette/Schnellwahl, Dateisuche und Arbeitsordner-Volltextsuche, Outline/Gliederung, Tastaturkürzel. |
 | **Schreibkomfort** | Optionale Formatierungsleiste, Zeilenumbruch, Dokument-Zoom, Zen-Modus, synchronisiertes Scrollen und komfortable Markdown-Eingaben. |
-| **KI-Workflows** | Arbeit an Prompts, Skills und Agentenanweisungen; Funktion „Copy for AI (with Metadata)“ zur Weitergabe von Kontext. |
+| **KI-Workflows** | Prompts, Skills und Agentenanweisungen lokal bearbeiten. Den aktiven Tab als KI-Kontext kopieren oder ausgewählte offene und ungeöffnete Dateien als Markdown oder XML mit relativen Pfaden bündeln. |
 | **Export & Teilen** | Markdown-Quelltext kopieren, formatierten Text kopieren, Standalone-HTML, PDF/Druck und „Save As“. |
 | **Sitzung & Sicherheit** | Sitzungswiederherstellung, Recovery ungespeicherter Entwürfe, Speicherung vorhandener Einstellungen; Auto-Save als konfigurierbare Funktion. |
 | **Windows & Personalisierung** | Native Windows-11-Integration, Dark/Light/System-Theme, Deutsch/Englisch, native Dateidialoge und Statusinformationen. |
 
-**Technische Orientierung:** Rust-basierte Windows-Desktop-Anwendung mit `tao`/`wry` und WebView2; CodeMirror 6 Editor und Vite-Frontend. Windows x64 ist die primäre Zielplattform; ARM64 ist als potenzielle Zielarchitektur vorgesehen.
+**Technische Orientierung.** Rust-basierte Windows-Desktop-Anwendung mit `tao`/`wry` und WebView2. Das Frontend nutzt CodeMirror 6 und Vite. Windows 11 x64 ist die primäre Zielplattform. Für ARM64 gibt es ein separates Build-Ziel und einen Kompiliercheck in der CI. Die automatisierte Installer-Abnahme läuft auf x64.
 
 ## 5. UX- und Designphilosophie
 
@@ -156,7 +152,7 @@ Der Dirty-Punkt erscheint bei Änderungen und verschwindet **sofort nach erfolgr
 - Tonalität: präzise, sachlich, ruhig und hilfreich — keine überhöhten KI-Versprechen.
 - Deutsch und Englisch konsistent; vorhandene Sprachumschaltung respektieren.
 - Funktionsbegriffe bevorzugen: *Öffnen, Bearbeiten, Vorschau, Speichern, Exportieren*.
-- „Copy for AI (with Metadata)“ als konkrete Workflow-Funktion benennen, **nicht** als KI-generierte Verarbeitung missverstehen.
+- „Als KI-Kontext kopieren“ und „KI-Kontext bündeln…“ benennen konkrete Aktionen. Beim Bündeln bestimmt die Dateiauswahl, welche Inhalte in die Ausgabe gelangen.
 - In README, About und Hilfetexten: Semyra als verbindlicher Produktname.
 
 ## 9. Technische Leitplanken für Entwicklung und Agenten

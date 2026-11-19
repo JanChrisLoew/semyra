@@ -22,12 +22,11 @@ Get-ChildItem src, frontend\src -Recurse -File |
 ```
 
 Also check for compiler/type warnings:
-- `cargo check`
-- `cd frontend && npm run typecheck`
+- Run frontend typecheck and build before a Rust compile check. Follow the [build order in AGENTS.md](../../../AGENTS.md#build-and-verify).
 
 ## 2. Cohesion & Modularity Audit
 
-Per `AGENTS.md`, there is **no rigid maximum LOC limit** for cohesive single-purpose modules. For the largest files in `src/` and `frontend/src/`, evaluate **why** they are large:
+Use file size to identify review candidates. Judge modules by cohesion and testability:
 - Are unrelated domain concerns mixed in one file (e.g., pure business/parsing logic coupled with Win32/DOM/IPC glue instead of being unit-tested separately)?
 - Is there duplicated logic across modules that should share a helper?
 - Are functions overly long or deeply nested where early returns or small helpers would clarify intent?
@@ -36,7 +35,7 @@ Per `AGENTS.md`, there is **no rigid maximum LOC limit** for cohesive single-pur
 
 Spot-check with targeted searches (`rg` / `Select-String`):
 - **Rust (`src/`)**:
-  - Heavy CPU/disk routes in `src/ipc.rs` must stay off the Win32 UI thread (`std::thread::spawn`).
+  - Heavy CPU and disk routes in `src/ipc.rs` must stay off the Win32 UI thread. Verify routing through the existing worker pools, especially for preview and drafts.
   - No `fs::remove_file` / `fs::remove_dir_all` on user documents (must use `trash::delete`).
   - Canonicalized paths shown in UI or passed to Explorer must go through `clean_windows_path`.
   - Local asset reads must remain gated by `state.is_local_asset_allowed(&target)`.
@@ -53,13 +52,13 @@ Check high-risk runtime paths for subtle regressions:
 - **Async Race Conditions**: Verify sequence/generation guards on debounced or async flows (live preview render, workspace search, tab switching, file reloads) so stale responses cannot overwrite newer state.
 - **Error Handling**: Inspect empty `catch {}` or `let _ =` blocks — ensure user-triggered actions (save, open, export, delete) surface errors via toast/status instead of failing silently.
 - **Resource & Lifecycle Cleanup**: Check `setTimeout` / `setInterval` clearing, `notify` watcher / `EventLoopProxy` error paths, and single-instance / WebView2 profile lock cleanup.
-- **Verification**: Run `cargo test`, `cd frontend && npm run typecheck && npm test`, and `npm run test:e2e` (when Playwright tests are present).
+- **Verification**: Run the relevant unit and Playwright tests using the build order above. Say which findings were reproduced and which are based on static review.
 
 ## 5. Prioritized Report Format
 
-Present findings concisely with clickable `file://` links, grouped by priority:
+Present actionable findings first, with clickable workspace links and line numbers. Prioritize by impact:
 1. **P1 – Security, Data-Safety & Correctness**
 2. **P2 – Architecture, Cohesion & Separation of Concerns**
 3. **P3 – Clean Code, Modern Stack & Testability**
 
-For each finding, state: **File/Lines**, **Why it matters**, and a **concrete, minimal next step**. If a large file is cohesive as-is, explicitly note that no split is needed.
+For each finding, explain the impact and suggest a concrete next step.

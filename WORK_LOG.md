@@ -1,9 +1,37 @@
 # Semyra — Work Log & Sessionshistorie
 
-Dieses Dokument dient als fortlaufendes Protokoll über Entwicklungssessions, wesentliche Arbeitsinhalte, technische Entscheidungen, Testergebnisse und offene Punkte im Semyra-Projekt.
+Dieses Protokoll hält abgeschlossene Features, größere Korrekturen, Releases und Entscheidungen mit Folgen für die weitere Arbeit fest. Einträge nennen kurz, was sich geändert hat, wie es geprüft wurde und was offen ist. Für kleine Änderungen reicht die Commit-Nachricht. Die Regel steht in [AGENTS.md](AGENTS.md#work-log).
 
-> [!NOTE]
-> **Pflegepflicht gemäß `AGENTS.md`**: Am Ende jeder Arbeitssession oder größeren Feature- bzw. Refactoring-Sequenz ist hier ein neuer Eintrag mit Datum, Zielsetzung, vorgenommenen Änderungen, Testergebnissen und nächsten Schritten einzutragen.
+---
+
+## 2026-11-19 — Projektdokumentation gestrafft und abgeglichen
+
+- **Änderung**: `README.md` auf Einstieg, KI-Kontext, wichtige Tastenkürzel, Installation und Build konzentriert. WebView2, Benutzerdaten, Recovery-Pfad und Prüfumfang je Architektur präzisiert. `docs/PRODUCT_CONTEXT.md` beschreibt den aktuellen KI-Kontext und ARM64 als separates Build-Ziel. Die vier Projekt-Skills übernehmen gemeinsame Build-Regeln aus `AGENTS.md` und ergänzen ihre jeweiligen Schutz- und Prüfpunkte.
+- **Nachtrag**: Das README nennt das x64-Artefakt in GitHub Actions. Der Review-Skill bewertet Modulgrenzen anhand fachlicher Zusammengehörigkeit und Testbarkeit.
+- **Verifikation**: Alle vier Skills mit `quick_validate.py` geprüft. Lokale Markdown-Verweise, Abschnittslinks und `git diff --check` geprüft. Typecheck, Tests und Release-Build für die Dokumentationsänderung ausgelassen.
+
+---
+
+## 2026-11-19 — AGENTS.md gekürzt und aktualisiert
+
+- **Änderung**: `AGENTS.md` auf den verbindlichen Git-Ablauf, Architektur-Einstiege, Sicherheits- und UI-Regeln, Build-Prüfungen sowie Sitzungsprotokolle gekürzt. Worker-Pools, Recovery-Snapshots und die Dokumentmodule sind am aktuellen Code ausgerichtet. Die Build-Anleitung nennt die erzwungene Prozessbeendigung und den Prüfumfang der Windows-CI.
+- **Entscheidung**: Work-Log-Einträge sind künftig für abgeschlossene Features, größere Korrekturen, Releases und Entscheidungen mit Folgen für die weitere Arbeit vorgesehen. Das Vorwort und das README verweisen auf denselben Umfang.
+- **Verifikation**: Verweise und `git diff --check` geprüft. Typecheck, Frontend- und Rust-Tests sowie `Build-Release.ps1` für die reine Dokumentationsänderung nicht ausgeführt.
+
+---
+
+## 2026-11-19 — Aktualitätsprüfung von AGENTS.md
+
+- **Umfang**: `AGENTS.md` gegen Rust-Host, Frontend, Build-Skripte, Produktkontext und Windows-CI abgeglichen. Sicherheitsregeln, Frontend-vor-Rust-Build und der vereinbarte Git-Workflow passen grundsätzlich.
+- **Befunde**: Release-Skript beendet laufende Semyra-Prozesse zwangsweise. Die Architekturübersicht beschreibt noch Einzelthreads und eine einzelne Recovery-Datei und nennt die Dokumentmodule nicht. Der Build-Abschnitt sollte lokale Unit-Tests und Release-Build von Playwright, ARM64-Kompiliercheck und x64-Installer-Abnahme in CI unterscheiden.
+- **Verifikation**: Quellstand, Skripte und bestehende Build-Ausgabe statisch geprüft. Typecheck, Frontend- und Rust-Tests sowie `Build-Release.ps1` für dieses Review nicht ausgeführt. Die Befunde sind für eine gezielte Dokumentationskorrektur festgehalten.
+
+---
+
+## 2026-11-19 — Git-Workflow festgehalten
+
+- **Änderung**: `AGENTS.md` dokumentiert den vereinbarten Ablauf für kleine Änderungen auf `main`, separate Feature- und Refactoring-Branches sowie gezielte Pull Requests mit Windows-CI.
+- **Verifikation**: Markdown-Diff und `git diff --check` geprüft. Typecheck, Frontend- und Rust-Tests sowie `Build-Release.ps1` für diese Dokumentationsänderung nicht ausgeführt.
 
 ---
 
@@ -11,7 +39,8 @@ Dieses Dokument dient als fortlaufendes Protokoll über Entwicklungssessions, we
 
 - **Dialog**: `frontend/src/ai-dialogs.ts`, `main.ts`, `index.html`, `i18n.ts` und `styles/dialogs-print.css` zeigen DE/EN-Fehlermeldungen direkt im Dialog. Die Ordnerliste kann dort erneut geladen werden. Lese-, Kopier- und Schreibfehler sowie ein abgebrochener Speicherdialog lassen die Auswahl bestehen. Späte Antworten wirken nur auf ihren ursprünglichen Dialogaufruf.
 - **Release**: `scripts/Build-Release.ps1` prüft den Exitcode des Installer-Kindprozesses. Ein temporärer Test mit Kind-Exitcode 23 bestätigte einen fehlgeschlagenen Release-Aufruf und die Ausgabe des ursprünglichen Codes.
-- **Verifikation**: `Build-Release.ps1 -Installer` mit explizitem ISCC-Verzeichnis im Prozesspfad erfolgreich einschließlich Typecheck, 201 Frontend-Tests, Vite-Build, 43 Rust-Tests, x64-EXE und x64-Installer. Alle 26 Playwright-Tests bestanden, darunter vier neue Tests für Ordnerliste, Lesen, Kopieren und Speichern. Windows-CI prüft den aktualisierten PR.
+- **Verifikation**: `Build-Release.ps1 -Installer` mit explizitem ISCC-Verzeichnis im Prozesspfad erfolgreich einschließlich Typecheck, 201 Frontend-Tests, Vite-Build, 43 Rust-Tests, x64-EXE und x64-Installer. Alle 26 Playwright-Tests bestanden. Die vier neuen Tests bestanden jeweils drei weitere Wiederholungen. Die [Windows-CI für `39c5ebd`](https://github.com/JanChrisLoew/semyra/actions/runs/44482775402) bestätigte ARM64-Kompilierung, x64-Neuinstallation, Upgrade und Deinstallation.
+- **Merge**: [PR #6](https://github.com/JanChrisLoew/semyra/pull/6) wurde als `11da00a` nach `main` übernommen. Der lokale Branch wurde per Fast-forward synchronisiert. Der gemergte Quellbaum entspricht dem in Windows-CI geprüften PR-Commit.
 
 ---
 

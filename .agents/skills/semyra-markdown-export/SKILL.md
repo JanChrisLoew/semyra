@@ -9,7 +9,7 @@ description: >-
 
 # Semyra Markdown, Sanitizer & Export Pipeline
 
-Changes to Markdown rendering or element structure often span five coupled layers. Check every relevant layer below before finishing.
+Check the layers affected by the change.
 
 ## 1. Pipeline Touchpoints
 
@@ -27,6 +27,8 @@ Changes to Markdown rendering or element structure often span five coupled layer
    - Ensure new styles, rendered MathML/Mermaid SVGs, and allowed local images (base64-inlined) work in standalone Light/Dark HTML exports.
 5. **Rich-Text Clipboard Export (`frontend/src/export-utils.ts`)**:
    - Ensure Office/Teams/Outlook clipboard output includes inline structural styles for any new Markdown elements.
+6. **Export orchestration (`frontend/src/document-export.ts`)**:
+   - Preserve the document snapshot across tab switches. Trace native PDF export through `src/ipc.rs` and `src/main.rs` when changing that path.
 
 ## 2. Security Invariant
 
@@ -34,11 +36,5 @@ Changes to Markdown rendering or element structure often span five coupled layer
 
 ## 3. Verification
 
-```powershell
-cargo test
-cd frontend
-npm run typecheck
-npm test
-```
-
-- Pay special attention to `sanitizer.test.ts`, `sync-scroll.test.ts`, `export-utils.test.ts`, and `src/markdown.rs` unit tests.
+- Follow the [build order in AGENTS.md](../../../AGENTS.md#build-and-verify).
+- Run the relevant cases in `sanitizer.test.ts`, `sync-scroll.test.ts`, `export-utils.test.ts`, and `src/markdown.rs`. For changes to the export flow, check the relevant Playwright tests.
