@@ -29,6 +29,30 @@ async function openDraft(page: Page, autoSave = false) {
   return { editor, setDisk: (value: string) => { disk = value; } };
 }
 
+test('recovery checkpoints continue during typing and flush the final edit after a pause', async ({ page }) => {
+  const { editor } = await openDraft(page);
+  const snapshots: string[] = [];
+  await page.route('**/api/drafts/save', async (route) => {
+    const entries = route.request().postDataJSON().entries;
+    if (entries.length) snapshots.push(entries[0].content);
+    await route.fulfill({ json: { ok: true } });
+  });
+  await page.clock.install({ time: new Date('2025-01-01T00:00:00Z') });
+  await page.clock.pauseAt(new Date('2025-01-01T00:01:00Z'));
+  for (let edit = 1; edit <= 120; edit++) {
+    await editor.fill(`Edit ${edit}`);
+    await page.clock.fastForward(500);
+    if (edit % 10 === 0) {
+      await expect.poll(() => snapshots.at(-1)).toBe(`Edit ${edit}`);
+    }
+  }
+  await editor.fill('Final edit');
+  await page.clock.fastForward(1100);
+  await expect.poll(() => snapshots.at(-1)).toBe('Final edit');
+  await page.clock.fastForward(5000);
+  expect(snapshots).toHaveLength(13);
+});
+
 test('edits made while a save is in flight remain unsaved', async ({ page }) => {
   const { editor, setDisk } = await openDraft(page);
   let finishSave!: () => void;
