@@ -162,6 +162,7 @@ class SemyraApp {
     onWindowCloseError: (err) => console.error('Fenster konnte nicht geschlossen werden:', err),
   });
   private draftSyncTimer: number | undefined;
+  private draftDeadlineTimer: number | undefined;
   private draftRevision = 0;
   private recoveryRestored = false;
   private prefsSyncTimer: number | undefined;
@@ -1132,7 +1133,9 @@ class SemyraApp {
 
   private flushDraftSync(): void {
     window.clearTimeout(this.draftSyncTimer);
+    window.clearTimeout(this.draftDeadlineTimer);
     this.draftSyncTimer = undefined;
+    this.draftDeadlineTimer = undefined;
     const dirtyEntries: DraftEntry[] = this.tabs
       .filter((t) => t.isDirty)
       .map((t) => ({
@@ -1151,6 +1154,8 @@ class SemyraApp {
   }
 
   private scheduleDraftSync(): void {
+    // Keep the first edit's deadline while later edits reset the idle timer.
+    this.draftDeadlineTimer ??= window.setTimeout(() => this.flushDraftSync(), 5000);
     window.clearTimeout(this.draftSyncTimer);
     this.draftSyncTimer = window.setTimeout(() => {
       this.flushDraftSync();

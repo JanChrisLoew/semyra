@@ -4,6 +4,14 @@ Dieses Protokoll hält abgeschlossene Features, größere Korrekturen, Releases 
 
 ---
 
+## 2026-11-21 — Entwurfssicherung bei fortlaufender Eingabe
+
+Semyra fordert bei kontinuierlichen Änderungen alle fünf Sekunden einen Recovery-Snapshot an. Eine Schreibpause von 1,1 Sekunden löst die Sicherung früher aus. Jede sofortige Sicherung setzt beide Zeitgeber zurück.
+
+Der neue Edge-Test prüft zwölf aufeinanderfolgende Sicherungen während einer simulierten Schreibminute und die letzte Fassung nach einer Pause. Lokal bestanden Typecheck, Frontend-Build, 201 Frontend-Unit-Tests, 27 Playwright-Tests und 43 Rust-Tests einschließlich Wiederherstellung nach Prozessabbruch.
+
+---
+
 ## 2026-11-19 — Projektdokumentation gestrafft und abgeglichen
 
 - **Änderung**: `README.md` auf Einstieg, KI-Kontext, wichtige Tastenkürzel, Installation und Build konzentriert. WebView2, Benutzerdaten, Recovery-Pfad und Prüfumfang je Architektur präzisiert. `docs/PRODUCT_CONTEXT.md` beschreibt den aktuellen KI-Kontext und ARM64 als separates Build-Ziel. Die vier Projekt-Skills übernehmen gemeinsame Build-Regeln aus `AGENTS.md` und ergänzen ihre jeweiligen Schutz- und Prüfpunkte.
