@@ -137,7 +137,7 @@ test('a workspace watch event disables replace until fresh matches arrive', asyn
     const version = ++searches;
     if (version > 1) await new Promise<void>((resolve) => { finishSearch = resolve; });
     await route.fulfill({ json: { results: [{
-      path, name: 'Draft.md', relPath: 'Draft.md', contentVersion: `version-${version}`,
+      path, name: 'Draft.md', relPath: 'Draft.md', occurrenceCount: 1, matchingLines: 1, contentVersion: `version-${version}`,
       matches: [{ line: 1, column: 1, preview: `needle version ${version}` }],
     }] } });
   });

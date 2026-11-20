@@ -70,6 +70,8 @@ export interface SearchFileResult {
   name: string;
   relPath: string;
   matches: SearchMatchItem[];
+  occurrenceCount: number;
+  matchingLines: number;
   contentVersion: string;
 }
 
