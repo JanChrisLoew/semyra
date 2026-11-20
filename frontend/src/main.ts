@@ -517,7 +517,9 @@ class SemyraApp {
             onToggleZen: () => void this.toggleZen(),
             onToggleTheme: () => toggleTheme(),
             onOpenSettings: () => this.settingsCtrl.openSettings(),
-            onFormatDocument: () => this.formatCurrentTabDocument(),
+            onFormatDocument: this.activeTab && isMarkdownPath(this.activeTab.name)
+              ? () => this.formatCurrentTabDocument()
+              : undefined,
             onShowLint: () => this.openLintDialog(),
             onRevealInExplorer: () => {
               const p = this.activeTab?.path ?? this.explorer.rootPath;
@@ -2383,7 +2385,7 @@ class SemyraApp {
 
   private formatCurrentTabDocument(): void {
     const tab = this.activeTab;
-    if (!tab) return;
+    if (!tab || !isMarkdownPath(tab.name)) return;
     const formatted = formatMarkdownDocument(tab.currentContent);
     if (formatted === tab.currentContent) {
       this.showToast(t('toast.docAlreadyFormatted'));

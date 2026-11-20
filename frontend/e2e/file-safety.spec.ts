@@ -2,18 +2,18 @@ import { expect, test, type Page } from '@playwright/test';
 
 const path = 'C:\\Notes\\Draft.md';
 
-async function openDraft(page: Page, autoSave = false) {
+async function openDraft(page: Page, autoSave = false, filePath = path) {
   let disk = 'Original';
   await page.route('**/api/**', async (route) => {
     const endpoint = new URL(route.request().url()).pathname;
     const responses: Record<string, unknown> = {
       '/api/startup': {
-        initialFiles: [path],
+        initialFiles: [filePath],
         recoveredDrafts: [],
         uiPrefs: { autoSave, syncScroll: true, wordWrap: true, language: 'de' },
       },
       '/api/read-file': {
-        path, content: disk, name: 'Draft.md', lineEnding: 'LF', encoding: 'UTF-8',
+        path: filePath, content: disk, name: filePath.split('\\').pop(), lineEnding: 'LF', encoding: 'UTF-8',
       },
       '/api/render': {
         html: '<p>Preview</p>',
@@ -28,6 +28,18 @@ async function openDraft(page: Page, autoSave = false) {
   await expect(editor).toHaveText(disk);
   return { editor, setDisk: (value: string) => { disk = value; } };
 }
+
+test('Markdown formatting is unavailable for a YAML tab', async ({ page }) => {
+  const { editor } = await openDraft(page, false, 'C:\\Notes\\settings.yaml');
+  await editor.fill('#config');
+  await page.keyboard.press('Control+Shift+L');
+  await expect(editor).toHaveText('#config');
+  await page.keyboard.press('Control+Shift+P');
+  const palette = page.getByRole('dialog', { name: 'Befehle', exact: true });
+  await expect(palette).toBeVisible();
+  await palette.getByRole('searchbox').fill('> Markdown-Dokument formatieren');
+  await expect(palette.getByRole('option', { name: /Markdown-Dokument formatieren/i })).toHaveCount(0);
+});
 
 test('recovery checkpoints continue during typing and flush the final edit after a pause', async ({ page }) => {
   const { editor } = await openDraft(page);

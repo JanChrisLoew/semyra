@@ -4,6 +4,14 @@ Dieses Protokoll hält abgeschlossene Features, größere Korrekturen, Releases 
 
 ---
 
+## 2026-11-21 — Inhaltstreue beim Markdown-Formatieren
+
+Der Formatierer übernimmt Codeblöcke und thematische Trennlinien anhand des Markdown-Syntaxbaums des Editors und erhält harte Zeilenumbrüche. Der Befehl steht nur für Markdown-Tabs zur Verfügung. Regressionstests prüfen unter anderem eingerückte Beispiele, Code in Listen und Zitaten sowie einen YAML-Tab über Tastenkürzel und Befehlspalette.
+
+Lokal bestanden Typecheck, Frontend-Build, 209 Frontend-Unit-Tests, 28 Playwright-Tests und 43 Rust-Tests.
+
+---
+
 ## 2026-11-21 — Entwurfssicherung bei fortlaufender Eingabe
 
 Semyra fordert bei kontinuierlichen Änderungen alle fünf Sekunden einen Recovery-Snapshot an. Eine Schreibpause von 1,1 Sekunden löst die Sicherung früher aus. Jede sofortige Sicherung setzt beide Zeitgeber zurück.
