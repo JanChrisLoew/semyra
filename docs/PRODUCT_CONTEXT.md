@@ -96,8 +96,8 @@ Die folgenden Werte sind **Design-Referenzwerte (Soll-Tokens)**:
 | `--color-surface-raised` | `#273240` / `#293340` | `#F0F3F6` / `#F1F3F6` | Abgesetzte Controls und Hoverflächen |
 | `--color-border` | `#323E4D` / `#354353` | `#D6DDE4` / `#D5DEE6` | Divider, Eingabekonturen, Panelgrenzen |
 | `--color-text-primary` | `#EDF2F5` | `#202934` | Fließtext und primäre UI-Beschriftung |
-| `--color-text-secondary` | `#8292A2` / `#9BAABA` | `#506173` / `#526477` | Hilfetext, sekundäre Daten |
-| `--color-text-muted` | `#6E7E8E` / `#8E9BA9` | `#6B7C8E` / `#667687` | Untergeordnete Hinweise und Icons |
+| `--color-text-secondary` | `#A2B1C0` | `#506173` / `#526477` | Hilfetext, sekundäre Daten |
+| `--color-text-muted` | `#8D9DAD` | `#596B7D` | Untergeordnete Hinweise und Icons |
 
 ### 6.2 Interaktion, Status und Nebenakzente
 

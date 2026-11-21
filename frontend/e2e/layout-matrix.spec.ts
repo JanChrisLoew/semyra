@@ -227,11 +227,25 @@ test.describe('Semyra Layout & Split Matrix', () => {
     await expect(app).not.toHaveClass(/is-zen/);
   });
 
+  for (const theme of ['light', 'dark'] as const) {
+    test(`Text contrast in the ${theme} workspace and settings`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: theme });
+      for (const view of ['workspace', 'settings']) {
+        if (view === 'settings') {
+          await page.locator('#btn-settings').click();
+          await expect(page.locator('#settings-dialog')).toBeVisible();
+        }
+        const result = await new AxeBuilder({ page }).withRules(['color-contrast']).analyze();
+        const failures = result.violations.flatMap(v => v.nodes.map(n => [n.target, n.failureSummary]));
+        expect.soft(failures, `${theme} ${view}`).toEqual([]);
+      }
+    });
+  }
+
   test('Automated Accessibility Audit (axe-core)', async ({ page }) => {
     // Run axe accessibility audit on the active UI shell
     const results = await new AxeBuilder({ page })
-      // Color contrast is evaluated separately with native OS font rendering
-      .disableRules(['color-contrast', 'scrollable-region-focusable'])
+      .disableRules(['scrollable-region-focusable'])
       .analyze();
 
     const criticalViolations = results.violations.filter(

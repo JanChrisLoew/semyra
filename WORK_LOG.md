@@ -4,6 +4,14 @@ Dieses Protokoll hält abgeschlossene Features, größere Korrekturen, Releases 
 
 ---
 
+## 2026-11-21 — Textkontrast in Hauptansicht und Einstellungen
+
+Die gemeinsamen Textfarben für untergeordnete Beschriftungen wurden für beide Themes angepasst. Im hellen Theme erreicht der Ordnertitel 4,75:1 und der Speicherstatus 4,93:1, im dunklen Theme der Ordnertitel 5,83:1. Zwei Edge-Regressionstests prüfen die Hauptansicht und die geöffneten Einstellungen mit der axe-Kontrastregel. Die separate manuelle Abnahme der Tableiste mit Windows-Sprachausgabe bleibt offen.
+
+Lokal bestanden Typecheck, Frontend- und x64-Release-Build, 218 Frontend-Tests, 30 Edge-Tests und 46 Rust-Tests.
+
+---
+
 ## 2026-11-21 — Bilder im Offline-HTML-Export
 
 Beim HTML-Export bettet Semyra freigegebene lokale Bilder bis 15 MiB ein. Für fehlende, gesperrte oder zu große lokale Bilder und für externe Bildquellen erscheinen unterscheidbare Platzhalter mit vorhandenem Alternativtext. Die Exportmeldung nennt bei Lücken die Anzahl eingebetteter, lokal nicht verfügbarer und externer Bilder. Der Export verarbeitet die Bildelemente mit dem bereits im Lockfile enthaltenen HTML-Parser.
