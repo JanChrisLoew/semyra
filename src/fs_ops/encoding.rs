@@ -17,10 +17,10 @@ pub struct FilePayload {
 
 /// Windows-1252 (`0x80..=0x9F`) mapping table for legacy Windows text files without UTF-8 encoding.
 const CP1252_HIGH: [char; 32] = [
-    '\u{20AC}', '\u{FFFD}', '\u{201A}', '\u{0192}', '\u{201E}', '\u{2026}', '\u{2020}', '\u{2021}',
-    '\u{02C6}', '\u{2030}', '\u{0160}', '\u{2039}', '\u{0152}', '\u{FFFD}', '\u{017D}', '\u{FFFD}',
-    '\u{FFFD}', '\u{2018}', '\u{2019}', '\u{201C}', '\u{201D}', '\u{2022}', '\u{2013}', '\u{2014}',
-    '\u{02DC}', '\u{2122}', '\u{0161}', '\u{203A}', '\u{0153}', '\u{FFFD}', '\u{017E}', '\u{0178}',
+    '\u{20AC}', '\u{0081}', '\u{201A}', '\u{0192}', '\u{201E}', '\u{2026}', '\u{2020}', '\u{2021}',
+    '\u{02C6}', '\u{2030}', '\u{0160}', '\u{2039}', '\u{0152}', '\u{008D}', '\u{017D}', '\u{008F}',
+    '\u{0090}', '\u{2018}', '\u{2019}', '\u{201C}', '\u{201D}', '\u{2022}', '\u{2013}', '\u{2014}',
+    '\u{02DC}', '\u{2122}', '\u{0161}', '\u{203A}', '\u{0153}', '\u{009D}', '\u{017E}', '\u{0178}',
 ];
 
 /// Decodes UTF-8, UTF-8 BOM, UTF-16 LE/BE BOM, or legacy Windows-1252 bytes losslessly into `String`.
@@ -61,6 +61,34 @@ pub fn decode_text_bytes(bytes: &[u8]) -> (String, &'static str) {
         }
     }
     (decoded, "Windows-1252")
+}
+
+pub const ENCODING_CONVERSION_REQUIRED: &str = "encoding_conversion_required";
+
+fn encode_text(text: &str, encoding: &str) -> Result<Vec<u8>, String> {
+    match encoding {
+        "UTF-8" => Ok(text.as_bytes().to_vec()),
+        "UTF-8 BOM" => Ok([&[0xEF, 0xBB, 0xBF][..], text.as_bytes()].concat()),
+        "UTF-16 LE" | "UTF-16 BE" => {
+            let little = encoding == "UTF-16 LE";
+            let mut bytes = Vec::new();
+            for unit in std::iter::once(0xFEFF).chain(text.encode_utf16()) {
+                let pair = if little { unit.to_le_bytes() } else { unit.to_be_bytes() };
+                bytes.extend_from_slice(&pair);
+            }
+            Ok(bytes)
+        }
+        "Windows-1252" => text.chars().map(|ch| {
+            if ch.is_ascii() || ('\u{a0}'..='\u{ff}').contains(&ch) {
+                Ok(ch as u8)
+            } else {
+                CP1252_HIGH.iter().position(|&entry| entry == ch)
+                    .map(|index| 0x80 + index as u8)
+                    .ok_or_else(|| ENCODING_CONVERSION_REQUIRED.to_owned())
+            }
+        }).collect(),
+        _ => Err(format!("Unbekannte Dateikodierung: {encoding}")),
+    }
 }
 
 pub const MAX_TEXT_FILE_BYTES: u64 = 25 * 1024 * 1024;
@@ -110,22 +138,30 @@ pub fn write_text_file_if_unchanged(
     prefer_crlf: bool,
     expected_content: &str,
     expected_line_ending: Option<&str>,
-) -> Result<Option<String>, String> {
+    prefer_windows1252: bool,
+    convert_windows1252: bool,
+) -> Result<Option<(String, &'static str)>, String> {
     let _guard = lock_text_writes()?;
-    match fs::read(path) {
+    let encoding = match fs::read(path) {
         Ok(bytes) => {
-            let (text, _) = decode_text_bytes(&bytes);
+            let (text, encoding) = decode_text_bytes(&bytes);
             let line_ending = if text.contains("\r\n") { "CRLF" } else { "LF" };
             if text.replace("\r\n", "\n") != expected_content
                 || (text.contains('\n') && expected_line_ending.is_some_and(|expected| expected != line_ending))
             {
                 return Ok(None);
             }
+            if prefer_windows1252 && encoding == "UTF-8" && bytes.is_ascii() {
+                "Windows-1252"
+            } else {
+                encoding
+            }
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(err) => return Err(format!("Datei konnte nicht gelesen werden: {err}")),
-    }
-    write_text_file_unlocked(path, content, prefer_crlf).map(Some)
+    };
+    let encoding = if convert_windows1252 && encoding == "Windows-1252" { "UTF-8" } else { encoding };
+    write_text_file_unlocked(path, content, prefer_crlf, encoding).map(|path| Some((path, encoding)))
 }
 
 pub(super) fn replace_text_file(
@@ -133,19 +169,20 @@ pub(super) fn replace_text_file(
     content: &str,
     prefer_crlf: bool,
     expected_bytes: &[u8],
+    encoding: &str,
 ) -> Result<(), String> {
     let _guard = lock_text_writes()?;
     let current = fs::read(path).map_err(|err| format!("Datei konnte nicht gelesen werden: {err}"))?;
     if current != expected_bytes {
         return Err("Die Datei wurde während des Ersetzens geändert.".to_string());
     }
-    write_text_file_unlocked(path, content, prefer_crlf).map(|_| ())
+    write_text_file_unlocked(path, content, prefer_crlf, encoding).map(|_| ())
 }
 
 /// Writes UTF-8 text atomically via a sibling temporary file and rename.
 pub fn write_text_file(path: &Path, content: &str, prefer_crlf: bool) -> Result<String, String> {
     let _guard = lock_text_writes()?;
-    write_text_file_unlocked(path, content, prefer_crlf)
+    write_text_file_unlocked(path, content, prefer_crlf, "UTF-8")
 }
 
 #[cfg(not(test))]
@@ -172,7 +209,7 @@ pub(super) fn lock_text_writes() -> Result<std::sync::MutexGuard<'static, ()>, S
     TEXT_WRITES.lock().map_err(|e| e.to_string())
 }
 
-fn write_text_file_unlocked(path: &Path, content: &str, prefer_crlf: bool) -> Result<String, String> {
+fn write_text_file_unlocked(path: &Path, content: &str, prefer_crlf: bool, encoding: &str) -> Result<String, String> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() && !parent.exists() {
             fs::create_dir_all(parent)
@@ -186,7 +223,7 @@ fn write_text_file_unlocked(path: &Path, content: &str, prefer_crlf: bool) -> Re
     } else {
         normalized
     };
-    write_file_atomically(path, final_str.as_bytes())
+    write_file_atomically(path, &encode_text(&final_str, encoding)?)
         .map_err(|e| format!("Datei konnte nicht gespeichert werden: {e}"))?;
     let canon = normalize_existing_path(path);
     Ok(canon.to_string_lossy().into_owned())
@@ -237,15 +274,48 @@ mod tests {
     }
 
     #[test]
+    fn saves_and_replaces_in_each_original_encoding() {
+        let dir = std::env::temp_dir().join(format!("semyra-encoding-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("example.md");
+        for (encoding, prefix, euro, newline) in [
+            ("UTF-8", &[][..], &[0xe2, 0x82, 0xac][..], &[13, 10][..]),
+            ("UTF-8 BOM", &[0xef, 0xbb, 0xbf], &[0xe2, 0x82, 0xac], &[13, 10]),
+            ("UTF-16 LE", &[0xff, 0xfe], &[0xac, 0x20], &[13, 0, 10, 0]),
+            ("UTF-16 BE", &[0xfe, 0xff], &[0x20, 0xac], &[0, 13, 0, 10]),
+            ("Windows-1252", &[], &[0x80], &[13, 10]),
+        ] {
+            let original = [prefix, euro, newline].concat();
+            fs::write(&path, &original).unwrap();
+            let saved = write_text_file_if_unchanged(&path, "€€\n", true, "€\n", Some("CRLF"), false, false)
+                .unwrap().unwrap();
+            assert_eq!(saved.1, encoding);
+            assert_eq!(fs::read(&path).unwrap(), [prefix, euro, euro, newline].concat());
+            let result = super::super::search::replace_in_workspace_files(&dir, "€€", "€", true).unwrap();
+            assert_eq!(result.files_updated, 1);
+            assert_eq!(fs::read(&path).unwrap(), original);
+        }
+        let result = super::super::search::replace_in_workspace_files(&dir, "€", "猫", true).unwrap();
+        assert_eq!(result.files_updated, 0);
+        assert_eq!(result.failures.len(), 1);
+        assert_eq!(write_text_file_if_unchanged(&path, "猫", false, "€\n", None, false, false).unwrap_err(),
+            ENCODING_CONVERSION_REQUIRED);
+        assert_eq!(fs::read(&path).unwrap(), &[0x80, 13, 10]);
+        write_text_file_if_unchanged(&path, "猫", false, "€\n", None, false, true).unwrap().unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "猫");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn guarded_save_keeps_external_edits_and_accepts_the_original_disk_version() {
         let path = std::env::temp_dir().join(format!("semyra-guarded-save-{}.md", std::process::id()));
         fs::write(&path, "External\r\n").unwrap();
-        let result = write_text_file_if_unchanged(&path, "Local\n", true, "Original\n", Some("CRLF")).unwrap();
+        let result = write_text_file_if_unchanged(&path, "Local\n", true, "Original\n", Some("CRLF"), false, false).unwrap();
         assert!(result.is_none());
-        let result = write_text_file_if_unchanged(&path, "Local\n", true, "External\n", Some("LF")).unwrap();
+        let result = write_text_file_if_unchanged(&path, "Local\n", true, "External\n", Some("LF"), false, false).unwrap();
         assert!(result.is_none());
         assert_eq!(fs::read_to_string(&path).unwrap(), "External\r\n");
-        let result = write_text_file_if_unchanged(&path, "Local\n", true, "External\n", Some("CRLF")).unwrap();
+        let result = write_text_file_if_unchanged(&path, "Local\n", true, "External\n", Some("CRLF"), false, false).unwrap();
         assert!(result.is_some());
         assert_eq!(fs::read_to_string(&path).unwrap(), "Local\r\n");
         fs::remove_file(path).unwrap();

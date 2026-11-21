@@ -226,6 +226,10 @@ struct WriteReq {
     line_ending: Option<String>,
     expected_content: String,
     expected_line_ending: Option<String>,
+    #[serde(default)]
+    prefer_windows1252: bool,
+    #[serde(default)]
+    convert_windows1252: bool,
 }
 
 #[derive(Deserialize)]
@@ -628,12 +632,15 @@ fn handle_api_route(
                     .unwrap_or(true);
                 match write_text_file_if_unchanged(
                     &p, &req.content, prefer_crlf, &req.expected_content,
-                    req.expected_line_ending.as_deref(),
+                    req.expected_line_ending.as_deref(), req.prefer_windows1252, req.convert_windows1252,
                 ) {
-                    Ok(Some(saved_path)) => {
+                    Ok(Some((saved_path, encoding))) => {
                         let saved_p = Path::new(&saved_path);
                         state.allow_file_parent(saved_p);
-                        responder.respond(ok_json(&serde_json::json!({ "saved": true })));
+                        responder.respond(ok_json(&serde_json::json!({ "saved": true, "encoding": encoding })));
+                    }
+                    Err(err) if err == crate::fs_ops::encoding::ENCODING_CONVERSION_REQUIRED => {
+                        responder.respond(ok_json(&serde_json::json!({ "saved": false, "conversionRequired": true })));
                     }
                     Ok(None) => responder.respond(ok_json(&serde_json::json!({ "saved": false }))),
                     Err(err) => {

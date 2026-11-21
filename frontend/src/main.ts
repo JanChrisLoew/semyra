@@ -139,7 +139,7 @@ class SemyraApp {
     },
     onSaveError: (err) => {
       console.error('Datei konnte nicht gespeichert werden:', err);
-      this.showToast(t('toast.saveFailed'));
+      this.showToast(err instanceof Error ? err.message : t('toast.saveFailed'));
     },
   });
   private readonly documentClose = new DocumentCloseController(this.documentFiles, this.autoSave, {
@@ -358,7 +358,7 @@ class SemyraApp {
             ...summary,
             failed: res.failures.length,
             file: res.failures[0].path,
-          }), 7000);
+          }) + (res.failures.some(f => f.error === 'encoding_conversion_required') ? ' ' + t('encoding.replaceSkipped') : ''), 7000);
         } else {
           this.showToast(res.totalReplacements > 0
             ? t('toast.workspaceReplaced', summary)

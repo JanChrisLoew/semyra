@@ -219,7 +219,10 @@ const de: Record<string, string> = {
   'status.filepathTitle': 'Klicken, um Datei im Windows Explorer anzuzeigen',
   'status.zoomResetTitle': 'Dokument-Zoom auf 100 % zurücksetzen (Strg+0)',
   'status.eolToggleTitle': 'Zeilenende zwischen CRLF und LF umschalten',
-  'status.encodingTitle': 'Erkannte Dateikodierung (Speicherung erfolgt als UTF-8)',
+  'status.encodingTitle': 'Dateikodierung',
+  'encoding.confirm': '„{name}“ enthält Zeichen, die Windows-1252 nicht darstellen kann. Datei in UTF-8 konvertieren und speichern?',
+  'encoding.autoSave': 'Automatisches Speichern pausiert. Zum Konvertieren in UTF-8 bitte manuell speichern.',
+  'encoding.replaceSkipped': 'Dateien mit in Windows-1252 nicht darstellbaren Zeichen wurden übersprungen. Bei Bedarf zuerst über „Speichern unter“ als UTF-8 speichern.',
 
   // Go to Line & Preview Find
   'gotoLine.title': 'Zu Zeile springen',
@@ -837,7 +840,10 @@ const en: Record<string, string> = {
   'status.filepathTitle': 'Click to reveal file in Windows Explorer',
   'status.zoomResetTitle': 'Reset document zoom to 100% (Ctrl+0)',
   'status.eolToggleTitle': 'Toggle line ending between CRLF and LF',
-  'status.encodingTitle': 'Detected file encoding (saved as UTF-8)',
+  'status.encodingTitle': 'File encoding',
+  'encoding.confirm': '“{name}” contains characters outside Windows-1252. Convert this file to UTF-8 and save?',
+  'encoding.autoSave': 'Automatic save skipped. Save manually to convert to UTF-8.',
+  'encoding.replaceSkipped': 'Files with characters outside Windows-1252 were skipped. Use Save As to save them as UTF-8 first if needed.',
 
   // Go to Line & Preview Find
   'gotoLine.title': 'Go to Line',

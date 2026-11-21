@@ -48,6 +48,32 @@ function diskCallbacks() {
 afterEach(() => vi.restoreAllMocks());
 
 describe('DocumentFileOperations', () => {
+  it.each(['UTF-8 BOM', 'UTF-16 LE', 'UTF-16 BE', 'Windows-1252'])(
+    'keeps the saved encoding %s after an automatic save', async encoding => {
+      const document = openDocument();
+      vi.spyOn(backend, 'writeFile').mockResolvedValue({ saved: true, encoding });
+      await expect(fileOperations().operations.save(document, false, true)).resolves.toBe(true);
+      expect(document.encoding).toBe(encoding);
+    },
+  );
+
+  it('converts only after an explicit manual confirmation', async () => {
+    const document = { ...openDocument(), encoding: 'Windows-1252', currentContent: '猫', isDirty: true };
+    const { operations, onSaveConflict } = fileOperations();
+    const write = vi.spyOn(backend, 'writeFile').mockResolvedValue({ saved: false, conversionRequired: true });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    await expect(operations.save(document, false, true)).resolves.toBe(false);
+    expect(confirm).not.toHaveBeenCalled();
+    await expect(operations.save(document)).resolves.toBe(false);
+    expect(document.isDirty).toBe(true);
+    confirm.mockReturnValue(true);
+    write.mockResolvedValueOnce({ saved: false, conversionRequired: true }).mockResolvedValueOnce({ saved: true, encoding: 'UTF-8' });
+    await expect(operations.save(document)).resolves.toBe(true);
+    expect(write).toHaveBeenLastCalledWith(path, '猫', 'LF', 'Saved\n', 'LF', { preferWindows1252: true, convertWindows1252: true });
+    expect(document.encoding).toBe('UTF-8');
+    expect(onSaveConflict).not.toHaveBeenCalled();
+  });
+
   it('starts the next save with the latest document content only after the active save finishes', async () => {
     const document = openDocument();
     document.currentContent = 'First edit\n';
@@ -60,14 +86,14 @@ describe('DocumentFileOperations', () => {
     const next = operations.save(document);
 
     expect(operations.activeSave(document)).toBeDefined();
-    expect(writeFile).toHaveBeenCalledExactlyOnceWith(path, 'First edit\n', 'LF', 'Saved\n', 'LF');
+    expect(writeFile).toHaveBeenCalledExactlyOnceWith(path, 'First edit\n', 'LF', 'Saved\n', 'LF', { preferWindows1252: false, convertWindows1252: false });
     document.currentContent = 'Latest edit\n';
     firstWrite.resolve({ saved: true });
 
     await expect(first).resolves.toBe(true);
     await expect(next).resolves.toBe(true);
     expect(writeFile).toHaveBeenCalledTimes(2);
-    expect(writeFile).toHaveBeenNthCalledWith(2, path, 'Latest edit\n', 'LF', 'First edit\n', 'LF');
+    expect(writeFile).toHaveBeenNthCalledWith(2, path, 'Latest edit\n', 'LF', 'First edit\n', 'LF', { preferWindows1252: false, convertWindows1252: false });
     expect(operations.activeSave(document)).toBeUndefined();
   });
 
