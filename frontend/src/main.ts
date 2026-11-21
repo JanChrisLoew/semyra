@@ -2776,10 +2776,10 @@ class SemyraApp {
         : this.tabs,
       workspaceRootPath,
       onShowToast: (msg) => this.showToast(msg),
-      onSaveBundle: async (bundleText) => {
+      onSaveBundle: async (bundleText, format) => {
         const res = await backend.saveFileDialog(
           bundleText,
-          'ai-context.md',
+          format === 'xml' ? 'ai-context.xml' : 'ai-context.md',
           workspaceRootPath,
           this.activeTab?.lineEnding ?? 'LF',
           getLanguage(),

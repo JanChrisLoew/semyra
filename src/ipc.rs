@@ -1069,15 +1069,12 @@ fn handle_api_route(
                     .default_name
                     .unwrap_or_else(|| default_fallback.to_string());
 
-                let title = if is_en {
-                    "Save Markdown File As"
-                } else {
-                    "Markdown-Datei speichern unter"
-                };
-                let md_filter = if is_en {
-                    "Markdown Files (*.md)"
-                } else {
-                    "Markdown-Datei (*.md)"
+                let is_xml = Path::new(&file_name).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("xml"));
+                let (title, filter, extensions): (_, _, &[&str]) = match (is_xml, is_en) {
+                    (true, true) => ("Save XML File As", "XML Files (*.xml)", &["xml"]),
+                    (true, false) => ("XML-Datei speichern unter", "XML-Datei (*.xml)", &["xml"]),
+                    (false, true) => ("Save Markdown File As", "Markdown Files (*.md)", &["md", "markdown"]),
+                    (false, false) => ("Markdown-Datei speichern unter", "Markdown-Datei (*.md)", &["md", "markdown"]),
                 };
                 let txt_filter = if is_en {
                     "Text Files (*.txt)"
@@ -1088,7 +1085,7 @@ fn handle_api_route(
                 let mut dlg = rfd::FileDialog::new()
                     .set_title(title)
                     .set_file_name(&file_name)
-                    .add_filter(md_filter, &["md", "markdown"])
+                    .add_filter(filter, extensions)
                     .add_filter(txt_filter, &["txt"]);
 
                 if let Some(dir) = start_dir {

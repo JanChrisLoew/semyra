@@ -55,15 +55,23 @@ describe('ai-bundle', () => {
       expect(out.endsWith('\n````\n')).toBe(true);
     });
 
-    it('formats as XML <file> element with escaped path attribute and </file> guard', () => {
-      const out = formatAiContextEntry(
-        'docs/"a&b"<c>.md',
-        'Line 1\n</file>\n</FILE>\nLine 2',
-        { format: 'xml' },
-      );
-      expect(out).toBe(
-        '<file path="docs/&quot;a&amp;b&quot;&lt;c&gt;.md">\nLine 1\n&lt;/file>\n&lt;/FILE>\nLine 2\n</file>\n',
-      );
+    it('round-trips paths and text through an XML parser', () => {
+      const entries = [
+        { label: 'docs/"A&B"\t\r\n.md', content: '\nA & B <xml/> ]]> </file> &amp; 😀\r\n\n' },
+        { label: 'empty.md', content: '' },
+        { label: 'last.md', content: 'no trailing newline' },
+      ];
+      const { payload } = buildAiContextBundle(entries, { format: 'xml' });
+      const root = new DOMParser().parseFromString(payload, 'application/xml').documentElement;
+      expect(root.tagName).toBe('context');
+      expect(Array.from(root.children, file => ({
+        label: file.getAttribute('path'), content: file.textContent,
+      }))).toEqual(entries);
+    });
+
+    it.each(['\0', '\u000b', '\uD800', '\uFFFF'])('rejects characters outside XML 1.0', invalid => {
+      expect(() => formatAiContextEntry('file.md', invalid, { format: 'xml' })).toThrow();
+      expect(() => formatAiContextEntry(invalid, '', { format: 'xml' })).toThrow();
     });
 
     it('strips leading YAML frontmatter when stripFrontmatter is true', () => {
@@ -125,8 +133,8 @@ describe('ai-bundle', () => {
         { format: 'xml', stripFrontmatter: true, stripComments: true },
       );
       expect(res.fileCount).toBe(2);
-      expect(res.payload).toContain('<file path="a.md">\nHello world\n</file>');
-      expect(res.payload).toContain('<file path="b.md">\nSecond file\n</file>');
+      expect(res.payload).toContain('<file path="a.md">Hello world</file>');
+      expect(res.payload).toContain('<file path="b.md">Second file</file>');
       expect(res.payload).not.toContain('k: v');
       expect(res.payload).not.toContain('hidden');
     });

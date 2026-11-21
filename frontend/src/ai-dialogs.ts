@@ -1,6 +1,7 @@
 import { backend, type FilePayload } from './api';
 import {
   buildAiContextBundle,
+  InvalidXmlCharacter,
   extractTemplateVariables,
   interpolateTemplateVariables,
   toWorkspaceRelativeLabel,
@@ -22,7 +23,7 @@ export interface AiBundleDialogDeps {
   tabs: AiBundleTabInfo[];
   workspaceRootPath: string | null;
   onShowToast: (msg: string) => void;
-  onSaveBundle?: (bundleText: string) => Promise<string | null>;
+  onSaveBundle?: (bundleText: string, format: AiContextFormat) => Promise<string | null>;
 }
 
 export interface PromptVariablesDialogOptions {
@@ -310,16 +311,21 @@ export function openAiBundleDialogModal(deps: AiBundleDialogDeps): void {
   const refreshSummary = () => {
     const selected = items.filter((item) => item.checked);
     const loadedSelected = selected.filter((item) => item.content !== null);
-    const knownTokens =
-      loadedSelected.length > 0
-        ? buildAiContextBundle(
-            loadedSelected.map((item) => ({
-              label: getBundleLabel(item),
-              content: item.content ?? '',
-            })),
-            getBundleOptions(),
-          ).totalTokens
-        : 0;
+    let knownTokens: number;
+    try {
+      knownTokens = buildAiContextBundle(
+        loadedSelected.map(item => ({ label: getBundleLabel(item), content: item.content ?? '' })),
+        getBundleOptions(),
+      ).totalTokens;
+    } catch (err) {
+      if (!(err instanceof InvalidXmlCharacter)) throw err;
+      totalEl.textContent = t('aiBundle.invalidXml', { file: err.label });
+      copyBtn.disabled = true;
+      if (saveBtn) saveBtn.disabled = true;
+      if (budgetFill) budgetFill.style.width = '0';
+      if (budgetStatus) budgetStatus.textContent = '';
+      return;
+    }
 
     totalEl.textContent = t('aiBundle.totalSummary', {
       count: String(selected.length),
@@ -559,7 +565,7 @@ export function openAiBundleDialogModal(deps: AiBundleDialogDeps): void {
         return { label, content: '' };
       }),
     );
-    return buildAiContextBundle(entries, options);
+    return { ...buildAiContextBundle(entries, options), format: options.format ?? 'markdown' };
   };
 
   const loadWorkspaceFiles = async () => {
@@ -604,7 +610,7 @@ export function openAiBundleDialogModal(deps: AiBundleDialogDeps): void {
   retryBtn.onclick = () => { void loadWorkspaceFiles(); };
 
   const runOutput = async (
-    output: (bundle: ReturnType<typeof buildAiContextBundle>) => Promise<string | null>,
+    output: (bundle: Awaited<ReturnType<typeof buildSelectedBundle>>) => Promise<string | null>,
     outputErrorKey: string,
   ) => {
     if (outputPending || !items.some((item) => item.checked)) return;
@@ -626,7 +632,7 @@ export function openAiBundleDialogModal(deps: AiBundleDialogDeps): void {
       if (!isCurrent()) return;
       console.error('Could not export AI context:', err);
       actionError.hidden = false;
-      actionError.textContent = t(errorKey);
+      actionError.textContent = err instanceof InvalidXmlCharacter ? t('aiBundle.invalidXml', { file: err.label }) : t(errorKey);
     } finally {
       outputPending = false;
       if (isCurrent()) refreshSummary();
@@ -644,7 +650,7 @@ export function openAiBundleDialogModal(deps: AiBundleDialogDeps): void {
   const saveBundle = deps.onSaveBundle;
   if (saveBtn) {
     saveBtn.onclick = saveBundle
-      ? () => runOutput((bundle) => saveBundle(bundle.payload), 'aiBundle.saveFailed')
+      ? () => runOutput((bundle) => saveBundle(bundle.payload, bundle.format), 'aiBundle.saveFailed')
       : null;
   }
 
