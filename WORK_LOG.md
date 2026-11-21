@@ -4,6 +4,12 @@ Dieses Protokoll hält abgeschlossene Features, größere Korrekturen, Releases 
 
 ---
 
+## 2026-11-21 — Produktprüfbericht auf den Nachprüfstand gebracht
+
+Der Produktprüfbericht dokumentiert die Korrekturen bis zum Merge von PR #12, den Codestand der Erstbefunde und die offenen Schritte für den Windows-Pilot. [Produktprüfbericht](docs/PRODUKTPRUEFUNG-2026-11-20.md)
+
+---
+
 ## 2026-11-21 — Eingabelatenz, Entwurfszeitgeber und Einstieg
 
 Die Statusleiste berechnet Dokumentstatistiken nach einer kurzen Pause und verwendet die Tokenzahl je Tab-Inhalt wieder. Die Dokumentprüfung läuft zeitversetzt zur Vorschau. Der Entwurfszeitgeber ist in einem eigenen Modul mit unveränderten Intervallen von 1,1 und 5 Sekunden. Die Sitzungswiederherstellung meldet keinen angeblichen Sprachwechsel. Das Begrüßungsdokument führt auf Deutsch und Englisch durch ein erstes Projekt-Kontextpaket. HTML übernimmt lang aus dem führenden YAML-Frontmatter und verwendet sonst die App-Sprache.
@@ -18,7 +24,7 @@ Lokal bestanden Typecheck, 218 Frontend-Tests, 33 Edge-Tests, 48 Rust-Tests und 
 
 Die native Navigation prüft Schema, Host und Port. WebView2 akzeptiert die HTTPS-Adresse der App und die registrierte Semyra-Adresse. Externe Web- und Mail-Links werden an Windows übergeben. Neue Fenster und die IPC-Funktion zum Öffnen externer Links verwenden dieselbe URL-Prüfung.
 
-Lokal bestanden Typecheck, 218 Frontend-Tests, 31 Edge-Tests, 47 Rust-Tests und der x64-Release-Build. Der Rust-Test prüft die native Zuordnung der URLs. Die tatsächliche Übergabe von WebView2 an den Windows-Standardbrowser steht als manuelle Abnahme aus.
+Lokal bestanden Typecheck, 218 Frontend-Tests, 31 Edge-Tests, 47 Rust-Tests und der x64-Release-Build. Der Rust-Test prüft die native Zuordnung der URLs. Die spätere native Nachprüfung bestätigte die Übergabe eines lokalen Testlinks an den Windows-Standardbrowser.
 
 ---
 
@@ -26,7 +32,7 @@ Lokal bestanden Typecheck, 218 Frontend-Tests, 31 Edge-Tests, 47 Rust-Tests und 
 
 Semyra und Mermaid 12.3.0 verwenden gemeinsam KaTeX 0.18.10. Der Lockfile enthält damit keine KaTeX-Laufzeitversion mehr im betroffenen Bereich von GHSA-238p-pmpm-9mq7. Die gemeinsam unterstützte KaTeX-0.18-Reihe kommt ohne Abhängigkeits-Override aus.
 
-Typecheck, 218 Frontend-Tests, 31 Edge-Tests, 46 Rust-Tests und der x64-Release-Build bestanden. Ein neuer Edge-Test prüft Markdown-Formeln und Mathematik in Mermaid-Labels in Vorschau, Zwischenablage, HTML und Drucklayout. Die native PDF-Erzeugung und das Einfügen in Office bleiben manuelle Abnahmeschritte.
+Typecheck, 218 Frontend-Tests, 31 Edge-Tests, 46 Rust-Tests und der x64-Release-Build bestanden. Ein neuer Edge-Test prüft Markdown-Formeln und Mathematik in Mermaid-Labels in Vorschau, Zwischenablage, HTML und Drucklayout. Die spätere native Nachprüfung bestätigte ein einseitiges PDF mit Formel und Tabelle. Das Einfügen in Office und mehrseitige PDF-Umbrüche bleiben offen.
 
 ---
 

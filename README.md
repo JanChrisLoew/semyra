@@ -10,7 +10,7 @@ Mit Repository-Zugriff findest du die x64-EXE als Artefakt `Semyra-win11-x64` in
 
 1. **Ordner öffnen** und eine Datei über den Dateibaum oder `Strg+E` auswählen.
 2. **Markdown bearbeiten und prüfen.** Die Vorschau läuft beim Schreiben mit. Mit `Alt+2` wechselst du zur geteilten Ansicht.
-3. **KI-Kontext zusammenstellen.** Klicke mit der rechten Maustaste auf den Namen des Arbeitsordners und wähle **KI-Kontext bündeln…**. Wähle etwa `AGENTS.md`, eine `SKILL.md`-Datei und Projektdokumentation aus. Auch ungeöffnete Dateien lassen sich mit relativen Pfaden als Markdown oder XML kopieren. Der Befehl steht ebenfalls im Teilen-Menü und in der Befehlspalette.
+3. **KI-Kontext zusammenstellen.** Klicke mit der rechten Maustaste auf den Namen des Arbeitsordners und wähle **KI-Kontext bündeln…**. Wähle etwa `AGENTS.md`, eine `SKILL.md`-Datei und Projektdokumentation aus. Auch ungeöffnete Dateien lassen sich mit relativen Pfaden als Markdown oder XML bündeln und kopieren. Ein XML-Paket kann als `ai-context.xml` gespeichert werden. Der Befehl steht ebenfalls im Teilen-Menü und in der Befehlspalette.
 
 ## Funktionen
 
@@ -63,6 +63,7 @@ Das Skript prüft TypeScript, führt Frontend- und Rust-Unit-Tests aus und baut 
 
 ## Projektdokumentation
 
+- [Produktprüfbericht](docs/PRODUKTPRUEFUNG-2026-11-20.md) mit dem Stand der Korrekturen und der offenen Pilotabnahme.
 - [Produktkontext](docs/PRODUCT_CONTEXT.md) für Produktversprechen, Gestaltung und UI-Regeln.
 - [AGENTS.md](AGENTS.md) für Architektur-Einstiege, Entwicklungsablauf und Sicherheitsregeln.
 - [Work Log](WORK_LOG.md) für größere Änderungen, Releases und offene Punkte.
