@@ -123,17 +123,14 @@ function stripHtmlCommentsOutsideFences(content: string): string {
     .join('\n');
 }
 
-function escapeXmlAttr(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/'/g, '&apos;');
+export class InvalidXmlCharacter extends Error {
+  constructor(readonly label: string) {
+    super('Invalid XML 1.0 character');
+  }
 }
 
-function escapeClosingFileTags(content: string): string {
-  return content.replace(/<\/(file)(\s*>)/gi, '&lt;/$1$2');
+function escapeXmlText(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r/g, '&#13;');
 }
 
 function prepareEntryContent(content: string, options?: AiBundleOptions): string {
@@ -159,10 +156,10 @@ export function formatAiContextEntry(
   const format = options?.format ?? 'markdown';
 
   if (format === 'xml') {
-    const safePath = escapeXmlAttr(label);
-    const safeContent = escapeClosingFileTags(processed);
-    const body = safeContent.endsWith('\n') ? safeContent : `${safeContent}\n`;
-    return `<file path="${safePath}">\n${body}</file>\n`;
+    const invalid = /[^\u0009\u000A\u000D\u0020-\uD7FF\uE000-\uFFFD\u{10000}-\u{10FFFF}]/u;
+    if (invalid.test(label) || invalid.test(processed)) throw new InvalidXmlCharacter(label);
+    const path = escapeXmlText(label).replace(/"/g, '&quot;').replace(/\t/g, '&#9;').replace(/\n/g, '&#10;');
+    return `<file path="${path}">${escapeXmlText(processed)}</file>\n`;
   }
 
   let fence = '```';
@@ -189,7 +186,7 @@ export function buildAiContextBundle(
   const blocks = entries.map((entry) =>
     formatAiContextEntry(entry.label, entry.content, options),
   );
-  const payload = blocks.join('\n');
+  const payload = options?.format === 'xml' ? `<context>\n${blocks.join('')}</context>\n` : blocks.join('\n');
   return {
     payload,
     totalTokens: estimateTokens(payload),

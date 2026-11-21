@@ -4,6 +4,14 @@ Dieses Protokoll hält abgeschlossene Features, größere Korrekturen, Releases 
 
 ---
 
+## 2026-11-21 — XML-Kontextpakete
+
+Der Bündeldialog kopiert und speichert ein XML-Dokument mit einem gemeinsamen Kontext-Element. Ein Parser kann Pfade, Reihenfolge und aufbereitete Dateiinhalte einschließlich Leerzeilen exakt zurücklesen. Bei für XML 1.0 unzulässigen Zeichen nennt der Dialog die betroffene Datei. Der native Speicherdialog schlägt ai-context.xml mit XML-Dateifilter vor.
+
+Lokal bestanden Typecheck, Frontend-Build, 218 Frontend-Tests, 28 Edge-Tests, 46 Rust-Tests und der x64-Release-Build. Die Edge-Tests prüften kopierte Pakete im XML-Parser und den Speicherauftrag über simuliertes IPC.
+
+---
+
 ## 2026-11-21 — Kodierung beim Speichern und Ordner-Ersetzen
 
 Manuelles Speichern, Auto-Save und versionsgebundenes Ordner-Ersetzen erhalten die erkannte Kodierung und BOM. Nicht in Windows-1252 darstellbare Änderungen lassen sich beim manuellen Speichern ausdrücklich in UTF-8 konvertieren. Auto-Save meldet den ausstehenden manuellen Schritt. Sammeländerungen überspringen betroffene Dateien. „Speichern unter“ erzeugt weiterhin UTF-8.

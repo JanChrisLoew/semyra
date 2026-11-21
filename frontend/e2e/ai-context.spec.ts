@@ -4,7 +4,7 @@ const workspace = 'C:\\PilotWorkspace';
 const files = [
   { name: 'AGENTS.md', relPath: 'AGENTS.md', content: '# Saved instructions' },
   { name: 'NOTES.md', relPath: 'NOTES.md', content: '# Unrelated notes' },
-  { name: 'PRODUCT_CONTEXT.md', relPath: 'docs/PRODUCT_CONTEXT.md', content: '# Product goals' },
+  { name: 'PRODUCT_CONTEXT.md', relPath: 'docs/PRODUCT_CONTEXT.md', content: '# A & B\n\n<tag> &amp; </file>' },
   { name: 'SKILL.md', relPath: '.agents/skills/review/SKILL.md', content: '# Review skill' },
 ].map((file) => ({ ...file, path: `${workspace}\\${file.relPath.replaceAll('/', '\\')}` }));
 const [agents, notes, productContext, skill] = files;
@@ -71,6 +71,13 @@ async function openWorkspaceBundle(page: Page) {
   return bundle;
 }
 
+async function clipboardFiles(page: Page) {
+  return page.evaluate(async () => {
+    const xml = new DOMParser().parseFromString(await navigator.clipboard.readText(), 'application/xml');
+    return Array.from(xml.querySelectorAll('context > file'), file => [file.getAttribute('path'), file.textContent]);
+  });
+}
+
 test('bundles the selected tab and workspace files as XML from the command palette', async ({ page }) => {
   await openWorkspace(page);
 
@@ -93,11 +100,9 @@ test('bundles the selected tab and workspace files as XML from the command palet
 
   await expect(bundle).toBeHidden();
   await expect(page.getByText(/^3 Dateien .* als KI-Kontext kopiert$/)).toBeVisible();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe([
-    '<file path="AGENTS.md">', editedInstructions, '</file>', '',
-    '<file path="docs/PRODUCT_CONTEXT.md">', productContext.content, '</file>', '',
-    '<file path=".agents/skills/review/SKILL.md">', skill.content, '</file>', '',
-  ].join('\n'));
+  expect(await clipboardFiles(page)).toEqual([
+    [agents.relPath, editedInstructions], [productContext.relPath, productContext.content], [skill.relPath, skill.content],
+  ]);
 });
 
 test('bundles unopened workspace documents from the workspace context menu', async ({ page }) => {
@@ -116,10 +121,9 @@ test('bundles unopened workspace documents from the workspace context menu', asy
 
   await expect(bundle).toBeHidden();
   await expect(page.getByText(/^2 Dateien .* als KI-Kontext kopiert$/)).toBeVisible();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe([
-    '<file path="AGENTS.md">', agents.content, '</file>', '',
-    '<file path="docs/PRODUCT_CONTEXT.md">', productContext.content, '</file>', '',
-  ].join('\n'));
+  expect(await clipboardFiles(page)).toEqual([
+    [agents.relPath, agents.content], [productContext.relPath, productContext.content],
+  ]);
 });
 
 test('retries a failed workspace listing inside the bundle dialog', async ({ page }) => {
@@ -187,15 +191,19 @@ test('keeps the bundle open after a canceled or failed save', async ({ page }) =
   await loadWorkspace(page, []);
   let attempts = 0;
   await page.route('**/api/dialog/save-file', (route) => {
+    const { defaultName, content } = route.request().postDataJSON();
+    expect(defaultName).toBe('ai-context.xml');
+    expect(content).toContain(`<file path="AGENTS.md">${agents.content}</file>`);
     switch (++attempts) {
       case 1: return route.fulfill({ json: { saved: false } });
       case 2: return route.fulfill({ status: 500, json: { error: 'Test write failure' } });
-      default: return route.fulfill({ json: { saved: true, path: workspace + '\\ai-context.md' } });
+      default: return route.fulfill({ json: { saved: true, path: workspace + '\\ai-context.xml' } });
     }
   });
   const bundle = await openWorkspaceBundle(page);
   const selected = bundle.getByRole('checkbox', { name: /^AGENTS\.md/ });
   const save = bundle.getByRole('button', { name: 'Als Datei speichern' });
+  await bundle.getByRole('button', { name: 'XML (<file>)' }).click();
   await selected.check();
   await save.click();
   await expect.poll(() => attempts).toBe(1);
@@ -207,7 +215,7 @@ test('keeps the bundle open after a canceled or failed save', async ({ page }) =
   await expect(bundle.getByRole('alert')).toContainText('Der KI-Kontext konnte nicht gespeichert werden');
   await save.click();
   await expect(bundle).toBeHidden();
-  await expect(page.getByText('KI-Kontext-Bündel gespeichert: ai-context.md')).toBeVisible();
+  await expect(page.getByText('KI-Kontext-Bündel gespeichert: ai-context.xml')).toBeVisible();
 });
 
 test('Control+Shift+A copies only the active tab as Markdown context', async ({ page }) => {
