@@ -4,6 +4,32 @@ Dieses Protokoll hält abgeschlossene Features, größere Korrekturen, Releases 
 
 ---
 
+## 2026-11-21 — Eingabelatenz, Entwurfszeitgeber und Einstieg
+
+Die Statusleiste berechnet Dokumentstatistiken nach einer kurzen Pause und verwendet die Tokenzahl je Tab-Inhalt wieder. Die Dokumentprüfung läuft zeitversetzt zur Vorschau. Der Entwurfszeitgeber ist in einem eigenen Modul mit unveränderten Intervallen von 1,1 und 5 Sekunden. Die Sitzungswiederherstellung meldet keinen angeblichen Sprachwechsel. Das Begrüßungsdokument führt auf Deutsch und Englisch durch ein erstes Projekt-Kontextpaket. HTML übernimmt lang aus dem führenden YAML-Frontmatter und verwendet sonst die App-Sprache.
+
+Auf dem Intel Core Ultra 9 285K mit nativer WebView2-Instanz und frischen lokalen Testprofilen fiel der Median vom Tastendruck bis zum nächsten Frame bei 1 MiB von 30,2 auf 11,4 ms. Die Vorschau erreichte 191,6 statt 201,1 ms. Bei 64 KiB lagen die Mediane bei 5,2 → 3,0 ms beziehungsweise 53,0 → 53,5 ms. Je Kombination gingen zehn Eingaben nach drei Aufwärmeingaben ein. Gemessen wurde mit einem synthetischen Markdown-Dokument.
+
+Lokal bestanden Typecheck, 218 Frontend-Tests, 33 Edge-Tests, 48 Rust-Tests und der x64-Release-Build. In WebView2 wurden ein interner Anker und die Übergabe eines lokalen Testlinks an den Standardbrowser geprüft. Ein über den nativen Dialog gespeichertes PDF wurde in einem zweiten Renderer geöffnet und mit Formel und Tabelle visuell kontrolliert. Office, Windows-Sprachausgabe, tatsächliche Windows-Anzeigeskalierung und die beobachtete Pilotaufgabe bleiben separate Abnahmeschritte.
+
+---
+
+## 2026-11-21 — Navigation in WebView2
+
+Die native Navigation prüft Schema, Host und Port. WebView2 akzeptiert die HTTPS-Adresse der App und die registrierte Semyra-Adresse. Externe Web- und Mail-Links werden an Windows übergeben. Neue Fenster und die IPC-Funktion zum Öffnen externer Links verwenden dieselbe URL-Prüfung.
+
+Lokal bestanden Typecheck, 218 Frontend-Tests, 31 Edge-Tests, 47 Rust-Tests und der x64-Release-Build. Der Rust-Test prüft die native Zuordnung der URLs. Die tatsächliche Übergabe von WebView2 an den Windows-Standardbrowser steht als manuelle Abnahme aus.
+
+---
+
+## 2026-11-21 — KaTeX und Mermaid aktualisiert
+
+Semyra und Mermaid 12.3.0 verwenden gemeinsam KaTeX 0.18.10. Der Lockfile enthält damit keine KaTeX-Laufzeitversion mehr im betroffenen Bereich von GHSA-238p-pmpm-9mq7. Die gemeinsam unterstützte KaTeX-0.18-Reihe kommt ohne Abhängigkeits-Override aus.
+
+Typecheck, 218 Frontend-Tests, 31 Edge-Tests, 46 Rust-Tests und der x64-Release-Build bestanden. Ein neuer Edge-Test prüft Markdown-Formeln und Mathematik in Mermaid-Labels in Vorschau, Zwischenablage, HTML und Drucklayout. Die native PDF-Erzeugung und das Einfügen in Office bleiben manuelle Abnahmeschritte.
+
+---
+
 ## 2026-11-21 — Textkontrast in Hauptansicht und Einstellungen
 
 Die gemeinsamen Textfarben für untergeordnete Beschriftungen wurden für beide Themes angepasst. Im hellen Theme erreicht der Ordnertitel 4,75:1 und der Speicherstatus 4,93:1, im dunklen Theme der Ordnertitel 5,83:1. Zwei Edge-Regressionstests prüfen die Hauptansicht und die geöffneten Einstellungen mit der axe-Kontrastregel. Die separate manuelle Abnahme der Tableiste mit Windows-Sprachausgabe bleibt offen.

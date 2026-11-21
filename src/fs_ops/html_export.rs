@@ -102,7 +102,14 @@ where
     Some(format!("data:{mime};base64,{encoded}"))
 }
 
-pub fn build_standalone_html_document(title: &str, rendered_body_html: &str) -> String {
+pub fn build_standalone_html_document(
+    title: &str,
+    rendered_body_html: &str,
+    markdown: &str,
+    is_en: bool,
+) -> String {
+    let language = crate::markdown::document_language(markdown)
+        .unwrap_or_else(|| if is_en { "en".into() } else { "de".into() });
     let mut escaped_title = String::new();
     for ch in title.chars() {
         match ch {
@@ -116,7 +123,7 @@ pub fn build_standalone_html_document(title: &str, rendered_body_html: &str) -> 
 
     format!(
         r#"<!doctype html>
-<html lang="de">
+<html lang="{language}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -251,9 +258,22 @@ mod tests {
 
     #[test]
     fn escapes_html_title_safely() {
-        let doc = build_standalone_html_document("<script>\"Test\" & Co</script>", "<p>Inhalt</p>");
+        let doc = build_standalone_html_document("<script>\"Test\" & Co</script>", "<p>Inhalt</p>", "", false);
         assert!(doc.contains("<title>&lt;script&gt;&quot;Test&quot; &amp; Co&lt;/script&gt;</title>"));
         assert!(doc.contains("<p>Inhalt</p>"));
+    }
+
+    #[test]
+    fn exports_frontmatter_language_or_application_language() {
+        for (source, is_en, expected) in [
+            ("---\nlang: 'en-GB'\n---\n# Heading", false, "en-GB"),
+            ("\u{feff}---\r\nlang: zh-Hant-TW\r\n---\r\n# Heading", false, "zh-Hant-TW"),
+            ("---\nlang: bad_tag\n---\n# Heading", true, "en"),
+            ("# Heading\n\nlang: fr", false, "de"),
+        ] {
+            let html = build_standalone_html_document("Example", "<p>Text</p>", source, is_en);
+            assert!(html.contains(&format!("<html lang=\"{expected}\">")), "{source:?}");
+        }
     }
 
     #[test]

@@ -396,6 +396,38 @@ fn find_closing_prompt_tag(lines: &[LineSpan<'_>], open_idx: usize, tag: &str) -
     None
 }
 
+/// Reads the language declared in the leading YAML frontmatter.
+pub fn document_language(markdown: &str) -> Option<String> {
+    let mut parser = Parser::new_ext(
+        markdown.strip_prefix('\u{feff}').unwrap_or(markdown),
+        Options::ENABLE_YAML_STYLE_METADATA_BLOCKS,
+    );
+    if !matches!(parser.next(), Some(Event::Start(Tag::MetadataBlock(_)))) {
+        return None;
+    }
+    let mut yaml = String::new();
+    for event in parser {
+        match event {
+            Event::Text(text) => yaml.push_str(&text),
+            Event::End(TagEnd::MetadataBlock(_)) => break,
+            _ => {}
+        }
+    }
+    let language = parse_frontmatter_chips(&yaml)
+        .into_iter()
+        .find(|(key, _)| key == "lang")
+        .map(|(_, value)| value)?;
+    // Accept language tags such as en, en-GB and zh-Hant-TW.
+    let mut subtags = language.split('-');
+    let primary = subtags.next()?;
+    let valid = (1..=8).contains(&primary.len())
+        && primary.bytes().all(|byte| byte.is_ascii_alphabetic())
+        && subtags.all(|part| {
+            (1..=8).contains(&part.len()) && part.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        });
+    valid.then_some(language)
+}
+
 pub fn render_markdown(markdown: &str, base_dir: Option<&Path>) -> RenderResult {
     let line_index = LineIndex::new(markdown);
 

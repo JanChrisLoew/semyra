@@ -2,7 +2,13 @@ import { getLanguage, Language } from './i18n';
 
 export const WELCOME_MARKDOWN_DE = `# Willkommen bei Semyra 👋
 
-**Semyra** ist dein nativer **Windows 11 Markdown-Viewer und -Editor für das KI-Zeitalter** auf Basis von **Rust** (\`pulldown-cmark\` + \`syntect\`) mit sofortiger Live-Vorschau.
+**Semyra** is your local Markdown editor for Windows 11. Edit the text on the left and see the preview on the right.
+
+## Share a project as context
+
+1. Open a project folder with **Ctrl + Shift + O**.
+2. Open two files in the Explorer, such as \`README.md\` and \`AGENTS.md\`, and check them in the preview.
+3. Press **Ctrl + Shift + P** to open the **Command Palette**, choose **Bundle AI Context**, select both files, and click **Copy Context**.
 
 > [!TIP]
 > Drücke **Strg + E** für die **Schnellauswahl** (Dateien & Verlauf) oder **Strg + Umschalt + P** für die **Befehlspalette**. Öffne Dateien über **Strg + O**, füge Screenshots per **Strg + V** ein oder ziehe Dateien & Bilder direkt per **Drag & Drop** ins Fenster!
@@ -52,7 +58,13 @@ flowchart LR
 
 export const WELCOME_MARKDOWN_EN = `# Welcome to Semyra 👋
 
-**Semyra** is your native **Windows 11 Markdown viewer and editor for the AI era**, powered by **Rust** (\`pulldown-cmark\` + \`syntect\`) with instant live preview.
+**Semyra** is your local Markdown editor for Windows 11. Edit the text on the left and see the preview on the right.
+
+## Share a project as context
+
+1. Open a project folder with **Ctrl + Shift + O**.
+2. Open two files in the Explorer, such as \`README.md\` and \`AGENTS.md\`, and check them in the preview.
+3. Press **Ctrl + Shift + P** to open the **Command Palette**, choose **Bundle AI Context**, select both files, and click **Copy Context**.
 
 > [!TIP]
 > Press **Ctrl + E** for **Quick Open** (files & history) or **Ctrl + Shift + P** for the **Command Palette**. Open files with **Ctrl + O**, paste screenshots via **Ctrl + V**, or drag & drop files and images directly into the window!

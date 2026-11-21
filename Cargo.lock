@@ -2249,6 +2249,7 @@ dependencies = [
  "syntect",
  "tao",
  "trash",
+ "url",
  "webview2-com",
  "window-vibrancy",
  "windows-core",
