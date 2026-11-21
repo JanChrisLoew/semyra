@@ -930,9 +930,7 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige URL"));
                 return;
             };
-            if req.url.starts_with("https://")
-                || req.url.starts_with("http://")
-                || req.url.starts_with("mailto:")
+            if crate::navigation::classify_url(&req.url) == crate::navigation::NavigationTarget::External
             {
                 let _ = state.proxy.send_event(UserEvent::OpenExternalUrl(req.url));
             }

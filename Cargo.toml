@@ -28,6 +28,7 @@ dirs = "5.0"
 dom_query = "0.28"
 base64 = "0.22"
 trash = "5.2"
+url = "2.5"
 regex = "1"
 sha2 = "0.10"
 

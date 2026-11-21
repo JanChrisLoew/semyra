@@ -4,6 +4,14 @@ Dieses Protokoll hält abgeschlossene Features, größere Korrekturen, Releases 
 
 ---
 
+## 2026-11-21 — Navigation in WebView2
+
+Die native Navigation prüft Schema, Host und Port. WebView2 akzeptiert die HTTPS-Adresse der App und die registrierte Semyra-Adresse. Externe Web- und Mail-Links werden an Windows übergeben. Neue Fenster und die IPC-Funktion zum Öffnen externer Links verwenden dieselbe URL-Prüfung.
+
+Lokal bestanden Typecheck, 218 Frontend-Tests, 31 Edge-Tests, 47 Rust-Tests und der x64-Release-Build. Der Rust-Test prüft die native Zuordnung der URLs. Die tatsächliche Übergabe von WebView2 an den Windows-Standardbrowser steht als manuelle Abnahme aus.
+
+---
+
 ## 2026-11-21 — KaTeX und Mermaid aktualisiert
 
 Semyra und Mermaid 12.3.0 verwenden gemeinsam KaTeX 0.18.10. Der Lockfile enthält damit keine KaTeX-Laufzeitversion mehr im betroffenen Bereich von GHSA-238p-pmpm-9mq7. Die gemeinsam unterstützte KaTeX-0.18-Reihe kommt ohne Abhängigkeits-Override aus.

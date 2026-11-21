@@ -5,6 +5,7 @@ mod fs_ops;
 mod icon_gen;
 mod ipc;
 mod markdown;
+mod navigation;
 mod single_instance;
 mod state;
 mod window_prefs;
@@ -12,6 +13,7 @@ mod window_prefs;
 use crate::fs_ops::{clean_windows_path, is_image_path, normalize_existing_path};
 use crate::icon_gen::render_semyra_rgba;
 use crate::ipc::handle_protocol_request;
+use crate::navigation::{classify_url, NavigationTarget};
 use crate::single_instance::{
     cleanup_instance_lock, start_primary_instance_listener, try_forward_to_running_instance,
 };
@@ -156,23 +158,17 @@ fn build_webview_with_context<'a>(
             handle_protocol_request(protocol_state.clone(), req, responder);
         })
         .with_navigation_handler(move |uri| {
-            let allowed = uri.starts_with("https://semyra.localhost")
-                || uri.starts_with("http://semyra.localhost")
-                || uri.starts_with("semyra://");
-            if !allowed
-                && (uri.starts_with("https://")
-                    || uri.starts_with("http://")
-                    || uri.starts_with("mailto:"))
-            {
-                let _ = nav_proxy.send_event(UserEvent::OpenExternalUrl(uri));
+            match classify_url(&uri) {
+                NavigationTarget::Internal => true,
+                NavigationTarget::External => {
+                    let _ = nav_proxy.send_event(UserEvent::OpenExternalUrl(uri));
+                    false
+                }
+                NavigationTarget::Blocked => false,
             }
-            allowed
         })
         .with_new_window_req_handler(move |uri, _features| {
-            if uri.starts_with("https://")
-                || uri.starts_with("http://")
-                || uri.starts_with("mailto:")
-            {
+            if classify_url(&uri) == NavigationTarget::External {
                 let _ = new_win_proxy.send_event(UserEvent::OpenExternalUrl(uri));
             }
             NewWindowResponse::Deny
