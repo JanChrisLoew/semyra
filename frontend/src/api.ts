@@ -132,8 +132,9 @@ export const backend = {
     lineEnding: string,
     expectedContent: string,
     expectedLineEnding?: string,
-  ) => postJson<{ saved: boolean }>('write-file', {
-    path, content, lineEnding, expectedContent, expectedLineEnding,
+    encodingOptions?: { preferWindows1252: boolean; convertWindows1252?: boolean },
+  ) => postJson<{ saved: boolean; encoding?: string; conversionRequired?: boolean }>('write-file', {
+    path, content, lineEnding, expectedContent, expectedLineEnding, ...encodingOptions,
   }),
 
   listTree: (path: string, activateWorkspace = true) =>

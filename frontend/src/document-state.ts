@@ -104,6 +104,10 @@ export function classifyDiskUpdate(
 ): DiskUpdate {
   const localChanged = localBeforeRead.content !== document.currentContent
     || localBeforeRead.lineEnding !== document.lineEnding;
+  // ASCII bytes are identical in UTF-8 and Windows-1252. Keep the open tab's known encoding.
+  if (document.encoding === 'Windows-1252' && disk.encoding === 'UTF-8' && !/[^\x00-\x7F]/.test(disk.content)) {
+    disk = { ...disk, encoding: document.encoding };
+  }
   const hasLineEndings = disk.content.includes('\n');
   const matchesLocal = document.currentContent === disk.content
     && (document.lineEnding === disk.lineEnding || (!hasLineEndings && !document.isDirty));

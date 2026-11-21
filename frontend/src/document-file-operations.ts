@@ -6,7 +6,7 @@ import {
   type DiskDocumentVersion,
   type FileDocument,
 } from './document-state';
-import { getLanguage } from './i18n';
+import { getLanguage, t } from './i18n';
 
 interface DocumentFileOperationsDeps<T> {
   isOpen: (document: T) => boolean;
@@ -45,6 +45,7 @@ export class DocumentFileOperations<T extends FileDocument> {
 
   private async writeSnapshot(document: T, forceSaveAs: boolean, automatic: boolean): Promise<boolean> {
     const { path, currentContent: content, lineEnding } = document;
+    let encoding = 'UTF-8';
     const savedAs = !path || forceSaveAs;
     const stillAtOriginalPath = () => this.deps.isOpen(document) && document.path === path;
     try {
@@ -58,8 +59,22 @@ export class DocumentFileOperations<T extends FileDocument> {
         document.parentDir = result.parentDir ?? document.parentDir;
       } else {
         const expected = expectedDiskVersion(document, automatic);
-        const result = await backend.writeFile(path, content, lineEnding, expected.content, expected.lineEnding);
+        const write = (convertWindows1252 = false) => backend.writeFile(
+          path, content, lineEnding, expected.content, expected.lineEnding,
+          { preferWindows1252: document.encoding === 'Windows-1252', convertWindows1252 },
+        );
+        let result = await write();
         if (!stillAtOriginalPath()) return false;
+        if (result.conversionRequired) {
+          if (automatic) {
+            this.deps.onSaveError(new Error(t('encoding.autoSave')));
+            return false;
+          }
+          if (!window.confirm(t('encoding.confirm', { name: document.name }))) return false;
+          result = await write(true);
+          if (!stillAtOriginalPath()) return false;
+        }
+        encoding = result.encoding ?? document.encoding;
         if (!result.saved) {
           this.deps.onSaveConflict(document);
           return false;
@@ -71,7 +86,7 @@ export class DocumentFileOperations<T extends FileDocument> {
     }
 
     this.diskReads.delete(document);
-    recordSavedDocumentVersion(document, content, lineEnding);
+    recordSavedDocumentVersion(document, content, lineEnding, encoding);
     this.deps.onSaved(document, path, savedAs);
     return true;
   }

@@ -4,6 +4,14 @@ Dieses Protokoll hält abgeschlossene Features, größere Korrekturen, Releases 
 
 ---
 
+## 2026-11-21 — Kodierung beim Speichern und Ordner-Ersetzen
+
+Manuelles Speichern, Auto-Save und versionsgebundenes Ordner-Ersetzen erhalten die erkannte Kodierung und BOM. Nicht in Windows-1252 darstellbare Änderungen lassen sich beim manuellen Speichern ausdrücklich in UTF-8 konvertieren. Auto-Save meldet den ausstehenden manuellen Schritt. Sammeländerungen überspringen betroffene Dateien. „Speichern unter“ erzeugt weiterhin UTF-8.
+
+Bytevergleiche prüfen alle fünf unterstützten Varianten einschließlich CRLF. Frontend-Tests prüfen Auto-Save, Abbruch und Zustimmung. Lokal bestanden Typecheck, Frontend- und x64-Release-Build, 214 Frontend-Tests, 28 Edge-Tests und 46 Rust-Tests. Der Edge-Lauf verwendete lokal einen separaten Loopback-Port.
+
+---
+
 ## 2026-11-21 — Trefferzahl vor dem Ersetzen im Arbeitsordner
 
 Die Suche zählt für jede durchsuchte Datei alle Vorkommen und Trefferzeilen. Die Vorschau zeigt höchstens 40 Zeilen pro Datei und 300 insgesamt und kennzeichnet eine Kürzung. Die Bestätigung nennt die Vorkommen in der aktuellen Dateiauswahl. Beim Schreiben gelten weiterhin die Versionen der Suchergebnisse.

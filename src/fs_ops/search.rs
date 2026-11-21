@@ -372,7 +372,7 @@ pub fn replace_in_workspace_with_options(
             });
             continue;
         }
-        let (content, _) = decode_text_bytes(&bytes);
+        let (content, encoding) = decode_text_bytes(&bytes);
         let prefer_crlf = content.contains("\r\n");
 
         let (updated, count, changed) = if let Some(ref re) = compiled_regex {
@@ -396,7 +396,7 @@ pub fn replace_in_workspace_with_options(
             (replaced, count, changed)
         };
         if changed {
-            match replace_text_file(&file_path, &updated, prefer_crlf, &bytes) {
+            match replace_text_file(&file_path, &updated, prefer_crlf, &bytes, encoding) {
                 Ok(()) => {
                     files_updated += 1;
                     total_replacements += count;
