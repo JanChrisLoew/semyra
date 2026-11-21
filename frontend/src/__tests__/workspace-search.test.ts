@@ -6,6 +6,8 @@ const guideResult: SearchFileResult = {
   path: 'C:\\Projekte\\Notes\\Guide.md',
   relPath: 'Guide.md',
   name: 'Guide.md',
+  occurrenceCount: 1,
+  matchingLines: 1,
   contentVersion: 'guide-v1',
   matches: [{ line: 1, column: 1, preview: 'old text' }],
 };
@@ -75,6 +77,8 @@ describe('WorkspaceSearchController', () => {
         path: 'C:\\Projekte\\Notes\\Guide.md',
         relPath: 'Guide.md',
         name: 'Guide.md',
+        occurrenceCount: 2,
+        matchingLines: 2,
         contentVersion: 'guide-v1',
         matches: [
           { line: 5, column: 3, preview: 'Semyra rocks' },
@@ -85,6 +89,8 @@ describe('WorkspaceSearchController', () => {
         path: 'C:\\Projekte\\Notes\\TODO.md',
         relPath: 'TODO.md',
         name: 'TODO.md',
+        occurrenceCount: 1,
+        matchingLines: 1,
         contentVersion: 'todo-v1',
         matches: [{ line: 2, column: 7, preview: 'Test Semyra' }],
       },
@@ -191,6 +197,8 @@ describe('WorkspaceSearchController', () => {
           path: 'C:\\B.md',
           relPath: 'B.md',
           name: 'B.md',
+          occurrenceCount: 1,
+          matchingLines: 1,
           contentVersion: 'ab-v1',
           matches: [{ line: 1, column: 1, preview: 'AB match' }],
         },
@@ -209,6 +217,8 @@ describe('WorkspaceSearchController', () => {
           path: 'C:\\A.md',
           relPath: 'A.md',
           name: 'A.md',
+          occurrenceCount: 1,
+          matchingLines: 1,
           contentVersion: 'stale-v1',
           matches: [{ line: 1, column: 1, preview: 'A stale match' }],
         },
@@ -288,7 +298,7 @@ describe('WorkspaceSearchController', () => {
       const pending = controller.runReplaceAll();
       await controller.runReplaceAll();
       expect(dialog.showModal).toHaveBeenCalledTimes(1);
-      expect(message.textContent).toBe('„old“ in der ausgewählten Datei durch „replacement“ ersetzen?');
+      expect(message.textContent).toBe('1 Vorkommen von „old“ in der ausgewählten Datei durch „replacement“ ersetzen?');
 
       switch (change) {
         case 'query':
@@ -385,6 +395,8 @@ describe('WorkspaceSearchController', () => {
         path: 'C:\\Projekte\\Notes\\A.md',
         relPath: 'A.md',
         name: 'A.md',
+        occurrenceCount: 100,
+        matchingLines: 50,
         contentVersion: 'a-v1',
         matches: [{ line: 1, column: 1, preview: 'old text' }],
       },
@@ -392,6 +404,8 @@ describe('WorkspaceSearchController', () => {
         path: 'C:\\Projekte\\Notes\\B.md',
         relPath: 'B.md',
         name: 'B.md',
+        occurrenceCount: 1,
+        matchingLines: 1,
         contentVersion: 'b-v1',
         matches: [{ line: 2, column: 1, preview: 'old text' }],
       },
@@ -429,11 +443,14 @@ describe('WorkspaceSearchController', () => {
     expect(checkboxes[1].checked).toBe(true);
     expect(replaceAllBtn.disabled).toBe(false);
 
+    expect(resultsContainerEl.textContent).toContain('101 Treffer in 2 Dateien');
+    expect(resultsContainerEl.textContent).toContain('Vorschau gekürzt');
     // Uncheck B.md so only A.md is included
     checkboxes[1].checked = false;
     checkboxes[1].dispatchEvent(new Event('change'));
     await controller.runReplaceAll();
 
+    expect(window.confirm).toHaveBeenCalledWith('100 Vorkommen von „old“ in der ausgewählten Datei durch „new“ ersetzen?');
     expect(searchSpy).toHaveBeenCalledWith('C:\\Projekte\\Notes', 'old', false, false, false);
     expect(replaceSpy).toHaveBeenCalledWith(
       'C:\\Projekte\\Notes',

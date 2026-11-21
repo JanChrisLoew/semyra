@@ -1,15 +1,35 @@
 /**
- * Zero-dependency Markdown formatter that protects YAML frontmatter, fenced
+ * Markdown formatter that protects YAML frontmatter, literal
  * code blocks, and display math while normalizing headings, list markers,
  * GFM tables, trailing whitespace, and blank lines.
  */
+import { markdownLanguage } from '@codemirror/lang-markdown';
+import { Text } from '@codemirror/state';
 import {
   formatMarkdownTableLines,
   isTableSeparatorRow,
   splitMarkdownTableRow,
 } from './markdown-table';
 
-const FENCE_OPEN_RE = /^(\s*)(`{3,}|~{3,})/;
+function findFormattingBoundaries(lines: string[], start: number) {
+  const verbatim = new Set<number>();
+  const hardBreaks = new Set<number>();
+  if (start >= lines.length) return { verbatim, hardBreaks };
+  const body = Text.of(lines.slice(start));
+  markdownLanguage.parser.parse(body.toString()).iterate({
+    enter(node) {
+      if (node.name === 'HardBreak') {
+        hardBreaks.add(start + body.lineAt(node.from).number - 1);
+      }
+      if (!['CodeBlock', 'FencedCode', 'HorizontalRule'].includes(node.name)) return;
+      const first = body.lineAt(node.from).number;
+      const last = body.lineAt(node.to).number;
+      for (let line = first; line <= last; line++) verbatim.add(start + line - 1);
+      return false;
+    },
+  });
+  return { verbatim, hardBreaks };
+}
 
 function findFrontmatterEndLine(lines: string[]): number {
   if (lines.length === 0 || lines[0].trim() !== '---') return -1;
@@ -30,20 +50,20 @@ function trimTrailingPreservingHardBreak(line: string): string {
   return line.replace(/[ \t]+$/, '');
 }
 
-function normalizeBodyLine(line: string): string {
-  let next = trimTrailingPreservingHardBreak(line);
+function normalizeBodyLine(line: string, hardBreak: boolean): string {
+  let next = hardBreak ? line : trimTrailingPreservingHardBreak(line);
   // ATX heading: ensure single space after `#`
   const headingMatch = next.match(/^(#{1,6})\s*([^\s#].*)$/);
   if (headingMatch) {
     next = `${headingMatch[1]} ${headingMatch[2]}`;
   }
   // Unordered list marker: normalize `* ` / `+ ` to `- `
-  next = next.replace(/^(\s*)[*+]\s+/, '$1- ');
+  next = next.replace(/^(\s*)[*+](?=[ \t])/, '$1-');
   return next;
 }
 
 /**
- * Formats a Markdown document cleanly without external dependencies.
+ * Formats a Markdown document using the editor's Markdown grammar.
  * Preserves the original line ending convention (`CRLF` or `LF`).
  */
 export function formatMarkdownDocument(content: string): string {
@@ -65,7 +85,7 @@ export function formatMarkdownDocument(content: string): string {
     idx = fmEnd + 1;
   }
 
-  let openFence: { char: string; len: number } | null = null;
+  const { verbatim, hardBreaks } = findFormattingBoundaries(lines, idx);
   let inMathBlock = false;
   let consecutiveBlanks = 0;
 
@@ -73,16 +93,8 @@ export function formatMarkdownDocument(content: string): string {
     const line = lines[idx];
     const trimmed = line.trim();
 
-    if (openFence) {
+    if (!inMathBlock && verbatim.has(idx)) {
       out.push(line);
-      const closeMatch = line.match(/^\s*(`{3,}|~{3,})\s*$/);
-      if (
-        closeMatch &&
-        closeMatch[1][0] === openFence.char &&
-        closeMatch[1].length >= openFence.len
-      ) {
-        openFence = null;
-      }
       consecutiveBlanks = 0;
       idx++;
       continue;
@@ -103,24 +115,14 @@ export function formatMarkdownDocument(content: string): string {
       continue;
     }
 
-    const fenceMatch = line.match(FENCE_OPEN_RE);
-    if (fenceMatch) {
-      const token = fenceMatch[2];
-      openFence = { char: token[0], len: token.length };
-      out.push(line);
-      consecutiveBlanks = 0;
-      idx++;
-      continue;
-    }
-
     // Format contiguous GFM table blocks via markdown-table.ts
     const firstRow = splitMarkdownTableRow(line);
     const secondRow =
       idx + 1 < lines.length ? splitMarkdownTableRow(lines[idx + 1]) : null;
-    if (firstRow && secondRow && isTableSeparatorRow(secondRow)) {
+    if (firstRow && secondRow && !verbatim.has(idx + 1) && isTableSeparatorRow(secondRow)) {
       const tableLines: string[] = [line, lines[idx + 1]];
       let scan = idx + 2;
-      while (scan < lines.length && splitMarkdownTableRow(lines[scan]) !== null) {
+      while (scan < lines.length && !verbatim.has(scan) && splitMarkdownTableRow(lines[scan]) !== null) {
         tableLines.push(lines[scan]);
         scan++;
       }
@@ -140,10 +142,12 @@ export function formatMarkdownDocument(content: string): string {
     }
 
     consecutiveBlanks = 0;
-    out.push(normalizeBodyLine(line));
+    out.push(normalizeBodyLine(line, hardBreaks.has(idx)));
     idx++;
   }
 
+  // An unclosed fence can extend through the final empty lines.
+  if (verbatim.has(lines.length - 1) && content.endsWith('\n')) return out.join(eol);
   // Trim trailing blank lines and ensure a single trailing newline
   while (out.length > 0 && out[out.length - 1] === '') {
     out.pop();

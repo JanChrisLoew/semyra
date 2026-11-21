@@ -26,6 +26,8 @@ pub struct SearchFileResult {
     pub name: String,
     pub rel_path: String,
     pub matches: Vec<SearchMatchItem>,
+    pub occurrence_count: usize,
+    pub matching_lines: usize,
     pub content_version: String,
 }
 
@@ -104,8 +106,8 @@ pub fn search_workspace_with_options(
     use_regex: bool,
     whole_word: bool,
 ) -> Result<Vec<SearchFileResult>, String> {
-    const MAX_TOTAL_MATCHES: usize = 300;
-    const MAX_MATCHES_PER_FILE: usize = 40;
+    const MAX_PREVIEW_LINES: usize = 300;
+    const MAX_PREVIEW_LINES_PER_FILE: usize = 40;
 
     let trimmed_q = query.trim();
     if trimmed_q.is_empty() {
@@ -119,24 +121,13 @@ pub fn search_workspace_with_options(
     let active_query = if use_regex { query } else { trimmed_q };
     let compiled_regex = build_search_regex(active_query, case_sensitive, use_regex, whole_word)?;
 
-    let needle = if compiled_regex.is_some() {
-        String::new()
-    } else if case_sensitive {
-        trimmed_q.to_string()
-    } else {
-        trimmed_q.to_lowercase()
-    };
-
     let mut scan = WorkspaceScan::default();
     scan.collect_files(&norm_root, 0);
 
     let mut results = Vec::new();
-    let mut total_matches = 0usize;
+    let mut preview_lines = 0usize;
 
     for file_path in scan.files {
-        if total_matches >= MAX_TOTAL_MATCHES {
-            break;
-        }
         if let Ok(meta) = fs::metadata(&file_path) {
             if meta.len() > 5 * 1024 * 1024 {
                 continue;
@@ -147,38 +138,45 @@ pub fn search_workspace_with_options(
         };
         let (content, _) = decode_text_bytes(&bytes);
 
+        let text = search_text(&content, compiled_regex.is_some());
+        let preview_limit = MAX_PREVIEW_LINES_PER_FILE.min(MAX_PREVIEW_LINES - preview_lines);
         let mut file_matches = Vec::new();
-        for (idx, raw_line) in content.lines().enumerate() {
-            let found_col = if let Some(ref re) = compiled_regex {
-                re.find(raw_line)
-                    .map(|m| raw_line[..m.start()].chars().count() + 1)
-            } else if case_sensitive {
-                raw_line
-                    .find(&needle)
-                    .map(|byte_pos| raw_line[..byte_pos].chars().count() + 1)
-            } else {
-                let h_lower = raw_line.to_lowercase();
-                h_lower
-                    .find(&needle)
-                    .map(|byte_pos| h_lower[..byte_pos].chars().count() + 1)
-            };
-
-            if let Some(col) = found_col {
-                let trimmed_preview: String = raw_line.trim().chars().take(140).collect();
-                file_matches.push(SearchMatchItem {
-                    line: idx + 1,
-                    column: col,
-                    preview: trimmed_preview,
-                });
-                total_matches += 1;
-                if file_matches.len() >= MAX_MATCHES_PER_FILE || total_matches >= MAX_TOTAL_MATCHES
-                {
-                    break;
-                }
+        let mut occurrence_count = 0;
+        let mut matching_lines = 0;
+        let mut line = 1;
+        let mut start = 0;
+        let mut end = text.find('\n').unwrap_or(text.len());
+        let mut previous_match_line = 0;
+        let mut record = |offset: usize| {
+            occurrence_count += 1;
+            while offset > end {
+                line += 1;
+                start = end + 1;
+                end = text[start..].find('\n').map_or(text.len(), |pos| start + pos);
             }
+            if previous_match_line == line {
+                return;
+            }
+            previous_match_line = line;
+            matching_lines += 1;
+            if file_matches.len() < preview_limit {
+                file_matches.push(SearchMatchItem {
+                    line,
+                    column: text[start..offset].chars().count() + 1,
+                    preview: text[start..end].trim().chars().take(140).collect(),
+                });
+            }
+        };
+        if let Some(re) = &compiled_regex {
+            for found in re.find_iter(&text) {
+                record(found.start());
+            }
+        } else {
+            visit_literal_matches(&text, active_query, case_sensitive, |from, _| record(from));
         }
+        preview_lines += file_matches.len();
 
-        if !file_matches.is_empty() {
+        if occurrence_count > 0 {
             let norm = clean_windows_path(&file_path);
             let rel_path = norm
                 .strip_prefix(&norm_root)
@@ -195,6 +193,8 @@ pub fn search_workspace_with_options(
                 name,
                 rel_path,
                 matches: file_matches,
+                occurrence_count,
+                matching_lines,
                 content_version: content_version(&bytes),
             });
         }
@@ -376,11 +376,7 @@ pub fn replace_in_workspace_with_options(
         let prefer_crlf = content.contains("\r\n");
 
         let (updated, count, changed) = if let Some(ref re) = compiled_regex {
-            let normalized: Cow<'_, str> = if prefer_crlf {
-                Cow::Owned(content.replace("\r\n", "\n"))
-            } else {
-                Cow::Borrowed(content.as_str())
-            };
+            let normalized = search_text(&content, true);
             let count = re.find_iter(&normalized).count();
             if count == 0 {
                 (String::new(), 0, false)
@@ -436,45 +432,51 @@ fn replace_text_occurrences(
     replacement: &str,
     case_sensitive: bool,
 ) -> (String, usize) {
-    if case_sensitive {
-        let count = haystack.matches(query).count();
-        if count == 0 {
-            return (String::new(), 0);
-        }
-        return (haystack.replace(query, replacement), count);
-    }
-
-    if query.is_empty() {
-        return (String::new(), 0);
-    }
-
-    let query_lower = query.to_lowercase();
-    if query_lower.is_empty() {
-        return (String::new(), 0);
-    }
-
-    // Fast path for pure ASCII: byte offsets in `to_ascii_lowercase()` match `haystack` 1:1.
-    if haystack.is_ascii() && query.is_ascii() {
-        let hay_lower = haystack.to_ascii_lowercase();
-        let mut out = String::with_capacity(haystack.len());
-        let mut last = 0usize;
-        let mut count = 0usize;
-        for (idx, _) in hay_lower.match_indices(&query_lower) {
-            if idx < last {
-                continue;
-            }
-            out.push_str(&haystack[last..idx]);
-            out.push_str(replacement);
-            last = idx + query_lower.len();
-            count += 1;
-        }
-        if count == 0 {
-            return (String::new(), 0);
-        }
+    let mut out = String::new();
+    let mut last = 0;
+    let mut count = 0;
+    visit_literal_matches(haystack, query, case_sensitive, |start, end| {
+        out.push_str(&haystack[last..start]);
+        out.push_str(replacement);
+        last = end;
+        count += 1;
+    });
+    if count > 0 {
         out.push_str(&haystack[last..]);
-        return (out, count);
     }
+    (out, count)
+}
 
+fn search_text(content: &str, normalize_crlf: bool) -> Cow<'_, str> {
+    if normalize_crlf && content.contains("\r\n") {
+        Cow::Owned(content.replace("\r\n", "\n"))
+    } else {
+        Cow::Borrowed(content)
+    }
+}
+
+fn visit_literal_matches(
+    haystack: &str,
+    query: &str,
+    case_sensitive: bool,
+    mut visit: impl FnMut(usize, usize),
+) {
+    if query.is_empty() {
+        return;
+    }
+    if case_sensitive {
+        for (start, matched) in haystack.match_indices(query) {
+            visit(start, start + matched.len());
+        }
+        return;
+    }
+    let query_lower = query.to_lowercase();
+    if haystack.is_ascii() && query.is_ascii() {
+        for (start, matched) in haystack.to_ascii_lowercase().match_indices(&query_lower) {
+            visit(start, start + matched.len());
+        }
+        return;
+    }
     // Unicode-safe case-insensitive matching: map each byte of `hay_lower` back to
     // the original `(char_start, char_end)` byte span in `haystack`.
     let mut hay_lower = String::with_capacity(haystack.len());
@@ -491,15 +493,7 @@ fn replace_text_occurrences(
         }
     }
 
-    let mut out = String::with_capacity(haystack.len());
-    let mut last_orig = 0usize;
-    let mut last_lower = 0usize;
-    let mut count = 0usize;
-
     for (l_start, matched) in hay_lower.match_indices(&query_lower) {
-        if l_start < last_lower {
-            continue;
-        }
         let l_end = l_start + matched.len();
         if l_end == l_start {
             continue;
@@ -514,27 +508,58 @@ fn replace_text_occurrences(
 
         let orig_start = byte_map[l_start].0;
         let orig_end = byte_map[l_end - 1].1;
-        if orig_start < last_orig {
-            continue;
-        }
-
-        out.push_str(&haystack[last_orig..orig_start]);
-        out.push_str(replacement);
-        last_orig = orig_end;
-        last_lower = l_end;
-        count += 1;
+        visit(orig_start, orig_end);
     }
-
-    if count == 0 {
-        return (String::new(), 0);
-    }
-    out.push_str(&haystack[last_orig..]);
-    (out, count)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_limits_do_not_limit_occurrences_or_selected_replacements() {
+        let dir = std::env::temp_dir().join(format!("semyra_search_counts_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        for index in 0..9 {
+            fs::write(dir.join(format!("{index}.md")), "alpha alpha\r\n".repeat(50)).unwrap();
+        }
+        let results = search_workspace_files(&dir, "alpha", false).unwrap();
+        assert_eq!(results.len(), 9);
+        assert_eq!(results[0].matches.len(), 40);
+        assert!(results[8].matches.is_empty());
+        assert_eq!(results.iter().map(|file| file.matches.len()).sum::<usize>(), 300);
+        assert!(results.iter().all(|file| file.occurrence_count == 100 && file.matching_lines == 50));
+        let selected = &results[0];
+        let target = ReplaceTarget::Versioned {
+            path: selected.path.clone(),
+            content_version: selected.content_version.clone(),
+        };
+        let replaced = replace_in_workspace_with_options(
+            &dir, "alpha", "beta", false, false, false, Some(vec![target]),
+        ).unwrap();
+        assert_eq!(replaced.total_replacements, selected.occurrence_count);
+        assert_eq!(fs::read_to_string(&selected.path).unwrap(), "beta beta\r\n".repeat(50));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn search_and_replace_share_multiline_and_unicode_match_boundaries() {
+        let dir = std::env::temp_dir().join(format!("semyra_match_boundaries_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("document.md");
+        for (input, query, regex, expected) in [
+            ("one\r\ntwo\r\none\r\ntwo", r"one\ntwo", true, 2),
+            ("İ i", "i", false, 1),
+            ("x\r\n", "$", true, 2),
+        ] {
+            fs::write(&path, input).unwrap();
+            let found = search_workspace_with_options(&dir, query, false, regex, false).unwrap();
+            assert_eq!(found[0].occurrence_count, expected);
+            let replaced = replace_in_workspace_with_options(&dir, query, "!", false, regex, false, None).unwrap();
+            assert_eq!(replaced.total_replacements, expected);
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn scan_records_an_unreadable_path_and_still_collects_other_files() {

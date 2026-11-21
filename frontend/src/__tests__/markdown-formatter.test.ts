@@ -2,6 +2,22 @@ import { describe, expect, it } from 'vitest';
 import { formatMarkdownDocument } from '../markdown-formatter';
 
 describe('formatMarkdownDocument', () => {
+  it.each([
+    '    * example  \n\n\n    + another\n',
+    '\t|Name|Value|\n\t|---|---|\n\t|A|B|\n',
+    '- item\n\n      * literal\n      + literal\n',
+    '> ~~~md\n> * literal   \n> ~~~\n',
+    '* * *\n\n  *  *  *\n',
+    'Line one    \nLine two\n',
+    '```md\n* example\n\n\n',
+  ])('keeps literal blocks, thematic breaks and hard breaks intact: %j', (input) => {
+    expect(formatMarkdownDocument(input)).toBe(input);
+  });
+
+  it('handles frontmatter ending at EOF', () => {
+    expect(formatMarkdownDocument('---\nname: example\n---')).toBe('---\nname: example\n---\n');
+  });
+
   it('preserves YAML frontmatter and fenced code blocks verbatim while formatting Markdown', () => {
     const input = [
       '---',

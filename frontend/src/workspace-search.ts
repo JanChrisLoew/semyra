@@ -29,7 +29,7 @@ interface SearchCriteria {
 interface SearchSelection {
   criteria: SearchCriteria;
   files: Set<string>;
-  versions: Map<string, string>;
+  resultsByPath: Map<string, SearchFileResult>;
 }
 
 /**
@@ -270,11 +270,12 @@ export class WorkspaceSearchController {
     const replacement = this.deps.replaceInputEl?.value ?? '';
     const includeFiles = Array.from(files);
 
+    const hits = includeFiles.reduce((sum, path) => sum + selection.resultsByPath.get(path)!.occurrenceCount, 0);
     this.replacePending = true;
     try {
       const confirmed = await this.confirmReplace(
         t(includeFiles.length === 1 ? 'search.replaceConfirmOne' : 'search.replaceConfirm', {
-          query, replacement, count: includeFiles.length,
+          query, replacement, hits, count: includeFiles.length,
         }),
       );
       if (!confirmed || this.selection !== selection || !this.isCurrentSearch(criteria)
@@ -289,7 +290,7 @@ export class WorkspaceSearchController {
         caseSensitive,
         useRegex,
         wholeWord,
-        includeFiles.map((path) => ({ path, contentVersion: selection.versions.get(path)! })),
+        includeFiles.map((path) => ({ path, contentVersion: selection.resultsByPath.get(path)!.contentVersion })),
       );
       if (this.deps.onFilesReplaced) {
         await this.deps.onFilesReplaced(res);
@@ -343,12 +344,12 @@ export class WorkspaceSearchController {
 
     const resultPaths = results.map((f) => f.path);
     const selectedFiles = new Set(resultPaths.filter((path) => !selected || selected.has(path)));
-    const versions = new Map(results.map(({ path, contentVersion }) => [path, contentVersion]));
-    this.selection = { criteria, files: selectedFiles, versions };
+    const resultsByPath = new Map(results.map((result) => [result.path, result]));
+    this.selection = { criteria, files: selectedFiles, resultsByPath };
     this.updateButtons();
 
     const isEn = getLanguage() === 'en';
-    const totalHits = results.reduce((acc, f) => acc + f.matches.length, 0);
+    const totalHits = results.reduce((acc, f) => acc + f.occurrenceCount, 0);
     const fileLabel = results.length === 1 ? t('search.file') : t('search.files');
     const summaryText = t('search.summary', { count: totalHits, files: results.length, fileLabel });
     if (this.deps.statusBadgeEl) {
@@ -361,7 +362,11 @@ export class WorkspaceSearchController {
 
     const summaryTextEl = document.createElement('span');
     summaryTextEl.className = 'search-summary-text';
-    summaryTextEl.textContent = summaryText;
+    const shown = results.reduce((sum, file) => sum + file.matches.length, 0);
+    const lines = results.reduce((sum, file) => sum + file.matchingLines, 0);
+    summaryTextEl.textContent = shown < lines
+      ? `${summaryText} · ${t('search.previewLimited', { shown, lines })}`
+      : summaryText;
 
     const selectToggleBtn = document.createElement('button');
     selectToggleBtn.type = 'button';
@@ -439,7 +444,7 @@ export class WorkspaceSearchController {
 
       const countSpan = document.createElement('span');
       countSpan.className = 'search-hit-count';
-      countSpan.textContent = String(fileRes.matches.length);
+      countSpan.textContent = String(fileRes.occurrenceCount);
 
       header.append(checkbox, nameSpan, countSpan);
       group.appendChild(header);
