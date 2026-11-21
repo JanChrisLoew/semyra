@@ -1178,12 +1178,13 @@ fn handle_api_route(
                             render_markdown(&req.markdown, base).html
                         }
                     };
-                    let self_contained_body =
-                        inline_local_asset_images(&raw_body, |p| state.is_local_asset_allowed(p));
+                    let (self_contained_body, images) =
+                        inline_local_asset_images(&raw_body, is_en, |p| state.is_local_asset_allowed(p));
                     let doc = build_standalone_html_document(stem, &self_contained_body);
                     match write_text_file(&chosen, &doc, true) {
                         Ok(saved_path) => responder.respond(ok_json(&serde_json::json!({
                             "exported": true,
+                            "images": images,
                             "path": saved_path
                         }))),
                         Err(err) => {

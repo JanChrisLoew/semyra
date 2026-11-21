@@ -262,7 +262,7 @@ test('HTML export uses the original document after switching tabs', async ({ pag
       },
     });
   });
-  await page.route('**/api/dialog/export-html', (route) => route.fulfill({ json: { exported: false } }));
+  await page.route('**/api/dialog/export-html', (route) => route.fulfill({ json: { exported: true, path: "Draft.html", images: { embedded: 1, missing: 2, external: 3 } } }));
   await page.locator('#btn-share-menu').click();
   await page.locator('#btn-share-export-html').click();
   await expect.poll(() => Boolean(finishRender)).toBe(true);
@@ -273,6 +273,7 @@ test('HTML export uses the original document after switching tabs', async ({ pag
   expect((await exportRequest).postDataJSON()).toMatchObject({
     title: 'Draft.md', markdown: 'Original', renderedHtml: '<p>Source document</p>',
   });
+  await expect(page.getByText('Draft.html exportiert. Bilder: 1 eingebettet, 2 lokal nicht verfügbar, 3 extern ausgelassen.')).toBeVisible();
   await expect(page.locator('#preview-content')).toHaveText('Other document');
 });
 

@@ -5,46 +5,61 @@ use std::path::Path;
 
 const MAX_INLINE_IMAGE_BYTES: u64 = 15 * 1024 * 1024;
 
-/// Replaces `/api/local-asset?path=...` image sources in rendered HTML with self-contained
-/// `data:<mime>;base64,...` URIs, strictly enforcing `is_allowed` per Security Invariant #1.
-pub fn inline_local_asset_images<F>(html: &str, is_allowed: F) -> String
+#[derive(Default, serde::Serialize)]
+pub struct ExportImages {
+    pub embedded: usize,
+    pub missing: usize,
+    pub external: usize,
+}
+
+/// Resolve actual image elements in both the WebView snapshot and the native render fallback.
+pub fn inline_local_asset_images<F>(html: &str, is_en: bool, is_allowed: F) -> (String, ExportImages)
 where
     F: Fn(&Path) -> bool,
 {
-    let mut out = String::with_capacity(html.len());
-    let mut rest = html;
-
-    while let Some(src_idx) = rest.find("src=\"") {
-        let after_attr = src_idx + 5;
-        out.push_str(&rest[..after_attr]);
-        rest = &rest[after_attr..];
-
-        let Some(end_quote) = rest.find('"') else {
-            out.push_str(rest);
-            return out;
-        };
-
-        let raw_url = &rest[..end_quote];
-        if let Some(local_path_encoded) = extract_local_asset_query_path(raw_url) {
-            let decoded = percent_decode_str(local_path_encoded)
-                .decode_utf8_lossy()
-                .into_owned();
-            let candidate = Path::new(&decoded);
-            if let Some(data_uri) = try_encode_allowed_image(candidate, &is_allowed) {
-                out.push_str(&data_uri);
-            } else {
-                out.push_str(raw_url);
-            }
-        } else {
-            out.push_str(raw_url);
+    let doc = dom_query::Document::fragment(html);
+    let mut counts = ExportImages::default();
+    doc.select("picture > source").remove();
+    for img in doc.select("img").iter() {
+        img.remove_attr("srcset");
+        let src = img.attr("src").unwrap_or_default();
+        let src = src.trim();
+        if src.get(..11).is_some_and(|s| s.eq_ignore_ascii_case("data:image/")) {
+            counts.embedded += 1;
+            continue;
         }
 
-        out.push('"');
-        rest = &rest[end_quote + 1..];
-    }
+        let local_path = extract_local_asset_query_path(src);
+        if let Some(encoded) = local_path {
+            if let Ok(path) = percent_decode_str(encoded).decode_utf8() {
+                if let Some(data_uri) = try_encode_allowed_image(Path::new(path.as_ref()), &is_allowed) {
+                    img.set_attr("src", &data_uri);
+                    counts.embedded += 1;
+                    continue;
+                }
+            }
+        }
 
-    out.push_str(rest);
-    out
+        let external = local_path.is_none() && (src.starts_with("//")
+            || src.get(..7).is_some_and(|s| s.eq_ignore_ascii_case("http://"))
+            || src.get(..8).is_some_and(|s| s.eq_ignore_ascii_case("https://")));
+        let label = if external {
+            counts.external += 1;
+            if is_en { "External image omitted from offline export" } else { "Externes Bild im Offline-Export ausgelassen" }
+        } else {
+            counts.missing += 1;
+            if is_en { "Local image unavailable" } else { "Lokales Bild nicht verfügbar" }
+        };
+        // Preserve the author's alternative text, escaping it as text in the placeholder.
+        let alt = img.attr("alt").unwrap_or_default();
+        let mut text = label.to_owned();
+        if !alt.trim().is_empty() {
+            text.push_str(" — ");
+            text.push_str(&alt.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"));
+        }
+        img.replace_with_html(format!("<span class=\"image-placeholder\">{text}</span>"));
+    }
+    (doc.html_root().inner_html().to_string(), counts)
 }
 
 fn extract_local_asset_query_path(url: &str) -> Option<&str> {
@@ -74,14 +89,15 @@ where
     if !is_allowed(candidate) {
         return None;
     }
-    let meta = fs::metadata(candidate).ok()?;
-    if !meta.is_file() || meta.len() > MAX_INLINE_IMAGE_BYTES {
-        return None;
-    }
-    let bytes = fs::read(candidate).ok()?;
-    let mime = mime_guess::from_path(candidate)
-        .first_or_octet_stream()
-        .to_string();
+    use std::io::Read;
+    let mime = mime_guess::from_path(candidate).first()?;
+    if mime.type_().as_str() != "image" { return None; }
+    let file = fs::File::open(candidate).ok()?;
+    let meta = file.metadata().ok()?;
+    if !meta.is_file() || meta.len() > MAX_INLINE_IMAGE_BYTES { return None; }
+    let mut bytes = Vec::with_capacity(meta.len() as usize);
+    file.take(MAX_INLINE_IMAGE_BYTES + 1).read_to_end(&mut bytes).ok()?;
+    if bytes.is_empty() || bytes.len() as u64 > MAX_INLINE_IMAGE_BYTES { return None; }
     let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Some(format!("data:{mime};base64,{encoded}"))
 }
@@ -207,6 +223,7 @@ pub fn build_standalone_html_document(title: &str, rendered_body_html: &str) -> 
     .math-display math, math[display="block"] {{ display: block; font-size: 1.12em; }}
     .mermaid-wrapper {{ margin: 1.2em 0; padding: 1rem; border: 1px solid var(--border); border-radius: 8px; background: #ffffff; color: #181c24; text-align: center; overflow-x: auto; }}
     .mermaid-wrapper svg {{ max-width: 100%; height: auto; }}
+    .image-placeholder {{ color: var(--muted); font-style: italic; }}
     img {{ max-width: 100%; height: auto; border-radius: 6px; }}
     a {{ color: var(--accent); text-decoration: none; }}
     a:hover {{ text-decoration: underline; }}
@@ -256,9 +273,22 @@ mod tests {
             "<p><img src=\"/api/local-asset?path={allowed_enc}\" alt=\"ok\"><img src=\"/api/local-asset?path={blocked_enc}\" alt=\"nope\"></p>"
         );
 
-        let result = inline_local_asset_images(&input_html, |p| p == allowed_img.as_path());
+        let oversized = tmp.join("oversized.png");
+        fs::File::create(&oversized).unwrap().set_len(MAX_INLINE_IMAGE_BYTES + 1).unwrap();
+        let large_enc = utf8_percent_encode(&oversized.to_string_lossy(), NON_ALPHANUMERIC).to_string();
+        let input = format!("{input_html}<img src='/api/local-asset?path={large_enc}'><img src='/api/local-asset?path=absent.png'><img src='https://example.org/photo.png' alt='A &amp; B'><code>src=&quot;literal&quot;</code><math><mi>x</mi></math><svg viewBox='0 0 1 1'><path d='M0 0'/></svg>");
+        let (result, images) = inline_local_asset_images(&input, false, |p| p != blocked_img);
+        assert_eq!((images.embedded, images.missing, images.external), (1, 3, 1));
         assert!(result.contains("src=\"data:image/png;base64,iVBORw==\""));
-        assert!(result.contains(&format!("src=\"/api/local-asset?path={blocked_enc}\"")));
+        assert!(!result.contains("/api/local-asset"));
+        assert!(!result.contains("example.org"));
+        assert!(!result.contains(&blocked_enc));
+        let parsed = dom_query::Document::fragment(result);
+        assert_eq!(parsed.select("span.image-placeholder").length(), 4);
+        assert!(parsed.select("span.image-placeholder").text().contains("A & B"));
+        assert_eq!(parsed.select("math mi").text().as_ref(), "x");
+        assert_eq!(parsed.select("svg path").length(), 1);
+        assert_eq!(parsed.select("code").text().as_ref(), "src=\"literal\"");
 
         let _ = fs::remove_dir_all(&tmp);
     }
