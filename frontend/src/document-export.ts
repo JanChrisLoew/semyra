@@ -136,7 +136,11 @@ export class DocumentExportController {
         getLanguage(),
       );
       if (res.exported && res.path) {
-        this.notify(t('toast.htmlExportSuccess', { name: baseNameOfPath(res.path) }));
+        const name = baseNameOfPath(res.path);
+        const images = res.images;
+        this.notify(images && (images.missing || images.external)
+          ? t('toast.htmlExportImages', { name, ...images })
+          : t('toast.htmlExportSuccess', { name }));
       }
     } catch (err) {
       console.error('HTML-Export fehlgeschlagen:', err);

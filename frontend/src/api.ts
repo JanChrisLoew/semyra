@@ -251,7 +251,7 @@ export const backend = {
     renderedHtml?: string,
     lang?: string,
   ) =>
-    postJson<{ exported: boolean; path?: string }>('dialog/export-html', {
+    postJson<{ exported: boolean; path?: string; images?: { embedded: number; missing: number; external: number } }>('dialog/export-html', {
       title,
       markdown,
       baseDir,

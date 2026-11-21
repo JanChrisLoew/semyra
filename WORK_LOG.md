@@ -4,6 +4,14 @@ Dieses Protokoll hält abgeschlossene Features, größere Korrekturen, Releases 
 
 ---
 
+## 2026-11-21 — Bilder im Offline-HTML-Export
+
+Beim HTML-Export bettet Semyra freigegebene lokale Bilder bis 15 MiB ein. Für fehlende, gesperrte oder zu große lokale Bilder und für externe Bildquellen erscheinen unterscheidbare Platzhalter mit vorhandenem Alternativtext. Die Exportmeldung nennt bei Lücken die Anzahl eingebetteter, lokal nicht verfügbarer und externer Bilder. Der Export verarbeitet die Bildelemente mit dem bereits im Lockfile enthaltenen HTML-Parser.
+
+Lokal bestanden Typecheck, Frontend- und x64-Release-Build, 218 Frontend-Tests, 28 Edge-Tests und 46 Rust-Tests. Eine nativ erzeugte HTML-Datei wurde nach Entfernen des Quellbilds im Offline-Modus von Edge geöffnet. Das eingebettete PNG wurde dekodiert, beide Platzhalter waren sichtbar, und es gab keine HTTP(S)-Anfrage. Die Prüfung lief auf demselben Windows-Rechner.
+
+---
+
 ## 2026-11-21 — XML-Kontextpakete
 
 Der Bündeldialog kopiert und speichert ein XML-Dokument mit einem gemeinsamen Kontext-Element. Ein Parser kann Pfade, Reihenfolge und aufbereitete Dateiinhalte einschließlich Leerzeilen exakt zurücklesen. Bei für XML 1.0 unzulässigen Zeichen nennt der Dialog die betroffene Datei. Der native Speicherdialog schlägt ai-context.xml mit XML-Dateifilter vor.
