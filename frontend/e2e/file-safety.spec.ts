@@ -29,6 +29,29 @@ async function openDraft(page: Page, autoSave = false, filePath = path) {
   return { editor, setDisk: (value: string) => { disk = value; } };
 }
 
+test('restores the session language without a language-change toast', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('semyra.language', 'en'));
+  await openDraft(page);
+  await expect(page.locator('html')).toHaveAttribute('lang', 'de');
+  await expect(page.getByText('Sprache geändert: Deutsch')).toHaveCount(0);
+});
+
+test('defers document statistics while typing and shows the latest revision after a pause', async ({ page }) => {
+  const { editor } = await openDraft(page);
+  const summary = page.locator('#status-doc-summary');
+  await expect(summary).toContainText('~3 Tokens');
+  await page.clock.install({ time: new Date('2025-01-01T00:00:00Z') });
+  await page.clock.pauseAt(new Date('2025-01-01T00:01:00Z'));
+  await editor.fill('x'.repeat(370));
+  await page.clock.runFor(100);
+  await expect(summary).toContainText('~3 Tokens');
+  await editor.fill('x'.repeat(740));
+  await page.clock.runFor(100);
+  await expect(summary).toContainText('~3 Tokens');
+  await page.clock.runFor(20);
+  await expect(summary).toContainText('~200 Tokens');
+});
+
 test('Markdown formatting is unavailable for a YAML tab', async ({ page }) => {
   const { editor } = await openDraft(page, false, 'C:\\Notes\\settings.yaml');
   await editor.fill('#config');

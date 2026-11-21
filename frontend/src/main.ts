@@ -75,6 +75,7 @@ import { findAdjacentTabId, reorderTabList, toggleTabPinned } from './tab-utils'
 import { bindThemeSystem, toggleTheme } from './theme';
 import { SettingsController } from './settings';
 import { getLanguage, setLanguage, onLanguageChange, t, updateDomLanguage, Language } from './i18n';
+import { DraftCheckpoint } from './draft-checkpoint';
 import { estimateTokens } from './token-utils';
 import { WELCOME_MARKDOWN, getWelcomeMarkdown } from './welcome';
 import { WorkspaceSearchController } from './workspace-search';
@@ -102,6 +103,9 @@ class SemyraApp {
     lineEnding: 'LF' | 'CRLF';
   }> = [];
   private lastSelection = { chars: 0, words: 0 };
+  private statusStatsTimer: number | undefined;
+  private statusLintTimer: number | undefined;
+  private readonly documentTokenCounts = new WeakMap<OpenTab, { content: string; count: number }>();
 
   private editor!: MarkdownEditorController;
   private syncScroll!: SyncScrollController;
@@ -161,8 +165,7 @@ class SemyraApp {
     onWindowCloseAborted: () => { document.body.inert = false; },
     onWindowCloseError: (err) => console.error('Fenster konnte nicht geschlossen werden:', err),
   });
-  private draftSyncTimer: number | undefined;
-  private draftDeadlineTimer: number | undefined;
+  private readonly draftCheckpoint = new DraftCheckpoint(() => this.persistDrafts());
   private draftRevision = 0;
   private recoveryRestored = false;
   private prefsSyncTimer: number | undefined;
@@ -246,7 +249,7 @@ class SemyraApp {
       onCursorChanged: (line, col, selChars, selWords) => {
         this.statusCursorEl.textContent = t('status.cursor', { line, col });
         this.lastSelection = { chars: selChars, words: selWords };
-        this.updateWordCountDisplay();
+        this.scheduleStatusStatistics();
       },
       onEditorScrolled: () => this.syncScroll.syncEditorToPreview(),
       onFormatCommand: (cmd) => this.editor.applyFormat(cmd),
@@ -580,8 +583,10 @@ class SemyraApp {
         onResetSplit: () => this.setSplitRatio(50),
         onSetLineEnding: (eol) => this.setActiveTabLineEnding(eol),
         onSetLanguage: (lang) => {
+          if (lang === getLanguage()) return;
           setLanguage(lang);
           this.schedulePrefsSave();
+          this.showToast(t('toast.langChanged'));
         },
         onOpenShortcuts: () => {
           (document.getElementById('shortcuts-dialog') as HTMLDialogElement)?.showModal();
@@ -615,7 +620,6 @@ class SemyraApp {
         );
       }
       this.syncWindowMetadata();
-      this.showToast(t('toast.langChanged'));
     });
     this.bindBackendEvents();
 
@@ -664,7 +668,7 @@ class SemyraApp {
         this.restoreRecoveredDrafts(startup.recoveredDrafts);
       }
       this.recoveryRestored = true;
-      if (startup.recoveredDrafts.length > 0) this.flushDraftSync();
+      if (startup.recoveredDrafts.length > 0) this.draftCheckpoint.flush();
     } catch {
       // Fallback to welcome tab
     }
@@ -1133,11 +1137,7 @@ class SemyraApp {
     }
   }
 
-  private flushDraftSync(): void {
-    window.clearTimeout(this.draftSyncTimer);
-    window.clearTimeout(this.draftDeadlineTimer);
-    this.draftSyncTimer = undefined;
-    this.draftDeadlineTimer = undefined;
+  private persistDrafts(): void {
     const dirtyEntries: DraftEntry[] = this.tabs
       .filter((t) => t.isDirty)
       .map((t) => ({
@@ -1153,15 +1153,6 @@ class SemyraApp {
       console.error('Entwurfswiederherstellung konnte nicht aktualisiert werden:', err);
       this.showToast(t('toast.draftSaveFailed'));
     });
-  }
-
-  private scheduleDraftSync(): void {
-    // Keep the first edit's deadline while later edits reset the idle timer.
-    this.draftDeadlineTimer ??= window.setTimeout(() => this.flushDraftSync(), 5000);
-    window.clearTimeout(this.draftSyncTimer);
-    this.draftSyncTimer = window.setTimeout(() => {
-      this.flushDraftSync();
-    }, 1100);
   }
 
   private pickImageFromDisk(): Promise<string | null> {
@@ -1304,7 +1295,7 @@ class SemyraApp {
     this.tabs.push(newTab);
     this.activateTab(id);
     if (markDirty) {
-      this.scheduleDraftSync();
+      this.draftCheckpoint.schedule();
     }
   }
 
@@ -1455,10 +1446,10 @@ class SemyraApp {
     this.updateStatusBar();
     this.syncWindowMetadata();
     if (tab.isDirty) {
-      this.flushDraftSync();
+      this.draftCheckpoint.flush();
       this.autoSave.schedule(tab);
     } else {
-      this.scheduleDraftSync();
+      this.draftCheckpoint.schedule();
     }
     this.schedulePrefsSave();
 
@@ -1474,7 +1465,7 @@ class SemyraApp {
     if (tab.path) {
       this.updateTabDirtyState(tab.id, tab.isDirty);
       this.syncWindowMetadata();
-      this.scheduleDraftSync();
+      this.draftCheckpoint.schedule();
       this.autoSave.schedule(tab);
     }
     this.updateStatusBar();
@@ -1512,7 +1503,7 @@ class SemyraApp {
       this.renderTabBar();
     }
     this.syncWindowMetadata();
-    this.flushDraftSync();
+    this.draftCheckpoint.flush();
     this.schedulePrefsSave();
   }
 
@@ -1601,7 +1592,7 @@ class SemyraApp {
     this.renderTabBar();
     this.updateStatusBar();
     this.syncWindowMetadata();
-    this.scheduleDraftSync();
+    this.draftCheckpoint.schedule();
     this.schedulePrefsSave();
   }
 
@@ -1642,7 +1633,7 @@ class SemyraApp {
       this.updateStatusBar();
     }
 
-    this.scheduleDraftSync();
+    this.draftCheckpoint.schedule();
     this.schedulePrefsSave();
   }
 
@@ -1658,8 +1649,9 @@ class SemyraApp {
       this.updateTabDirtyState(tab.id, tab.isDirty);
       this.syncWindowMetadata();
     }
-    this.updateStatusBar();
-    this.scheduleDraftSync();
+    this.updateSaveStatus(tab);
+    this.scheduleStatusStatistics(true);
+    this.draftCheckpoint.schedule();
 
     window.clearTimeout(this.renderDebounceTimer);
     ++this.renderSeq;
@@ -1693,7 +1685,7 @@ class SemyraApp {
         tab.stats = res.stats;
       }
       this.renderOutline(res.outline);
-      this.updateStatusBar();
+      if (this.statusStatsTimer === undefined) this.updateWordCountDisplay();
 
       if (typeof restoreScrollTop === 'number') {
         this.previewPaneEl.scrollTop = restoreScrollTop;
@@ -2005,21 +1997,44 @@ class SemyraApp {
     });
   }
 
-  private updateStatusBar(): void {
-    const tab = this.activeTab;
-    if (!tab) return;
-
-    const isEn = getLanguage() === 'en';
-    this.statusPathBtn.textContent = tab.path ?? tab.name;
+  private updateSaveStatus(tab: OpenTab): void {
     this.statusSaveBadge.textContent = tab.isDirty
       ? t('status.unsaved')
       : tab.path
         ? t('status.saved')
         : t('status.draft');
     this.statusSaveBadge.classList.toggle('is-dirty', tab.isDirty);
+  }
 
-    const { words, readingTimeSec } = tab.stats;
-    this.updateWordCountDisplay();
+  private scheduleStatusStatistics(updateLint = false): void {
+    window.clearTimeout(this.statusStatsTimer);
+    this.statusStatsTimer = window.setTimeout(() => {
+      this.statusStatsTimer = undefined;
+      this.updateWordCountDisplay();
+    }, 120);
+    if (updateLint) {
+      // Leave the live preview time to apply before scanning the document for lint issues.
+      window.clearTimeout(this.statusLintTimer);
+      this.statusLintTimer = window.setTimeout(() => {
+        const tab = this.activeTab;
+        if (tab) this.updateLintStatus(tab.currentContent, tab.path);
+      }, 350);
+    }
+  }
+
+  private updateStatusBar(): void {
+    const tab = this.activeTab;
+    if (!tab) return;
+
+    this.statusPathBtn.textContent = tab.path ?? tab.name;
+    this.updateSaveStatus(tab);
+    this.scheduleStatusStatistics(true);
+    this.statusZoomBtn.textContent = `${this.zoomPercent}%`;
+    this.statusEolBtn.textContent = tab.lineEnding;
+    this.statusEncodingEl.textContent = tab.encoding;
+  }
+
+  private updateReadingTime(readingTimeSec: number, isEn: boolean): void {
     if (this.statusReadtimeEl) {
       if (readingTimeSec < 60) {
         this.statusReadtimeEl.textContent = isEn ? `${readingTimeSec}s read time` : `${readingTimeSec} Sek. Lesezeit`;
@@ -2028,18 +2043,22 @@ class SemyraApp {
         this.statusReadtimeEl.textContent = isEn ? `~${mins} min read time` : `~${mins} Min. Lesezeit`;
       }
     }
-    this.statusZoomBtn.textContent = `${this.zoomPercent}%`;
-    this.statusEolBtn.textContent = tab.lineEnding;
-    this.statusEncodingEl.textContent = tab.encoding;
   }
 
   private updateWordCountDisplay(): void {
     const tab = this.activeTab;
     if (!tab) return;
     const { words, readingTimeSec } = tab.stats;
-    const totalTokens = estimateTokens(tab.currentContent);
+    let tokens = this.documentTokenCounts.get(tab);
+    if (tokens?.content !== tab.currentContent) {
+      tokens = { content: tab.currentContent, count: estimateTokens(tab.currentContent) };
+      this.documentTokenCounts.set(tab, tokens);
+    }
+    const totalTokens = tokens.count;
+    const selTokens = this.lastSelection.chars > 0 ? estimateTokens(this.editor.getSelectedText()) : 0;
     const isEn = getLanguage() === 'en';
     const locale = isEn ? 'en-US' : 'de-DE';
+    this.updateReadingTime(readingTimeSec, isEn);
     const wordLabel = isEn ? (words === 1 ? 'word' : 'words') : (words === 1 ? 'Wort' : 'Wörter');
     const readingTimeStr = readingTimeSec < 60
       ? (isEn ? `${readingTimeSec}s read time` : `${readingTimeSec} Sek. Lesezeit`)
@@ -2049,7 +2068,6 @@ class SemyraApp {
       if (this.lastSelection.chars > 0) {
         const selW = this.lastSelection.words;
         const selC = this.lastSelection.chars;
-        const selTokens = estimateTokens(this.editor?.getSelectedText() ?? '');
         this.statusDocSummaryBtn.textContent = isEn
           ? `${selW} of ${words.toLocaleString(locale)} words · ~${selTokens.toLocaleString(locale)} tokens`
           : `${selW} von ${words.toLocaleString(locale)} Wörtern · ~${selTokens.toLocaleString(locale)} Tokens`;
@@ -2078,17 +2096,10 @@ class SemyraApp {
     }
     if (this.statusTokensEl) {
       if (this.lastSelection.chars > 0) {
-        const selW = this.lastSelection.words;
-        const selC = this.lastSelection.chars;
-        const selTokens = estimateTokens(this.editor?.getSelectedText() ?? '');
         this.statusTokensEl.textContent = `~${selTokens.toLocaleString(locale)} Tokens (~${totalTokens.toLocaleString(locale)})`;
       } else {
         this.statusTokensEl.textContent = `~${totalTokens.toLocaleString(locale)} Tokens`;
       }
-    }
-
-    if (this.activeTab) {
-      this.updateLintStatus(this.activeTab.currentContent, this.activeTab.path);
     }
   }
 
@@ -2494,7 +2505,7 @@ class SemyraApp {
     this.renderTabBar();
     this.updateStatusBar();
     this.syncWindowMetadata();
-    this.scheduleDraftSync();
+    this.draftCheckpoint.schedule();
   }
 
   private dismissExternalConflictBanner(): void {
