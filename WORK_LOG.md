@@ -4,6 +4,14 @@ Dieses Protokoll hält abgeschlossene Features, größere Korrekturen, Releases 
 
 ---
 
+## 2026-11-21 — KaTeX und Mermaid aktualisiert
+
+Semyra und Mermaid 12.3.0 verwenden gemeinsam KaTeX 0.18.10. Der Lockfile enthält damit keine KaTeX-Laufzeitversion mehr im betroffenen Bereich von GHSA-238p-pmpm-9mq7. Die gemeinsam unterstützte KaTeX-0.18-Reihe kommt ohne Abhängigkeits-Override aus.
+
+Typecheck, 218 Frontend-Tests, 31 Edge-Tests, 46 Rust-Tests und der x64-Release-Build bestanden. Ein neuer Edge-Test prüft Markdown-Formeln und Mathematik in Mermaid-Labels in Vorschau, Zwischenablage, HTML und Drucklayout. Die native PDF-Erzeugung und das Einfügen in Office bleiben manuelle Abnahmeschritte.
+
+---
+
 ## 2026-11-21 — Textkontrast in Hauptansicht und Einstellungen
 
 Die gemeinsamen Textfarben für untergeordnete Beschriftungen wurden für beide Themes angepasst. Im hellen Theme erreicht der Ordnertitel 4,75:1 und der Speicherstatus 4,93:1, im dunklen Theme der Ordnertitel 5,83:1. Zwei Edge-Regressionstests prüfen die Hauptansicht und die geöffneten Einstellungen mit der axe-Kontrastregel. Die separate manuelle Abnahme der Tableiste mit Windows-Sprachausgabe bleibt offen.
