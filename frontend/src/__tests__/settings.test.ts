@@ -174,4 +174,27 @@ describe('SettingsController', () => {
     enBtn?.click();
     expect(callbacks.onSetLanguage).toHaveBeenCalledWith('en');
   });
+
+  it('resets dialog returnValue when the settings dialog closes', () => {
+    const callbacks = {
+      onToggleWordWrap: vi.fn(),
+      onToggleSpellcheck: vi.fn(),
+      onToggleAutoSave: vi.fn(),
+      onToggleSyncScroll: vi.fn(),
+      onToggleFormatBar: vi.fn(),
+      onToggleCenteredEditor: vi.fn(),
+      onToggleOrientation: vi.fn(),
+      onToggleZen: vi.fn(),
+      onResetSplit: vi.fn(),
+      onSetLineEnding: vi.fn(),
+      onSetLanguage: vi.fn(),
+      onOpenShortcuts: vi.fn(),
+    };
+
+    new SettingsController(() => state, callbacks);
+    const dialog = document.getElementById('settings-dialog') as HTMLDialogElement;
+    dialog.returnValue = 'done';
+    dialog.dispatchEvent(new Event('close'));
+    expect(dialog.returnValue).toBe('');
+  });
 });

@@ -281,4 +281,22 @@ describe('MarkdownEditorController keybindings & folding integration', () => {
     ctrl.view.destroy();
     host.remove();
   });
+
+  it('updates i18n, aria-label, and format fallback snippets on swapState after setAppLanguage', () => {
+    const { host, ctrl } = createController('Tab 1');
+    const secondState = ctrl.createState('');
+
+    ctrl.setAppLanguage('en');
+    expect(ctrl.view.contentDOM.getAttribute('aria-label')).toBe('Markdown Editor');
+
+    ctrl.swapState(secondState);
+    expect(ctrl.view.contentDOM.getAttribute('aria-label')).toBe('Markdown Editor');
+    expect(ctrl.view.dom.textContent).toContain('Write your Markdown here');
+
+    ctrl.applyFormat('bold');
+    expect(ctrl.getContent()).toBe('**bold text**');
+
+    ctrl.view.destroy();
+    host.remove();
+  });
 });

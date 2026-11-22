@@ -161,4 +161,21 @@ describe('CommandPaletteController A11y and # heading-jump mode', () => {
     expect(resultsEl.textContent).toContain('Keine passenden Überschriften');
     expect(input.hasAttribute('aria-activedescendant')).toBe(false);
   });
+
+  it('keeps option buttons out of Tab order and handles arrow navigation across the dialog', async () => {
+    const { dialog, input, resultsEl, controller } = createPaletteFixture();
+
+    controller.open('files');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const options = resultsEl.querySelectorAll<HTMLButtonElement>('[role="option"]');
+    expect(options[0].tabIndex).toBe(-1);
+    expect(options[1].tabIndex).toBe(-1);
+
+    resultsEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(options[1].getAttribute('aria-selected')).toBe('true');
+    expect(input.getAttribute('aria-activedescendant')).toBe('palette-option-1');
+    dialog.close();
+  });
 });

@@ -38,6 +38,7 @@ export interface SidebarExplorerDeps {
   onScaffoldAgents?: (targetDir: string) => Promise<void> | void;
   onScaffoldSkill?: (targetDir: string) => Promise<void> | void;
   onBundleWorkspace?: (rootPath: string) => void;
+  onShowToast?: (message: string) => void;
 }
 
 export type SidebarExplorerCallbacks = SidebarExplorerDeps;
@@ -108,6 +109,8 @@ export class SidebarExplorerController {
       this.setTree(tree, persistPrefs);
     } catch (err) {
       console.error('Ordnerbaum konnte nicht geladen werden:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      this.deps.onShowToast?.(t('sidebar.treeLoadFailed', { err: msg }));
     }
   }
 
@@ -124,6 +127,8 @@ export class SidebarExplorerController {
       }
     } catch (err) {
       console.error('Ordnerbaum konnte nicht geladen werden:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      this.deps.onShowToast?.(t('sidebar.treeLoadFailed', { err: msg }));
     }
   }
 
@@ -897,6 +902,8 @@ export class SidebarExplorerController {
       submitBtn.textContent = t('renameDialog.submit');
     }
 
+    if (dialog.open) return;
+    dialog.returnValue = '';
     inputEl.value = initialValue;
     dialog.showModal();
 
@@ -912,9 +919,11 @@ export class SidebarExplorerController {
   }
 
   private async confirmMoveToRecycleBin(target: ContextMenuTarget): Promise<void> {
-    const dialog = document.getElementById('delete-dialog') as HTMLDialogElement;
-    const desc = document.getElementById('delete-dialog-desc')!;
+    const dialog = document.getElementById('delete-dialog') as HTMLDialogElement | null;
+    const desc = document.getElementById('delete-dialog-desc');
+    if (!dialog || !desc || dialog.open) return;
     desc.textContent = t('trashDialog.confirmItem', { name: target.name });
+    dialog.returnValue = '';
 
     const confirmed = await new Promise<boolean>((resolve) => {
       const onClose = () => {
@@ -935,6 +944,8 @@ export class SidebarExplorerController {
       await this.refresh();
     } catch (err) {
       console.error('Löschen in Papierkorb fehlgeschlagen:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      this.deps.onShowToast?.(t('sidebar.trashFailed', { err: msg }));
     }
   }
 }

@@ -272,6 +272,7 @@ export class WorkspaceSearchController {
 
     const hits = includeFiles.reduce((sum, path) => sum + selection.resultsByPath.get(path)!.occurrenceCount, 0);
     this.replacePending = true;
+    this.updateButtons();
     try {
       const confirmed = await this.confirmReplace(
         t(includeFiles.length === 1 ? 'search.replaceConfirmOne' : 'search.replaceConfirm', {
@@ -282,7 +283,6 @@ export class WorkspaceSearchController {
         || (this.deps.replaceInputEl?.value ?? '') !== replacement
         || files.size !== includeFiles.length || includeFiles.some((path) => !files.has(path))) return;
 
-      this.updateButtons();
       const res = await backend.replaceWorkspace(
         rootPath,
         query,

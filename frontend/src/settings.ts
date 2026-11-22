@@ -165,6 +165,12 @@ export class SettingsController {
   private bindSettingsDialog(): void {
     if (!this.dialog) return;
 
+    this.dialog.addEventListener('close', () => {
+      if (this.dialog) {
+        this.dialog.returnValue = '';
+      }
+    });
+
     // Direct open button in toolbar
     document.getElementById('btn-settings')?.addEventListener('click', () => {
       this.openSettings();

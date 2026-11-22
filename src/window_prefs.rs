@@ -107,23 +107,67 @@ fn prefs_path() -> PathBuf {
     crate::fs_ops::app_data_dir().join("window_prefs.json")
 }
 
+fn is_unc_path(path: &str) -> bool {
+    path.starts_with(r"\\") || path.starts_with("//")
+}
+
+fn sanitize_loaded_prefs(prefs: &mut WindowPrefs) {
+    prefs.ui.split_ratio = prefs.ui.split_ratio.clamp(20.0, 80.0);
+    prefs.ui.zoom_percent = prefs.ui.zoom_percent.clamp(75, 175);
+    prefs
+        .ui
+        .recent_files
+        .retain(|p| is_unc_path(p) || PathBuf::from(p).is_file());
+    prefs.ui.recent_files.truncate(12);
+    prefs
+        .ui
+        .recent_folders
+        .retain(|p| is_unc_path(p) || PathBuf::from(p).is_dir());
+    prefs.ui.recent_folders.truncate(8);
+    prefs
+        .ui
+        .session_files
+        .retain(|p| is_unc_path(p) || PathBuf::from(p).is_file());
+    prefs.ui.pinned_session_files.retain(|p| {
+        prefs
+            .ui
+            .session_files
+            .iter()
+            .any(|s| s.eq_ignore_ascii_case(p))
+    });
+}
+
 pub fn load_window_prefs() -> WindowPrefs {
     let Ok(mut prefs) = read_prefs(&prefs_path()) else {
         return WindowPrefs::default();
     };
-    prefs.ui.split_ratio = prefs.ui.split_ratio.clamp(20.0, 80.0);
-    prefs.ui.zoom_percent = prefs.ui.zoom_percent.clamp(75, 175);
-    prefs.ui.recent_files.retain(|p| PathBuf::from(p).is_file());
-    prefs.ui.recent_files.truncate(12);
-    prefs.ui.recent_folders.retain(|p| PathBuf::from(p).is_dir());
-    prefs.ui.recent_folders.truncate(8);
-    prefs.ui.session_files.retain(|p| PathBuf::from(p).is_file());
+    sanitize_loaded_prefs(&mut prefs);
     prefs
+}
+
+fn backup_corrupt_prefs(path: &Path, bytes: &[u8]) {
+    let backup = path.with_extension("corrupt.json");
+    if let Err(err) = crate::fs_ops::encoding::write_file_atomically(&backup, bytes) {
+        eprintln!(
+            "Sicherung der defekten Einstellungsdatei '{}' fehlgeschlagen: {err}",
+            backup.display()
+        );
+    }
 }
 
 fn read_prefs(path: &Path) -> std::io::Result<WindowPrefs> {
     match fs::read(path) {
-        Ok(bytes) => Ok(serde_json::from_slice(&bytes).unwrap_or_default()),
+        Ok(bytes) => match serde_json::from_slice(&bytes) {
+            Ok(prefs) => Ok(prefs),
+            Err(err) => {
+                eprintln!(
+                    "Defekte Einstellungsdatei '{}' wird gesichert: {err}",
+                    path.display()
+                );
+                backup_corrupt_prefs(path, &bytes);
+                Ok(WindowPrefs::default())
+            }
+        },
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(WindowPrefs::default()),
         Err(err) => Err(err),
     }
@@ -185,5 +229,72 @@ mod tests {
         assert_eq!(prefs.x, Some(32));
         assert!(prefs.ui.auto_save);
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn corrupt_prefs_are_backed_up_before_falling_back_to_defaults() {
+        let dir = std::env::temp_dir().join(format!("semyra-prefs-corrupt-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("window_prefs.json");
+        let raw_corrupt = b"{ not valid json !!!";
+        fs::write(&path, raw_corrupt).unwrap();
+
+        update_prefs_file(&path, |prefs| {
+            prefs.width = 999.0;
+            Ok(true)
+        })
+        .unwrap();
+
+        let backup = path.with_extension("corrupt.json");
+        assert!(backup.is_file(), "corrupt prefs backup should be created");
+        assert_eq!(fs::read(&backup).unwrap(), raw_corrupt);
+
+        let loaded = read_prefs(&path).unwrap();
+        assert_eq!(loaded.width, 999.0);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn sanitize_loaded_prefs_prunes_pinned_session_files_consistently() {
+        let dir = std::env::temp_dir().join(format!("semyra-prefs-prune-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let existing = dir.join("existing.md");
+        let missing = dir.join("missing.md");
+        fs::write(&existing, "# ok").unwrap();
+
+        let mut prefs = WindowPrefs::default();
+        prefs.ui.session_files = vec![
+            existing.to_string_lossy().into_owned(),
+            missing.to_string_lossy().into_owned(),
+        ];
+        prefs.ui.pinned_session_files = vec![
+            existing.to_string_lossy().to_uppercase(),
+            missing.to_string_lossy().into_owned(),
+        ];
+
+        sanitize_loaded_prefs(&mut prefs);
+
+        assert_eq!(prefs.ui.session_files, vec![existing.to_string_lossy().into_owned()]);
+        assert_eq!(prefs.ui.pinned_session_files.len(), 1);
+        assert!(prefs.ui.pinned_session_files[0].eq_ignore_ascii_case(&existing.to_string_lossy()));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn sanitize_loaded_prefs_preserves_unc_paths_without_blocking_stat() {
+        let mut prefs = WindowPrefs::default();
+        let unc_file = r"\\unreachable-host.invalid\share\notes.md".to_string();
+        let unc_folder = "//unreachable-host.invalid/share".to_string();
+        prefs.ui.recent_files = vec![unc_file.clone()];
+        prefs.ui.recent_folders = vec![unc_folder.clone()];
+        prefs.ui.session_files = vec![unc_file.clone()];
+        prefs.ui.pinned_session_files = vec![unc_file.clone()];
+
+        sanitize_loaded_prefs(&mut prefs);
+
+        assert_eq!(prefs.ui.recent_files, vec![unc_file.clone()]);
+        assert_eq!(prefs.ui.recent_folders, vec![unc_folder]);
+        assert_eq!(prefs.ui.session_files, vec![unc_file.clone()]);
+        assert_eq!(prefs.ui.pinned_session_files, vec![unc_file]);
     }
 }

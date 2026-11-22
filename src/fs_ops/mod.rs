@@ -72,6 +72,67 @@ pub fn normalize_existing_path(path: &Path) -> PathBuf {
     }
 }
 
+/// Normalizes an entry path without dereferencing a final symlink or junction component.
+pub fn normalize_entry_path_preserving_link(path: &Path) -> PathBuf {
+    let cleaned = clean_windows_path(path);
+    match (cleaned.parent(), cleaned.file_name()) {
+        (Some(parent), Some(name)) if !parent.as_os_str().is_empty() => {
+            normalize_existing_path(parent).join(name)
+        }
+        _ => cleaned,
+    }
+}
+
+pub(crate) fn visit_filtered_dir_entries(
+    dir: &Path,
+    mut on_err: impl FnMut(&Path, String),
+    mut on_dir: impl FnMut(PathBuf),
+    mut on_file: impl FnMut(PathBuf),
+) {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(err) => {
+            on_err(dir, format!("Ordner konnte nicht gelesen werden: {err}"));
+            return;
+        }
+    };
+
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(err) => {
+                on_err(dir, format!("Ordnereintrag konnte nicht gelesen werden: {err}"));
+                continue;
+            }
+        };
+        let path = entry.path();
+        let name = entry.file_name();
+        let Some(name_str) = name.to_str() else {
+            continue;
+        };
+        if !is_allowed_dot_entry(name_str) {
+            continue;
+        }
+        let kind = match entry.file_type() {
+            Ok(kind) => kind,
+            Err(err) => {
+                on_err(&path, format!("Dateityp konnte nicht ermittelt werden: {err}"));
+                continue;
+            }
+        };
+        if kind.is_dir() {
+            if !IGNORED_DIRS
+                .iter()
+                .any(|ignored| name_str.eq_ignore_ascii_case(ignored))
+            {
+                on_dir(path);
+            }
+        } else if kind.is_file() {
+            on_file(path);
+        }
+    }
+}
+
 /// Returns the local application data directory (`%LOCALAPPDATA%\Semyra`).
 pub fn app_data_dir() -> PathBuf {
     let base = dirs::data_local_dir().unwrap_or_else(std::env::temp_dir);

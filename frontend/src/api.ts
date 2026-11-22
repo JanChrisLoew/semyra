@@ -218,7 +218,7 @@ export const backend = {
     postJson<{ ok: boolean }>('reveal-in-explorer', { path }),
 
   openFilesDialog: (lang?: string) =>
-    postJson<{ files: FilePayload[] }>('dialog/open-files', { lang }),
+    postJson<{ files: FilePayload[]; errors?: string[] }>('dialog/open-files', { lang }),
 
   openFolderDialog: (lang?: string) =>
     postJson<{ tree: FileTreeNode | null }>('dialog/open-folder', { lang }),

@@ -260,4 +260,163 @@ describe('SyncScrollController', () => {
       vi.useRealTimers();
     }
   });
+
+  it('skips hidden elements inside closed <details> and honors suppressFor()', () => {
+    vi.useFakeTimers();
+    const rafCallbacks: FrameRequestCallback[] = [];
+    const rafSpy = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((cb) => {
+        rafCallbacks.push(cb);
+        return rafCallbacks.length;
+      });
+
+    const appEl = document.createElement('div');
+    appEl.setAttribute('data-view', 'split');
+    const previewPaneEl = document.createElement('div');
+    Object.defineProperty(previewPaneEl, 'scrollHeight', { value: 2000, configurable: true });
+    Object.defineProperty(previewPaneEl, 'clientHeight', { value: 500, configurable: true });
+    previewPaneEl.getBoundingClientRect = () =>
+      ({ top: 0, bottom: 500, height: 500, width: 500 } as DOMRect);
+
+    const previewContentEl = document.createElement('article');
+    const details = document.createElement('details');
+    details.setAttribute('data-line', '1');
+    details.getBoundingClientRect = () =>
+      ({ top: 10 - previewPaneEl.scrollTop, bottom: 40 - previewPaneEl.scrollTop, height: 30, width: 500 } as DOMRect);
+    const hiddenP = document.createElement('p');
+    hiddenP.setAttribute('data-line', '5');
+    hiddenP.getBoundingClientRect = () =>
+      ({ top: 0, bottom: 0, height: 0, width: 0 } as DOMRect);
+    details.appendChild(hiddenP);
+
+    const visibleP = document.createElement('p');
+    visibleP.setAttribute('data-line', '20');
+    visibleP.getBoundingClientRect = () =>
+      ({ top: 400 - previewPaneEl.scrollTop, bottom: 450 - previewPaneEl.scrollTop, height: 50, width: 500 } as DOMRect);
+    previewContentEl.append(details, visibleP);
+
+    const scrollToSourceLine = vi.fn();
+    const edScrollDom = document.createElement('div');
+    Object.defineProperty(edScrollDom, 'scrollHeight', { value: 2000, configurable: true });
+    Object.defineProperty(edScrollDom, 'clientHeight', { value: 500, configurable: true });
+
+    const controller = new SyncScrollController({
+      appEl,
+      previewPaneEl,
+      previewContentEl,
+      getEditor: () =>
+        ({
+          view: { scrollDOM: edScrollDom, state: { doc: { lines: 40 } } },
+          getTopViewportLine: () => 5,
+          scrollToSourceLine,
+        }) as any,
+      getOutline: () => [],
+      onActiveHeadingChange: vi.fn(),
+    });
+
+    // Suppressed sync must not schedule rAF
+    controller.suppressFor(150);
+    controller.syncEditorToPreview();
+    expect(rafSpy).not.toHaveBeenCalled();
+
+    // After suppression expires, closed <details> child at line 5 is ignored (interpolates 1..20, not 5..20)
+    vi.advanceTimersByTime(160);
+    previewPaneEl.scrollTop = 205;
+    controller.syncPreviewToEditor();
+    rafCallbacks.shift()!(16);
+    expect(scrollToSourceLine).toHaveBeenCalledTimes(1);
+    const targetLine = scrollToSourceLine.mock.calls[0][0] as number;
+    expect(targetLine).toBeGreaterThan(10);
+    expect(targetLine).toBeLessThan(12);
+
+    controller.destroy();
+    rafSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it('keeps closed <details data-line> itself as a line anchor while excluding non-summary descendants', () => {
+    vi.useFakeTimers();
+    const rafCallbacks: FrameRequestCallback[] = [];
+    const rafSpy = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((cb) => {
+        rafCallbacks.push(cb);
+        return rafCallbacks.length;
+      });
+
+    try {
+      const appEl = document.createElement('div');
+      appEl.setAttribute('data-view', 'split');
+      const previewPaneEl = document.createElement('div');
+      Object.defineProperty(previewPaneEl, 'scrollHeight', { value: 2000, configurable: true });
+      Object.defineProperty(previewPaneEl, 'clientHeight', { value: 500, configurable: true });
+      previewPaneEl.getBoundingClientRect = () =>
+        ({ top: 0, bottom: 500, height: 500, width: 500 } as DOMRect);
+
+      const previewContentEl = document.createElement('article');
+      const introP = document.createElement('p');
+      introP.setAttribute('data-line', '2');
+      introP.getBoundingClientRect = () =>
+        ({ top: 20 - previewPaneEl.scrollTop, bottom: 50 - previewPaneEl.scrollTop, height: 30, width: 500 } as DOMRect);
+
+      const details = document.createElement('details');
+      details.setAttribute('data-line', '10');
+      details.getBoundingClientRect = () =>
+        ({ top: 100 - previewPaneEl.scrollTop, bottom: 130 - previewPaneEl.scrollTop, height: 30, width: 500 } as DOMRect);
+      const summary = document.createElement('summary');
+      summary.textContent = 'Abschnitt';
+      const hiddenP = document.createElement('p');
+      hiddenP.setAttribute('data-line', '12');
+      hiddenP.getBoundingClientRect = () =>
+        ({ top: 0, bottom: 0, height: 0, width: 0 } as DOMRect);
+      details.append(summary, hiddenP);
+
+      const afterP = document.createElement('p');
+      afterP.setAttribute('data-line', '20');
+      afterP.getBoundingClientRect = () =>
+        ({ top: 300 - previewPaneEl.scrollTop, bottom: 350 - previewPaneEl.scrollTop, height: 50, width: 500 } as DOMRect);
+
+      previewContentEl.append(introP, details, afterP);
+
+      const scrollToSourceLine = vi.fn();
+      const edScrollDom = document.createElement('div');
+      Object.defineProperty(edScrollDom, 'scrollHeight', { value: 2000, configurable: true });
+      Object.defineProperty(edScrollDom, 'clientHeight', { value: 500, configurable: true });
+      edScrollDom.scrollTop = 250;
+
+      const controller = new SyncScrollController({
+        appEl,
+        previewPaneEl,
+        previewContentEl,
+        getEditor: () =>
+          ({
+            view: { scrollDOM: edScrollDom, state: { doc: { lines: 40 } } },
+            getTopViewportLine: () => 10,
+            scrollToSourceLine,
+          }) as any,
+        getOutline: () => [],
+        onActiveHeadingChange: vi.fn(),
+      });
+
+      // Scroll halfway between closed <details> (line 10, top 100) and afterP (line 20, top 300)
+      previewPaneEl.scrollTop = 200;
+      controller.syncPreviewToEditor();
+      rafCallbacks.shift()!(16);
+      expect(scrollToSourceLine).toHaveBeenCalledTimes(1);
+      // If details (line 10) were dropped it would interpolate 2..20 (~13.57); if hiddenP (line 12) were kept it would hit 12.
+      expect(scrollToSourceLine.mock.calls[0][0]).toBeCloseTo(15, 2);
+
+      // Verify editor -> preview also anchors directly on the closed <details> at line 10 (pvTop 100)
+      vi.advanceTimersByTime(150);
+      controller.syncEditorToPreview();
+      rafCallbacks.shift()!(16);
+      expect(previewPaneEl.scrollTop).toBe(100);
+
+      controller.destroy();
+    } finally {
+      rafSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
 });

@@ -3,11 +3,26 @@
  * Markdown link resolution without Node `path` runtime dependencies.
  */
 
+export function normalizePathKey(value: string): string {
+  return value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+export function isSamePath(a: string, b: string): boolean {
+  return normalizePathKey(a) === normalizePathKey(b);
+}
+
 export function isSameOrDescendantPath(path: string, root: string): boolean {
-  const normalize = (value: string) => value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
-  const normalizedRoot = normalize(root);
-  const normalizedPath = normalize(path);
+  const normalizedRoot = normalizePathKey(root);
+  const normalizedPath = normalizePathKey(path);
   return normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}/`);
+}
+
+export function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 export function parentDirOfPath(filePath: string): string | null {
@@ -27,7 +42,7 @@ export function baseNameOfPath(filePath: string): string {
 }
 
 export function resolveRelativeMarkdownPath(parentDir: string, relativeHref: string): string {
-  const cleanHref = decodeURIComponent(relativeHref.split('#')[0].split('?')[0]);
+  const cleanHref = safeDecodeURIComponent(relativeHref.split('#')[0].split('?')[0]);
   const baseParts = parentDir.replace(/\//g, '\\').replace(/\\+$/, '').split('\\');
   const relParts = cleanHref.replace(/\//g, '\\').split('\\');
 

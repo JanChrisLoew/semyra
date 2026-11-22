@@ -4,8 +4,10 @@ import {
   getFileExtension,
   isImagePath,
   isMarkdownPath,
+  isSamePath,
   parentDirOfPath,
   resolveRelativeMarkdownPath,
+  safeDecodeURIComponent,
 } from '../path-utils';
 
 describe('path-utils', () => {
@@ -54,5 +56,14 @@ describe('path-utils', () => {
     expect(getFileExtension('Cargo.toml')).toBe('toml');
     expect(getFileExtension('.env')).toBe('env');
     expect(getFileExtension('noextension')).toBe('');
+  });
+
+  it('compares Windows/POSIX paths safely and handles malformed percent-encoding', () => {
+    expect(isSamePath('C:\\Notes\\Draft.md', 'c:/notes/draft.md')).toBe(true);
+    expect(isSamePath('C:\\Notes\\Draft.md', 'C:\\Notes\\Other.md')).toBe(false);
+    expect(safeDecodeURIComponent('%E0%A4%A')).toBe('%E0%A4%A');
+    expect(
+      resolveRelativeMarkdownPath('C:\\Workspace\\Docs', './bad%E0%A4%A.md#frag'),
+    ).toBe('C:\\Workspace\\Docs\\bad%E0%A4%A.md');
   });
 });

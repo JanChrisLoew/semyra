@@ -1,7 +1,7 @@
-use super::encoding::{read_text_file, write_text_file, FilePayload};
+use super::encoding::{create_new_text_file, read_text_file, FilePayload};
 use super::{
-    app_data_dir, clean_windows_path, is_allowed_dot_entry, is_image_path, is_markdown_path,
-    is_supported_text_path, normalize_existing_path, IGNORED_DIRS,
+    app_data_dir, clean_windows_path, is_image_path, is_markdown_path, is_supported_text_path,
+    normalize_entry_path_preserving_link, normalize_existing_path, visit_filtered_dir_entries,
 };
 use serde::Serialize;
 use std::fs;
@@ -59,58 +59,53 @@ fn scan_dir_children(
         return Vec::new();
     }
 
-    let Ok(read_dir) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
+    let mut raw_dirs = Vec::new();
+    let mut raw_files = Vec::new();
+    visit_filtered_dir_entries(
+        dir,
+        |_, _| {},
+        |d| raw_dirs.push(d),
+        |f| raw_files.push(f),
+    );
 
     let mut dirs = Vec::new();
-    let mut files = Vec::new();
-
-    for entry in read_dir.flatten() {
+    for path in raw_dirs {
         if *entry_budget >= MAX_TOTAL_ENTRIES {
             break;
         }
-        let path = entry.path();
         let Some(name_str) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        if !is_allowed_dot_entry(name_str) {
-            continue;
-        }
+        *entry_budget += 1;
+        let sub = scan_dir_children(&path, depth + 1, max_depth, entry_budget);
+        dirs.push(FileTreeNode {
+            name: name_str.to_string(),
+            path: clean_windows_path(&path).to_string_lossy().into_owned(),
+            is_dir: true,
+            is_markdown: false,
+            children: Some(sub),
+        });
+    }
 
-        let Ok(file_type) = entry.file_type() else {
+    let mut files = Vec::new();
+    for path in raw_files {
+        if *entry_budget >= MAX_TOTAL_ENTRIES {
+            break;
+        }
+        let Some(name_str) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-
-        if file_type.is_dir() {
-            if IGNORED_DIRS
-                .iter()
-                .any(|ignored| name_str.eq_ignore_ascii_case(ignored))
-            {
-                continue;
-            }
+        let is_md = is_markdown_path(&path);
+        let show_file = is_md || is_image_path(&path) || is_supported_text_path(&path);
+        if show_file {
             *entry_budget += 1;
-            let sub = scan_dir_children(&path, depth + 1, max_depth, entry_budget);
-            dirs.push(FileTreeNode {
+            files.push(FileTreeNode {
                 name: name_str.to_string(),
                 path: clean_windows_path(&path).to_string_lossy().into_owned(),
-                is_dir: true,
-                is_markdown: false,
-                children: Some(sub),
+                is_dir: false,
+                is_markdown: is_md,
+                children: None,
             });
-        } else if file_type.is_file() {
-            let is_md = is_markdown_path(&path);
-            let show_file = is_md || is_image_path(&path) || is_supported_text_path(&path);
-            if show_file {
-                *entry_budget += 1;
-                files.push(FileTreeNode {
-                    name: name_str.to_string(),
-                    path: clean_windows_path(&path).to_string_lossy().into_owned(),
-                    is_dir: false,
-                    is_markdown: is_md,
-                    children: None,
-                });
-            }
         }
     }
 
@@ -142,35 +137,20 @@ fn collect_markdown_files_recursive(
     if depth >= max_depth || out.len() >= MAX_FILES {
         return;
     }
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
 
     let mut subdirs = Vec::new();
     let mut files = Vec::new();
 
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Some(name_str) = path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        if !is_allowed_dot_entry(name_str) {
-            continue;
-        }
-        let Ok(ft) = entry.file_type() else {
-            continue;
-        };
-        if ft.is_dir() {
-            if !IGNORED_DIRS
-                .iter()
-                .any(|ig| name_str.eq_ignore_ascii_case(ig))
-            {
-                subdirs.push(path);
+    visit_filtered_dir_entries(
+        dir,
+        |_, _| {},
+        |d| subdirs.push(d),
+        |f| {
+            if is_markdown_path(&f) || is_supported_text_path(&f) {
+                files.push(f);
             }
-        } else if ft.is_file() && (is_markdown_path(&path) || is_supported_text_path(&path)) {
-            files.push(path);
-        }
-    }
+        },
+    );
 
     subdirs.sort();
     files.sort();
@@ -216,8 +196,9 @@ pub fn create_new_markdown_file(parent_dir: &Path, file_name: &str) -> Result<Fi
     };
 
     let full_path = parent_dir.join(&final_name);
-    if full_path.exists() {
-        return Err(format!("Die Datei '{final_name}' existiert bereits."));
+    let exists_err = format!("Die Datei '{final_name}' existiert bereits.");
+    if fs::symlink_metadata(&full_path).is_ok() {
+        return Err(exists_err);
     }
 
     let stem = Path::new(&final_name)
@@ -259,7 +240,7 @@ pub fn create_new_markdown_file(parent_dir: &Path, file_name: &str) -> Result<Fi
             _ => format!("# {stem}\n\n"),
         }
     };
-    write_text_file(&full_path, &initial, true)?;
+    create_new_text_file(&full_path, &initial, true, &exists_err)?;
     read_text_file(&full_path)
 }
 
@@ -303,15 +284,16 @@ pub fn create_ai_skill(skills_dir: &Path, raw_skill_name: &str) -> Result<FilePa
     let slug = normalize_skill_slug(raw_skill_name)?;
     let skill_dir = skills_dir.join(&slug);
     let skill_file = skill_dir.join("SKILL.md");
-    if skill_file.exists() {
-        return Err(format!("Der Skill '{slug}' existiert bereits."));
+    let exists_err = format!("Der Skill '{slug}' existiert bereits.");
+    if fs::symlink_metadata(&skill_file).is_ok() {
+        return Err(exists_err);
     }
     fs::create_dir_all(&skill_dir)
         .map_err(|e| format!("Skill-Ordner konnte nicht erstellt werden: {e}"))?;
     let initial = format!(
         "---\nname: {slug}\ndescription: Beschreibe hier präzise, was dieser Skill tut und wann er verwendet werden soll.\n---\n\n# {slug}\n\n## Ziel\n\n## Schritte\n- Schritt 1\n- Schritt 2\n"
     );
-    write_text_file(&skill_file, &initial, true)?;
+    create_new_text_file(&skill_file, &initial, true, &exists_err)?;
     read_text_file(&skill_file)
 }
 
@@ -361,7 +343,7 @@ fn validate_entry_name(name: &str) -> Result<&str, String> {
 pub fn create_new_folder(parent_dir: &Path, folder_name: &str) -> Result<String, String> {
     let valid = validate_entry_name(folder_name)?;
     let full = parent_dir.join(valid);
-    if full.exists() {
+    if fs::symlink_metadata(&full).is_ok() {
         return Err(format!("Der Ordner '{valid}' existiert bereits."));
     }
     fs::create_dir_all(&full)
@@ -372,17 +354,24 @@ pub fn create_new_folder(parent_dir: &Path, folder_name: &str) -> Result<String,
 pub fn rename_fs_entry(target_path: &Path, new_name: &str) -> Result<(String, String), String> {
     let valid = validate_entry_name(new_name)?;
     let _guard = super::encoding::lock_text_writes()?;
-    let norm = normalize_existing_path(target_path);
+    let norm = normalize_entry_path_preserving_link(target_path);
+    if fs::symlink_metadata(&norm).is_err() {
+        return Err("Datei oder Ordner existiert nicht mehr.".to_string());
+    }
     let Some(parent) = norm.parent() else {
         return Err("Stammverzeichnis kann nicht umbenannt werden.".to_string());
     };
     let dest = parent.join(valid);
-    if dest.exists() && normalize_existing_path(&dest) != norm {
+    let same_entry_case_folded = norm
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|old_name| old_name.to_lowercase() == valid.to_lowercase());
+    if fs::symlink_metadata(&dest).is_ok() && !same_entry_case_folded {
         return Err(format!("'{valid}' existiert bereits im selben Ordner."));
     }
     fs::rename(&norm, &dest)
         .map_err(|e| format!("Umbenennen fehlgeschlagen: {e}"))?;
-    let canon = normalize_existing_path(&dest);
+    let canon = normalize_entry_path_preserving_link(&dest);
     let final_name = canon
         .file_name()
         .and_then(|n| n.to_str())
@@ -392,9 +381,8 @@ pub fn rename_fs_entry(target_path: &Path, new_name: &str) -> Result<(String, St
 }
 
 pub fn move_to_recycle_bin(target_path: &Path) -> Result<(), String> {
-    let _guard = super::encoding::lock_text_writes()?;
-    let norm = normalize_existing_path(target_path);
-    if !norm.exists() {
+    let norm = normalize_entry_path_preserving_link(target_path);
+    if fs::symlink_metadata(&norm).is_err() {
         return Err("Datei oder Ordner existiert nicht mehr.".to_string());
     }
     trash::delete(&norm)
@@ -473,6 +461,16 @@ mod tests {
         assert!(created.content.starts_with("---\nname: mein-neuer-skill\ndescription:"));
 
         assert!(create_ai_skill(&skills_root, "mein-neuer-skill").is_err());
+
+        // Case-only rename succeeds and existing-target rename fails
+        let doc_a = temp.join("alpha.md");
+        let doc_b = temp.join("beta.md");
+        fs::write(&doc_a, "A").unwrap();
+        fs::write(&doc_b, "B").unwrap();
+        let (renamed_path, renamed_name) = rename_fs_entry(&doc_a, "Alpha.md").unwrap();
+        assert_eq!(renamed_name, "Alpha.md");
+        assert!(rename_fs_entry(Path::new(&renamed_path), "beta.md").is_err());
+
         let _ = fs::remove_dir_all(&temp);
     }
 }

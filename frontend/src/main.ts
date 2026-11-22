@@ -11,6 +11,7 @@ import {
 } from './api';
 import { extractTemplateVariables, formatAiContextEntry, toWorkspaceRelativeLabel } from './ai-bundle';
 import {
+  bindDialogReturnValueReset,
   openAiBundleDialogModal,
   openCompareDiffDialogModal,
   openExternalDiffDialogModal,
@@ -47,8 +48,11 @@ import {
   baseNameOfPath,
   isMarkdownPath,
   isSameOrDescendantPath,
+  isSamePath,
+  normalizePathKey,
   parentDirOfPath,
   resolveRelativeMarkdownPath,
+  safeDecodeURIComponent,
 } from './path-utils';
 import { installProgressiveEnhancements } from './polyfills';
 import { safeSetMarkdownHTML } from './sanitizer';
@@ -101,6 +105,7 @@ class SemyraApp {
     path: string | null;
     content: string;
     lineEnding: 'LF' | 'CRLF';
+    wasDirty?: boolean;
   }> = [];
   private lastSelection = { chars: 0, words: 0 };
   private statusStatsTimer: number | undefined;
@@ -163,7 +168,16 @@ class SemyraApp {
       return backend.forceCloseWindow(this.recoveryRestored);
     },
     onWindowCloseAborted: () => { document.body.inert = false; },
-    onWindowCloseError: (err) => console.error('Fenster konnte nicht geschlossen werden:', err),
+    onWindowCloseError: (err) => {
+      console.error('Fenster konnte nicht geschlossen werden:', err);
+      this.showToast(
+        err instanceof Error
+          ? err.message
+          : getLanguage() === 'en'
+            ? 'Could not close window.'
+            : 'Fenster konnte nicht geschlossen werden.',
+      );
+    },
   });
   private readonly draftCheckpoint = new DraftCheckpoint(() => this.persistDrafts());
   private draftRevision = 0;
@@ -173,6 +187,7 @@ class SemyraApp {
   private prefsSaveFailed = false;
   private toastTimer: number | undefined;
   private renderSeq = 0;
+  private openFileSeq = 0;
   private externalChangedPath: string | null = null;
   private sidebarSourceMode: 'workspace' | 'ai-library' = 'workspace';
   private lastWorkfolderPath: string | null = null;
@@ -209,16 +224,12 @@ class SemyraApp {
   private statusSaveBadge = document.getElementById('status-save-badge')!;
   private statusCursorEl = document.getElementById('status-cursor')!;
   private statusDocSummaryBtn = document.getElementById('status-doc-summary') as HTMLButtonElement | null;
-  private statusWordsEl = document.getElementById('status-words');
-  private statusTokensEl = document.getElementById('status-tokens');
-  private statusReadtimeEl = document.getElementById('status-readtime');
   private statusZoomBtn = document.getElementById('status-zoom') as HTMLButtonElement;
   private statusEolBtn = document.getElementById('status-eol') as HTMLButtonElement;
   private statusEncodingEl = document.getElementById('status-encoding')!;
   private statusLintBtn = document.getElementById('status-lint-badge') as HTMLButtonElement | null;
   private statusToastEl = document.getElementById('status-toast')!;
   private formatBarVisible = true;
-  private btnCopyMarkdown = document.getElementById('btn-copy-markdown') as HTMLButtonElement | null;
   private dropOverlayEl = document.getElementById('drop-overlay')!;
   private externalBannerEl = document.getElementById('external-banner')!;
   private tabContextMenuEl = document.getElementById('tab-context-menu') as HTMLElement & {
@@ -240,6 +251,7 @@ class SemyraApp {
     isAfter: boolean;
   } | null = null;
   private suppressNextTabClick = false;
+  private suppressNextTabClickTimer: number | undefined;
   private settingsCtrl!: SettingsController;
 
   public async init(): Promise<void> {
@@ -332,6 +344,7 @@ class SemyraApp {
         this.scaffoldWorkspaceSkill(targetDir);
       },
       onBundleWorkspace: (rootPath) => this.openAiBundleDialog(rootPath),
+      onShowToast: (message) => this.showToast(message),
     });
 
     this.workspaceSearch = new WorkspaceSearchController({
@@ -344,7 +357,7 @@ class SemyraApp {
       resultsContainerEl: document.getElementById('search-results-container')!,
       getWorkspaceRootPath: () => this.explorer.rootPath,
       onOpenMatch: async (filePath, line) => {
-        await this.openFileByPath(filePath);
+        if (!await this.openFileByPath(filePath)) return;
         requestAnimationFrame(() => {
           this.editor.jumpToLine(line);
         });
@@ -457,37 +470,13 @@ class SemyraApp {
             onPrint: () => {
               void this.documentExport.print();
             },
-            onAlignTable: () => this.alignActiveMarkdownTables(),
-            onInsertTableRowAbove: () => {
-              if (this.editor.modifyTable({ type: 'insert-row', direction: 'above' })) {
-                this.showToast(t('toast.tableRowAbove'));
-              }
-            },
-            onInsertTableRowBelow: () => {
-              if (this.editor.modifyTable({ type: 'insert-row', direction: 'below' })) {
-                this.showToast(t('toast.tableRowBelow'));
-              }
-            },
-            onDeleteTableRow: () => {
-              if (this.editor.modifyTable({ type: 'delete-row' })) {
-                this.showToast(t('toast.tableRowDeleted'));
-              }
-            },
-            onInsertTableColumnLeft: () => {
-              if (this.editor.modifyTable({ type: 'insert-col', direction: 'left' })) {
-                this.showToast(t('toast.tableColLeft'));
-              }
-            },
-            onInsertTableColumnRight: () => {
-              if (this.editor.modifyTable({ type: 'insert-col', direction: 'right' })) {
-                this.showToast(t('toast.tableColRight'));
-              }
-            },
-            onDeleteTableColumn: () => {
-              if (this.editor.modifyTable({ type: 'delete-col' })) {
-                this.showToast(t('toast.tableColDeleted'));
-              }
-            },
+            onAlignTable: () => this.applyTableAction('align'),
+            onInsertTableRowAbove: () => this.applyTableAction('row-above'),
+            onInsertTableRowBelow: () => this.applyTableAction('row-below'),
+            onDeleteTableRow: () => this.applyTableAction('delete-row'),
+            onInsertTableColumnLeft: () => this.applyTableAction('col-left'),
+            onInsertTableColumnRight: () => this.applyTableAction('col-right'),
+            onDeleteTableColumn: () => this.applyTableAction('delete-col'),
             onSetViewMode: (mode) => this.setViewMode(mode),
             splitOrientation: this.splitOrientation,
             onToggleSplitOrientation: () => this.toggleSplitOrientation(),
@@ -526,10 +515,10 @@ class SemyraApp {
             onShowLint: () => this.openLintDialog(),
             onRevealInExplorer: () => {
               const p = this.activeTab?.path ?? this.explorer.rootPath;
-              if (p) void backend.revealInExplorer(p);
+              if (p) this.revealPathInExplorer(p);
             },
             onShowShortcuts: () => {
-              (document.getElementById('shortcuts-dialog') as HTMLDialogElement).showModal();
+              this.openShortcutsDialog();
             },
             onReopenTab: () => {
               void this.reopenLastClosedTab();
@@ -589,7 +578,7 @@ class SemyraApp {
           this.showToast(t('toast.langChanged'));
         },
         onOpenShortcuts: () => {
-          (document.getElementById('shortcuts-dialog') as HTMLDialogElement)?.showModal();
+          this.openShortcutsDialog();
         },
       },
     );
@@ -632,6 +621,7 @@ class SemyraApp {
         await this.explorer.loadFolder(startup.initialFolder, false);
       }
 
+      let preferredActivePath: string | null = null;
       if (startup.initialFiles.length > 0) {
         for (const filePath of startup.initialFiles) {
           await this.openFileByPath(filePath, false);
@@ -656,8 +646,8 @@ class SemyraApp {
           this.renderTabBar();
         }
         if (startup.uiPrefs.activeSessionFile) {
-          const lower = startup.uiPrefs.activeSessionFile.toLowerCase();
-          const match = this.tabs.find((t) => t.path?.toLowerCase() === lower);
+          preferredActivePath = startup.uiPrefs.activeSessionFile;
+          const match = this.tabs.find((t) => t.path && isSamePath(t.path, preferredActivePath!));
           if (match) {
             this.activateTab(match.id);
           }
@@ -665,7 +655,7 @@ class SemyraApp {
       }
 
       if (startup.recoveredDrafts.length > 0) {
-        this.restoreRecoveredDrafts(startup.recoveredDrafts);
+        this.restoreRecoveredDrafts(startup.recoveredDrafts, preferredActivePath);
       }
       this.recoveryRestored = true;
       if (startup.recoveredDrafts.length > 0) this.draftCheckpoint.flush();
@@ -822,6 +812,7 @@ class SemyraApp {
   private toggleEditorCentered(): void {
     this.editorCentered = !this.editorCentered;
     this.applyEditorCentered();
+    this.syncScroll?.invalidateCache();
     this.settingsCtrl?.syncAll();
     try {
       localStorage.setItem('semyra.editorCentered', this.editorCentered ? '1' : '0');
@@ -854,7 +845,9 @@ class SemyraApp {
 
       const onMove = (ev: PointerEvent) => this.setSidebarWidth(ev.clientX - left, false);
       const onUp = (ev: PointerEvent) => {
-        handle.releasePointerCapture(ev.pointerId);
+        if (handle.hasPointerCapture?.(ev.pointerId)) {
+          handle.releasePointerCapture(ev.pointerId);
+        }
         handle.classList.remove('is-dragging');
         handle.removeEventListener('pointermove', onMove);
         handle.removeEventListener('pointerup', onUp);
@@ -922,6 +915,7 @@ class SemyraApp {
     this.zoomPercent = clamped;
     document.documentElement.style.setProperty('--doc-zoom', String(clamped / 100));
     this.statusZoomBtn.textContent = `${clamped}%`;
+    this.syncScroll?.invalidateCache();
     if (persist) {
       this.schedulePrefsSave();
     }
@@ -1079,16 +1073,20 @@ class SemyraApp {
   // Crash-Recovery Draft Persistence & Image Insertion
   // ==========================================================================
 
-  private restoreRecoveredDrafts(drafts: DraftEntry[]): void {
+  private restoreRecoveredDrafts(
+    drafts: DraftEntry[],
+    preferredActivePath: string | null = null,
+  ): void {
     let restoredCount = 0;
     const restoredPaths = new Set<string>();
+    const standaloneFileTabs: OpenTab[] = [];
     for (const draft of drafts) {
       restoredCount++;
-      const normLower = draft.path?.toLowerCase();
-      const duplicate = normLower !== undefined && restoredPaths.has(normLower);
-      if (normLower && !duplicate) {
-        restoredPaths.add(normLower);
-        const existing = this.tabs.find((t) => t.path?.toLowerCase() === normLower);
+      const normKey = draft.path ? normalizePathKey(draft.path) : undefined;
+      const duplicate = normKey !== undefined && restoredPaths.has(normKey);
+      if (normKey && !duplicate) {
+        restoredPaths.add(normKey);
+        const existing = this.tabs.find((t) => t.path && isSamePath(t.path, draft.path!));
         if (existing) {
           restoreDocumentDraft(existing, draft);
           existing.editorState = this.editor.createState(draft.content);
@@ -1122,10 +1120,23 @@ class SemyraApp {
         stats: { words: 0, chars: 0, lines: 1, readingTimeSec: 0 },
       };
       this.tabs.push(tab);
+      if (tab.path) {
+        standaloneFileTabs.push(tab);
+      }
     }
 
     if (this.tabs.length > 0) {
-      this.activateTab(this.tabs[this.tabs.length - 1].id);
+      const preferredTab = preferredActivePath
+        ? this.tabs.find((t) => t.path && isSamePath(t.path, preferredActivePath))
+        : undefined;
+      const targetTab = preferredTab ?? this.tabs[this.tabs.length - 1];
+      if (targetTab.id !== this.activeTabId) {
+        this.activateTab(targetTab.id);
+      } else {
+        this.renderTabBar();
+        this.updateStatusBar();
+        this.syncWindowMetadata();
+      }
       this.statusSaveBadge.textContent = t('status.restored');
       if (restoredCount > 0) {
         this.showToast(
@@ -1134,6 +1145,33 @@ class SemyraApp {
             : t('toast.draftsRestored', { count: restoredCount }),
         );
       }
+    }
+
+    for (const tab of standaloneFileTabs) {
+      void this.reconcileRecoveredDraftWithDisk(tab);
+    }
+  }
+
+  private async reconcileRecoveredDraftWithDisk(tab: OpenTab): Promise<void> {
+    const path = tab.path;
+    if (!path) return;
+    try {
+      const disk = await backend.readFile(path);
+      if (!this.tabs.includes(tab) || tab.path !== path) return;
+      tab.encoding = disk.encoding || 'UTF-8';
+      const expectedLineEnding = tab.savedLineEnding ?? disk.lineEnding;
+      const diskChanged = disk.content !== tab.savedContent
+        || (disk.content.includes('\n') && disk.lineEnding !== expectedLineEnding);
+      if (diskChanged) {
+        this.markExternalConflict(tab);
+      } else if (tab.savedLineEnding === undefined) {
+        tab.savedLineEnding = disk.lineEnding;
+      }
+      if (tab.id === this.activeTabId) {
+        this.updateStatusBar();
+      }
+    } catch {
+      // File may no longer exist on disk; keep recovered draft dirty for manual save.
     }
   }
 
@@ -1156,23 +1194,28 @@ class SemyraApp {
   }
 
   private pickImageFromDisk(): Promise<string | null> {
+    const targetTab = this.activeTab;
+    const targetBaseDir = targetTab?.parentDir ?? this.explorer.rootPath;
     return new Promise((resolve) => {
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = 'image/png,image/jpeg,image/gif,image/webp,image/bmp,image/svg+xml,image/*';
       input.className = 'visually-hidden';
       let settled = false;
+      let focusTimer: number | undefined;
 
       const finish = (result: string | null) => {
         if (settled) return;
         settled = true;
+        window.clearTimeout(focusTimer);
         window.removeEventListener('focus', onWindowFocus);
         input.remove();
         resolve(result);
       };
 
       const onWindowFocus = () => {
-        window.setTimeout(() => {
+        window.clearTimeout(focusTimer);
+        focusTimer = window.setTimeout(() => {
           if (!settled && (!input.files || input.files.length === 0)) {
             finish(null);
           }
@@ -1194,8 +1237,10 @@ class SemyraApp {
               finish(null);
               return;
             }
-            const tab = this.activeTab;
-            const targetBaseDir = tab?.parentDir ?? this.explorer.rootPath;
+            if (targetTab && this.activeTab?.id !== targetTab.id) {
+              finish(null);
+              return;
+            }
             try {
               const res = await backend.savePastedImage(
                 targetBaseDir,
@@ -1205,10 +1250,16 @@ class SemyraApp {
               if (this.explorer.hasWorkspace) {
                 this.explorer.scheduleRefresh();
               }
+              if (targetTab && this.activeTab?.id !== targetTab.id) {
+                finish(null);
+                return;
+              }
               const match = /\(([^)]+)\)$/.exec(res.markdownSnippet.trim());
               finish(match ? match[1] : null);
             } catch (err) {
               console.error('Bild konnte nicht gespeichert werden:', err);
+              const msg = err instanceof Error ? err.message : String(err);
+              this.showToast(t('toast.saveClipboardImgFailed', { err: msg }));
               finish(null);
             }
           };
@@ -1230,13 +1281,17 @@ class SemyraApp {
     const targetBaseDir = tab.parentDir ?? this.explorer.rootPath;
     try {
       const res = await backend.savePastedImage(targetBaseDir, mimeType, dataUrl);
-      this.editor.insertSnippet(res.markdownSnippet);
+      if (this.activeTab?.id === tab.id) {
+        this.editor.insertSnippet(res.markdownSnippet);
+      }
       if (this.explorer.hasWorkspace) {
         this.invalidateLintWorkspaceCache();
         this.explorer.scheduleRefresh();
       }
     } catch (err) {
       console.error('Bild aus Zwischenablage konnte nicht gespeichert werden:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      this.showToast(t('toast.saveClipboardImgFailed', { err: msg }));
     }
   }
 
@@ -1245,6 +1300,7 @@ class SemyraApp {
     if (!tab) return;
     const targetBaseDir = tab.parentDir ?? this.explorer.rootPath;
     const snippets: string[] = [];
+    let lastError: string | null = null;
 
     for (const imgPath of imagePaths) {
       try {
@@ -1252,15 +1308,21 @@ class SemyraApp {
         snippets.push(res.markdownSnippet);
       } catch (err) {
         console.error('Bild konnte nicht importiert werden:', err);
+        lastError = err instanceof Error ? err.message : String(err);
       }
     }
 
     if (snippets.length > 0) {
-      this.editor.insertSnippet(snippets.join('\n'));
+      if (this.activeTab?.id === tab.id) {
+        this.editor.insertSnippet(snippets.join('\n'));
+      }
       if (this.explorer.hasWorkspace) {
         this.invalidateLintWorkspaceCache();
         this.explorer.scheduleRefresh();
       }
+    }
+    if (lastError !== null) {
+      this.showToast(t('toast.saveClipboardImgFailed', { err: lastError }));
     }
   }
 
@@ -1308,6 +1370,7 @@ class SemyraApp {
   }
 
   private activateTab(tabId: string): void {
+    ++this.openFileSeq;
     if (this.activeTabId && this.activeTabId !== tabId) {
       this.persistActiveTabScrollAndState();
     }
@@ -1327,6 +1390,7 @@ class SemyraApp {
       this.externalChangedPath = null;
       this.externalBannerEl.hidden = true;
     }
+    this.syncScroll.suppressFor(150);
     this.editor.swapState(target.editorState, target.editorScrollTop);
     void this.editor.setLanguageForFile(target.name);
 
@@ -1344,8 +1408,8 @@ class SemyraApp {
   }
 
   private async openFileByPath(path: string, persistPrefs = true): Promise<boolean> {
-    const normLower = path.toLowerCase();
-    const existing = this.tabs.find((t) => t.path?.toLowerCase() === normLower);
+    const seq = ++this.openFileSeq;
+    const existing = this.tabs.find((t) => t.path && isSamePath(t.path, path));
     if (existing) {
       this.activateTab(existing.id);
       return true;
@@ -1353,15 +1417,17 @@ class SemyraApp {
 
     try {
       const payload = await backend.readFile(path);
+      if (seq !== this.openFileSeq) return false;
       this.openTabFromPayload(payload, persistPrefs);
       return true;
     } catch (err) {
+      if (seq !== this.openFileSeq) return false;
       console.error('Datei konnte nicht geöffnet werden:', err);
       const fileName = baseNameOfPath(path);
       this.showToast(t('toast.openFileFailed', { name: fileName }));
       const prevLen = this.recentFiles.length;
       this.recentFiles = this.recentFiles.filter(
-        (p) => p.toLowerCase() !== normLower,
+        (p) => !isSamePath(p, path),
       );
       if (this.recentFiles.length !== prevLen) {
         if (!this.explorer.hasWorkspace) {
@@ -1374,19 +1440,20 @@ class SemyraApp {
   }
 
   private openTabFromPayload(payload: FilePayload, persistPrefs = true): void {
-    const normLower = payload.path.toLowerCase();
-    const existing = this.tabs.find((t) => t.path?.toLowerCase() === normLower);
+    const existing = this.tabs.find((t) => t.path && isSamePath(t.path, payload.path));
     if (existing) {
       this.activateTab(existing.id);
       return;
     }
 
-    // Replace untouched single welcome/empty untitled tab cleanly
+    // Replace untouched single welcome/empty untitled tab cleanly (unless pinned)
     if (
       this.tabs.length === 1 &&
       this.tabs[0].path === null &&
-      !this.tabs[0].isDirty
+      !this.tabs[0].isDirty &&
+      !this.tabs[0].isPinned
     ) {
+      this.autoSave.cancel(this.tabs[0]);
       this.tabs = [];
       this.activeTabId = '';
     } else {
@@ -1430,9 +1497,31 @@ class SemyraApp {
     this.invalidateLintWorkspaceCache();
 
     if (savedAs && tab.path) {
-      const prevLower = previousPath?.toLowerCase() ?? null;
+      let absorbedPin = false;
+      for (let i = this.tabs.length - 1; i >= 0; i--) {
+        const other = this.tabs[i];
+        if (other !== tab && other.path && isSamePath(other.path, tab.path)) {
+          if (!other.isDirty) {
+            this.autoSave.cancel(other);
+            this.tabs.splice(i, 1);
+            if (other.isPinned) {
+              tab.isPinned = true;
+              absorbedPin = true;
+            }
+          } else {
+            void this.syncTabFromDisk(other);
+          }
+        }
+      }
+      if (absorbedPin) {
+        this.tabs = [
+          ...this.tabs.filter((t) => t.isPinned),
+          ...this.tabs.filter((t) => !t.isPinned),
+        ];
+      }
+
       for (const entry of this.navHistory) {
-        if (entry.tabId === tab.id || (prevLower && entry.path?.toLowerCase() === prevLower)) {
+        if (entry.tabId === tab.id || (previousPath && entry.path && isSamePath(entry.path, previousPath))) {
           entry.path = tab.path;
         }
       }
@@ -1440,6 +1529,20 @@ class SemyraApp {
 
     if (savedAs) {
       this.renderTabBar(false);
+      if (tab.id === this.activeTabId) {
+        window.clearTimeout(this.renderDebounceTimer);
+        this.renderDebounceTimer = undefined;
+        void this.editor.setLanguageForFile(tab.name);
+        const preserveScrollTop =
+          isMarkdownPath(tab.name) && (!previousPath || isMarkdownPath(previousPath))
+            ? this.previewPaneEl.scrollTop
+            : undefined;
+        void this.renderPreviewImmediate(
+          tab.currentContent,
+          tab.parentDir ?? this.explorer.rootPath,
+          preserveScrollTop,
+        );
+      }
     } else {
       this.updateTabDirtyState(tab.id, tab.isDirty);
     }
@@ -1465,8 +1568,10 @@ class SemyraApp {
     if (tab.path) {
       this.updateTabDirtyState(tab.id, tab.isDirty);
       this.syncWindowMetadata();
-      this.draftCheckpoint.schedule();
       this.autoSave.schedule(tab);
+    }
+    if (tab.path !== null || tab.isDirty) {
+      this.draftCheckpoint.schedule();
     }
     this.updateStatusBar();
     this.settingsCtrl?.syncAll();
@@ -1487,6 +1592,7 @@ class SemyraApp {
       path: tab.path,
       content: tab.currentContent,
       lineEnding: tab.lineEnding,
+      wasDirty: tab.isDirty,
     });
     if (this.closedTabsHistory.length > 15) {
       this.closedTabsHistory.shift();
@@ -1514,10 +1620,12 @@ class SemyraApp {
       return;
     }
     if (last.path) {
-      await this.openFileByPath(last.path);
-      this.showToast(t('toast.tabReopened', { name: last.name }));
+      const opened = await this.openFileByPath(last.path);
+      if (opened) {
+        this.showToast(t('toast.tabReopened', { name: last.name }));
+      }
     } else {
-      this.createNewTab(last.name, last.content, false);
+      this.createNewTab(last.name, last.content, last.wasDirty ?? last.content.length > 0);
       this.showToast(t('toast.draftReopened', { name: last.name }));
     }
   }
@@ -1553,27 +1661,28 @@ class SemyraApp {
     newPath: string,
     newName: string,
   ): void {
-    const oldLower = oldPath.toLowerCase();
-    const oldPrefix = `${oldLower}\\`;
+    const cleanOldLen = oldPath.replace(/[\\/]+$/, '').length;
+    const cleanNewRoot = newPath.replace(/[\\/]+$/, '');
     for (const t of this.tabs) {
       if (!t.path) continue;
-      const tabLower = t.path.toLowerCase();
-      if (tabLower === oldLower) {
+      if (isSamePath(t.path, oldPath)) {
         t.path = newPath;
         t.name = newName;
         t.parentDir = parentDirOfPath(newPath);
-      } else if (tabLower.startsWith(oldPrefix)) {
-        const suffix = t.path.slice(oldPath.length);
-        t.path = `${newPath}${suffix}`;
+        if (t.id === this.activeTabId) {
+          void this.editor.setLanguageForFile(t.name);
+        }
+      } else if (isSameOrDescendantPath(t.path, oldPath)) {
+        const suffix = t.path.slice(cleanOldLen);
+        t.path = `${cleanNewRoot}${suffix}`;
         t.parentDir = parentDirOfPath(t.path);
       }
     }
 
     const remapPath = (p: string) => {
-      const pLower = p.toLowerCase();
-      if (pLower === oldLower) return newPath;
-      if (pLower.startsWith(oldPrefix)) {
-        return `${newPath}${p.slice(oldPath.length)}`;
+      if (isSamePath(p, oldPath)) return newPath;
+      if (isSameOrDescendantPath(p, oldPath)) {
+        return `${cleanNewRoot}${p.slice(cleanOldLen)}`;
       }
       return p;
     };
@@ -1598,15 +1707,8 @@ class SemyraApp {
 
   private handleExplorerEntryDeleted(deletedPath: string): void {
     this.invalidateLintWorkspaceCache();
-    const lowerTarget = deletedPath.toLowerCase();
-    const prefix = `${lowerTarget}\\`;
-
-    const isDeleted = (p: string) => {
-      const pLower = p.toLowerCase();
-      return pLower === lowerTarget || pLower.startsWith(prefix);
-    };
-    this.recentFiles = this.recentFiles.filter((p) => !isDeleted(p));
-    this.recentFolders = this.recentFolders.filter((p) => !isDeleted(p));
+    this.recentFiles = this.recentFiles.filter((p) => !isSameOrDescendantPath(p, deletedPath));
+    this.recentFolders = this.recentFolders.filter((p) => !isSameOrDescendantPath(p, deletedPath));
     if (!this.explorer.hasWorkspace) {
       this.explorer.renderEmptyStateWithRecents(this.recentFolders, this.recentFiles);
     }
@@ -1614,12 +1716,15 @@ class SemyraApp {
     for (let i = this.tabs.length - 1; i >= 0; i--) {
       const t = this.tabs[i];
       if (!t.path) continue;
-      const lowerTab = t.path.toLowerCase();
-      if (lowerTab === lowerTarget || lowerTab.startsWith(prefix)) {
+      if (isSameOrDescendantPath(t.path, deletedPath)) {
+        this.autoSave.cancel(t);
         if (!t.isDirty) {
           this.tabs.splice(i, 1);
         } else {
           t.path = null;
+          t.savedContent = '';
+          t.savedLineEnding = undefined;
+          this.clearExternalConflict(t);
         }
       }
     }
@@ -1631,6 +1736,7 @@ class SemyraApp {
     } else {
       this.renderTabBar();
       this.updateStatusBar();
+      this.syncWindowMetadata();
     }
 
     this.draftCheckpoint.schedule();
@@ -1657,6 +1763,7 @@ class SemyraApp {
     ++this.renderSeq;
     this.renderDebounceTimer = window.setTimeout(() => {
       this.renderDebounceTimer = undefined;
+      if (this.activeTab !== tab) return;
       void this.renderPreviewImmediate(
         content,
         tab.parentDir ?? this.explorer.rootPath,
@@ -1688,7 +1795,9 @@ class SemyraApp {
       if (this.statusStatsTimer === undefined) this.updateWordCountDisplay();
 
       if (typeof restoreScrollTop === 'number') {
+        this.syncScroll.suppressFor(150);
         this.previewPaneEl.scrollTop = restoreScrollTop;
+        this.previewPaneEl.classList.toggle('is-scrolled', this.previewPaneEl.scrollTop > 220);
       }
       this.syncScroll.updateActiveHeadingFromViewport();
       if (!this.previewFindBarEl.hidden && this.previewFindInputEl.value) {
@@ -1696,6 +1805,9 @@ class SemyraApp {
       }
     } catch (err) {
       console.error('Markdown-Rendering fehlgeschlagen:', err);
+      if (isCurrent()) {
+        this.showToast(err instanceof Error ? err.message : String(err));
+      }
     }
   }
 
@@ -1717,6 +1829,8 @@ class SemyraApp {
 
     if (panel === 'search') {
       this.workspaceSearch.focusAndRunIfPopulated();
+    } else if (panel === 'outline' && this.activeTab) {
+      this.renderOutline(this.activeTab.outline);
     }
   }
 
@@ -1746,7 +1860,8 @@ class SemyraApp {
     }
 
     const tokenByLine = new Map<number, number>();
-    if (this.activeTab) {
+    const outlinePanelHidden = document.getElementById('panel-outline')?.hidden ?? false;
+    if (this.activeTab && !outlinePanelHidden) {
       for (const tc of computeHeadingTokenCounts(this.activeTab.currentContent)) {
         tokenByLine.set(tc.line, tc.tokens);
       }
@@ -1881,6 +1996,7 @@ class SemyraApp {
       if (tab.isDirty) {
         const dot = document.createElement('span');
         dot.className = 'tab-dirty-dot';
+        dot.setAttribute('role', 'img');
         dot.title = t('tab.unsavedTitle');
         dot.setAttribute('aria-label', t('tab.unsavedTitle'));
         selectBtn.appendChild(dot);
@@ -1919,6 +2035,7 @@ class SemyraApp {
       if (!existingDot) {
         const dot = document.createElement('span');
         dot.className = 'tab-dirty-dot';
+        dot.setAttribute('role', 'img');
         dot.title = t('tab.unsavedTitle');
         dot.setAttribute('aria-label', t('tab.unsavedTitle'));
         selectBtn.appendChild(dot);
@@ -1960,37 +2077,30 @@ class SemyraApp {
       pinLabel.textContent = tab.isPinned ? t('tabCtx.unpin') : t('tabCtx.pin');
     }
 
-    this.tabContextMenuEl.style.left = `${e.clientX}px`;
-    this.tabContextMenuEl.style.top = `${e.clientY}px`;
-    this.tabContextMenuEl.showPopover?.();
-
-    requestAnimationFrame(() => {
-      const rect = this.tabContextMenuEl.getBoundingClientRect();
-      const clampedLeft = Math.max(6, Math.min(e.clientX, window.innerWidth - rect.width - 8));
-      const clampedTop = Math.max(6, Math.min(e.clientY, window.innerHeight - rect.height - 8));
-      this.tabContextMenuEl.style.left = `${clampedLeft}px`;
-      this.tabContextMenuEl.style.top = `${clampedTop}px`;
-
-      const firstItem = this.tabContextMenuEl.querySelector<HTMLButtonElement>(
-        '[focusgroup~="menu"] > button:not(:disabled)',
-      );
-      firstItem?.focus();
-    });
+    this.positionAndFocusPopover(this.tabContextMenuEl, e.clientX, e.clientY);
   }
 
   private openTableContextMenu(clientX: number, clientY: number): void {
-    this.tableContextMenuEl.style.left = `${clientX}px`;
-    this.tableContextMenuEl.style.top = `${clientY}px`;
-    this.tableContextMenuEl.showPopover?.();
+    this.positionAndFocusPopover(this.tableContextMenuEl, clientX, clientY);
+  }
+
+  private positionAndFocusPopover(
+    popoverEl: HTMLElement & { showPopover?: () => void },
+    clientX: number,
+    clientY: number,
+  ): void {
+    popoverEl.style.left = `${clientX}px`;
+    popoverEl.style.top = `${clientY}px`;
+    popoverEl.showPopover?.();
 
     requestAnimationFrame(() => {
-      const rect = this.tableContextMenuEl.getBoundingClientRect();
+      const rect = popoverEl.getBoundingClientRect();
       const clampedLeft = Math.max(6, Math.min(clientX, window.innerWidth - rect.width - 8));
       const clampedTop = Math.max(6, Math.min(clientY, window.innerHeight - rect.height - 8));
-      this.tableContextMenuEl.style.left = `${clampedLeft}px`;
-      this.tableContextMenuEl.style.top = `${clampedTop}px`;
+      popoverEl.style.left = `${clampedLeft}px`;
+      popoverEl.style.top = `${clampedTop}px`;
 
-      const firstItem = this.tableContextMenuEl.querySelector<HTMLButtonElement>(
+      const firstItem = popoverEl.querySelector<HTMLButtonElement>(
         '[focusgroup~="menu"] > button:not(:disabled)',
       );
       firstItem?.focus();
@@ -2028,21 +2138,25 @@ class SemyraApp {
 
     this.statusPathBtn.textContent = tab.path ?? tab.name;
     this.updateSaveStatus(tab);
+    const { state } = this.editor.view;
+    const head = state.selection.main.head;
+    const lineObj = state.doc.lineAt(head);
+    this.statusCursorEl.textContent = t('status.cursor', {
+      line: lineObj.number,
+      col: head - lineObj.from + 1,
+    });
     this.scheduleStatusStatistics(true);
     this.statusZoomBtn.textContent = `${this.zoomPercent}%`;
     this.statusEolBtn.textContent = tab.lineEnding;
     this.statusEncodingEl.textContent = tab.encoding;
   }
 
-  private updateReadingTime(readingTimeSec: number, isEn: boolean): void {
-    if (this.statusReadtimeEl) {
-      if (readingTimeSec < 60) {
-        this.statusReadtimeEl.textContent = isEn ? `${readingTimeSec}s read time` : `${readingTimeSec} Sek. Lesezeit`;
-      } else {
-        const mins = Math.ceil(readingTimeSec / 60);
-        this.statusReadtimeEl.textContent = isEn ? `~${mins} min read time` : `~${mins} Min. Lesezeit`;
-      }
+  private formatReadingTime(readingTimeSec: number, isEn: boolean): string {
+    if (readingTimeSec < 60) {
+      return isEn ? `${readingTimeSec}s read time` : `${readingTimeSec} Sek. Lesezeit`;
     }
+    const mins = Math.ceil(readingTimeSec / 60);
+    return isEn ? `~${mins} min read time` : `~${mins} Min. Lesezeit`;
   }
 
   private updateWordCountDisplay(): void {
@@ -2058,11 +2172,8 @@ class SemyraApp {
     const selTokens = this.lastSelection.chars > 0 ? estimateTokens(this.editor.getSelectedText()) : 0;
     const isEn = getLanguage() === 'en';
     const locale = isEn ? 'en-US' : 'de-DE';
-    this.updateReadingTime(readingTimeSec, isEn);
     const wordLabel = isEn ? (words === 1 ? 'word' : 'words') : (words === 1 ? 'Wort' : 'Wörter');
-    const readingTimeStr = readingTimeSec < 60
-      ? (isEn ? `${readingTimeSec}s read time` : `${readingTimeSec} Sek. Lesezeit`)
-      : (isEn ? `~${Math.ceil(readingTimeSec / 60)} min read time` : `~${Math.ceil(readingTimeSec / 60)} Min. Lesezeit`);
+    const readingTimeStr = this.formatReadingTime(readingTimeSec, isEn);
 
     if (this.statusDocSummaryBtn) {
       if (this.lastSelection.chars > 0) {
@@ -2080,25 +2191,6 @@ class SemyraApp {
         this.statusDocSummaryBtn.title = isEn
           ? `Document statistics: ${words.toLocaleString(locale)} words · ~${totalTokens.toLocaleString(locale)} tokens · ${readingTimeStr} · Click for details`
           : `Dokument-Statistiken: ${words.toLocaleString(locale)} Wörter · ~${totalTokens.toLocaleString(locale)} Tokens · ${readingTimeStr} · Klicken für Details`;
-      }
-    }
-
-    if (this.statusWordsEl) {
-      if (this.lastSelection.chars > 0) {
-        const selW = this.lastSelection.words;
-        const selC = this.lastSelection.chars;
-        this.statusWordsEl.textContent = isEn
-          ? `${selW} of ${words.toLocaleString(locale)} words selected (${selC.toLocaleString(locale)} ch.)`
-          : `${selW} von ${words.toLocaleString(locale)} Wörtern markiert (${selC.toLocaleString(locale)} Z.)`;
-      } else {
-        this.statusWordsEl.textContent = `${words.toLocaleString(locale)} ${wordLabel}`;
-      }
-    }
-    if (this.statusTokensEl) {
-      if (this.lastSelection.chars > 0) {
-        this.statusTokensEl.textContent = `~${selTokens.toLocaleString(locale)} Tokens (~${totalTokens.toLocaleString(locale)})`;
-      } else {
-        this.statusTokensEl.textContent = `~${totalTokens.toLocaleString(locale)} Tokens`;
       }
     }
   }
@@ -2218,18 +2310,36 @@ class SemyraApp {
   }
 
   private async triggerOpenFilesDialog(): Promise<void> {
-    const res = await backend.openFilesDialog(getLanguage());
-    for (const f of res.files) {
-      this.openTabFromPayload(f);
+    try {
+      const res = await backend.openFilesDialog(getLanguage());
+      for (const f of res.files) {
+        this.openTabFromPayload(f);
+      }
+      if (res.errors && res.errors.length > 0) {
+        this.showToast(res.errors.join(' | '));
+      }
+    } catch (err) {
+      console.error('Dateidialog konnte nicht geöffnet werden:', err);
+      this.showToast(
+        err instanceof Error
+          ? err.message
+          : t('toast.openFileFailed', { name: '' }).trim(),
+      );
     }
   }
 
   private async triggerOpenFolderDialog(): Promise<void> {
-    const res = await backend.openFolderDialog(getLanguage());
-    if (res.tree) {
-      this.setSidebarSourceMode('workspace', false);
-      this.explorer.setTree(res.tree);
-      this.switchSidebarPanel('files');
+    try {
+      const res = await backend.openFolderDialog(getLanguage());
+      if (res.tree) {
+        this.setSidebarSourceMode('workspace', false);
+        this.explorer.setTree(res.tree);
+        this.switchSidebarPanel('files');
+      }
+    } catch (err) {
+      console.error('Ordnerdialog konnte nicht geöffnet werden:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      this.showToast(t('sidebar.treeLoadFailed', { err: msg }));
     }
   }
 
@@ -2516,7 +2626,7 @@ class SemyraApp {
     const targetPath = this.externalChangedPath ?? this.activeTab?.path;
     if (!targetPath) return;
     const tab = this.tabs.find(
-      (t) => t.path?.toLowerCase() === targetPath.toLowerCase(),
+      (t) => t.path && isSamePath(t.path, targetPath),
     );
     if (!tab || !tab.path) return;
 
@@ -2524,11 +2634,12 @@ class SemyraApp {
       path: tab.path,
       localContent: tab.currentContent,
       onKeepLocal: (payload) => {
-        if (tab.path !== targetPath) return;
+        if (!tab.path || !isSamePath(tab.path, targetPath)) return;
         tab.overwriteExpected = payload;
         if (tab.id === this.activeTabId) this.dismissExternalConflictBanner();
       },
       onReloadDisk: () => this.syncTabFromDisk(tab, true),
+      onError: () => this.showToast(t('toast.diffReadFailed')),
     });
   }
 
@@ -2619,7 +2730,7 @@ class SemyraApp {
     header.append(titleWrap, closeBtn);
 
     const list = document.createElement('div');
-    list.className = 'lint-issues-list scroller';
+    list.className = 'lint-dialog-list scroller';
     let firstBtn: HTMLButtonElement | null = null;
     for (const candidate of otherTabs) {
       const btn = document.createElement('button');
@@ -2646,10 +2757,10 @@ class SemyraApp {
     }
 
     const actions = document.createElement('div');
-    actions.className = 'modal-actions';
+    actions.className = 'dialog-actions ai-bundle-footer';
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
-    cancelBtn.className = 'btn';
+    cancelBtn.className = 'dialog-btn';
     cancelBtn.textContent = isEn ? 'Cancel' : 'Abbrechen';
     cancelBtn.addEventListener('click', () => dialog.close());
     actions.append(cancelBtn);
@@ -2842,13 +2953,10 @@ class SemyraApp {
     this.statusLintBtn?.addEventListener('click', () => {
       this.renderLintDialogList();
     });
-    document.getElementById('lint-dialog')?.addEventListener('close', (e) => {
-      (e.currentTarget as HTMLDialogElement).returnValue = '';
-    });
+    const lintDialog = document.getElementById('lint-dialog') as HTMLDialogElement | null;
+    if (lintDialog) bindDialogReturnValueReset(lintDialog);
 
-    const newTabFn = () => this.createNewTab();
-    document.getElementById('btn-new-tab')?.addEventListener('click', newTabFn);
-    document.getElementById('btn-tab-add')?.addEventListener('click', newTabFn);
+    document.getElementById('btn-tab-add')?.addEventListener('click', () => this.createNewTab());
 
     document.getElementById('btn-open-file')?.addEventListener('click', () => {
       void this.triggerOpenFilesDialog();
@@ -2860,30 +2968,6 @@ class SemyraApp {
 
     document.getElementById('btn-save')?.addEventListener('click', () => {
       if (this.activeTab) void this.documentFiles.save(this.activeTab);
-    });
-
-    document.getElementById('btn-save-as')?.addEventListener('click', () => {
-      if (this.activeTab) void this.documentFiles.save(this.activeTab, true);
-    });
-
-    document.getElementById('btn-copy-markdown')?.addEventListener('click', () => {
-      void this.copyCurrentTabMarkdown();
-    });
-
-    document.getElementById('btn-copy-rich')?.addEventListener('click', () => {
-      void this.documentExport.copyRichText();
-    });
-
-    document.getElementById('btn-export-html')?.addEventListener('click', () => {
-      void this.documentExport.exportHtml();
-    });
-
-    document.getElementById('btn-export-pdf')?.addEventListener('click', () => {
-      void this.documentExport.exportPdf();
-    });
-
-    document.getElementById('btn-print')?.addEventListener('click', () => {
-      void this.documentExport.print();
     });
 
     // Share & Export Popover Actions
@@ -3007,20 +3091,21 @@ class SemyraApp {
           this.schedulePrefsSave();
           break;
         case 'reveal':
-          if (tab.path) void backend.revealInExplorer(tab.path);
+          if (tab.path) this.revealPathInExplorer(tab.path);
           break;
         case 'copy-path':
           if (tab.path) {
-            await navigator.clipboard.writeText(tab.path).catch(() => {});
-            this.showToast(t('toast.copyPath'));
+            await this.copyTextWithToast(tab.path, t('toast.copyPath'));
           }
           break;
         case 'copy-at-path':
           await this.copyAtPath(tab);
           break;
         case 'copy-markdown':
-          await navigator.clipboard.writeText(tab.currentContent).catch(() => {});
-          this.showToast(isMarkdownPath(tab.name) ? t('toast.copyMarkdown') : t('toast.copySource'));
+          await this.copyTextWithToast(
+            tab.currentContent,
+            isMarkdownPath(tab.name) ? t('toast.copyMarkdown') : t('toast.copySource'),
+          );
           break;
         case 'copy-ai-context':
           await this.copyTabAiContext(tab);
@@ -3040,45 +3125,16 @@ class SemyraApp {
       if (!actionBtn) return;
       const action = actionBtn.dataset.tableAction;
       this.tableContextMenuEl.hidePopover?.();
-      switch (action) {
-        case 'row-above':
-          if (this.editor.modifyTable({ type: 'insert-row', direction: 'above' })) {
-            this.showToast(t('toast.tableRowAbove'));
-          }
-          break;
-        case 'row-below':
-          if (this.editor.modifyTable({ type: 'insert-row', direction: 'below' })) {
-            this.showToast(t('toast.tableRowBelow'));
-          }
-          break;
-        case 'delete-row':
-          if (this.editor.modifyTable({ type: 'delete-row' })) {
-            this.showToast(t('toast.tableRowDeleted'));
-          }
-          break;
-        case 'col-left':
-          if (this.editor.modifyTable({ type: 'insert-col', direction: 'left' })) {
-            this.showToast(t('toast.tableColLeft'));
-          }
-          break;
-        case 'col-right':
-          if (this.editor.modifyTable({ type: 'insert-col', direction: 'right' })) {
-            this.showToast(t('toast.tableColRight'));
-          }
-          break;
-        case 'delete-col':
-          if (this.editor.modifyTable({ type: 'delete-col' })) {
-            this.showToast(t('toast.tableColDeleted'));
-          }
-          break;
-        case 'align':
-          this.alignActiveMarkdownTables();
-          break;
+      if (action) {
+        this.applyTableAction(action);
       }
     });
 
     // Tab drag-and-drop reordering via Pointer Events (immune to button click suppression)
     this.tabBarEl.addEventListener('pointerdown', (e: PointerEvent) => {
+      window.clearTimeout(this.suppressNextTabClickTimer);
+      this.suppressNextTabClickTimer = undefined;
+      this.suppressNextTabClick = false;
       if (e.button !== 0) return;
       if ((e.target as HTMLElement).closest('.tab-close-btn')) return;
 
@@ -3160,7 +3216,9 @@ class SemyraApp {
       }
 
       if (state.isDragging) {
-        setTimeout(() => {
+        window.clearTimeout(this.suppressNextTabClickTimer);
+        this.suppressNextTabClickTimer = window.setTimeout(() => {
+          this.suppressNextTabClickTimer = undefined;
           this.suppressNextTabClick = false;
         }, 80);
 
@@ -3280,10 +3338,8 @@ class SemyraApp {
       this.editor.insertSnippet(`\n${lines.join('\n')}\n`);
     });
 
-    const shortcutsDialog = document.getElementById('shortcuts-dialog') as HTMLDialogElement;
-    shortcutsDialog.addEventListener('close', () => {
-      shortcutsDialog.returnValue = '';
-    });
+    const shortcutsDialog = document.getElementById('shortcuts-dialog') as HTMLDialogElement | null;
+    if (shortcutsDialog) bindDialogReturnValueReset(shortcutsDialog);
 
     for (const tabBtn of document.querySelectorAll<HTMLButtonElement>('[data-sidebar-panel]')) {
       tabBtn.addEventListener('click', () => {
@@ -3311,16 +3367,20 @@ class SemyraApp {
       };
 
       const onUp = (ev: PointerEvent) => {
-        resizer.releasePointerCapture(ev.pointerId);
+        if (resizer.hasPointerCapture?.(ev.pointerId)) {
+          resizer.releasePointerCapture(ev.pointerId);
+        }
         resizer.classList.remove('is-dragging');
         resizer.removeEventListener('pointermove', onMove);
         resizer.removeEventListener('pointerup', onUp);
+        resizer.removeEventListener('pointercancel', onUp);
         this.saveSplitRatios();
         this.schedulePrefsSave();
       };
 
       resizer.addEventListener('pointermove', onMove);
       resizer.addEventListener('pointerup', onUp);
+      resizer.addEventListener('pointercancel', onUp);
     });
 
     resizer.addEventListener('dblclick', () => {
@@ -3348,11 +3408,7 @@ class SemyraApp {
       }
     });
 
-    const openStats = () => this.openDocStatsPopover();
-    this.statusDocSummaryBtn?.addEventListener('click', openStats);
-    document.getElementById('status-words')?.addEventListener('click', openStats);
-    document.getElementById('status-tokens')?.addEventListener('click', openStats);
-    document.getElementById('status-readtime')?.addEventListener('click', openStats);
+    this.statusDocSummaryBtn?.addEventListener('click', () => this.openDocStatsPopover());
 
     this.previewPaneEl.addEventListener(
       'scroll',
@@ -3387,9 +3443,9 @@ class SemyraApp {
       if (copyBtn) {
         const codeEl = copyBtn.closest('.code-block-wrapper')?.querySelector('pre code');
         if (codeEl) {
-          void navigator.clipboard.writeText(codeEl.textContent ?? '').then(() => {
+          void this.copyTextWithToast(codeEl.textContent ?? '', t('toast.copyCode')).then((ok) => {
+            if (!ok) return;
             copyBtn.textContent = t('preview.copied');
-            this.showToast(t('toast.copyCode'));
             setTimeout(() => {
               copyBtn.textContent = t('preview.copy');
             }, 1400);
@@ -3403,9 +3459,9 @@ class SemyraApp {
         const wrapper = copyMermaidBtn.closest('.mermaid-wrapper');
         const svgEl = wrapper?.querySelector('svg');
         if (svgEl) {
-          void navigator.clipboard.writeText(svgEl.outerHTML).then(() => {
+          void this.copyTextWithToast(svgEl.outerHTML, t('toast.copyDiagram')).then((ok) => {
+            if (!ok) return;
             copyMermaidBtn.textContent = t('preview.copied');
-            this.showToast(t('toast.copyDiagram'));
             setTimeout(() => {
               copyMermaidBtn.textContent = t('preview.copySvg');
             }, 1400);
@@ -3428,28 +3484,29 @@ class SemyraApp {
         const href = anchor.getAttribute('href') ?? '';
         if (href.startsWith('#')) {
           e.preventDefault();
-          const id = decodeURIComponent(href.slice(1));
+          const id = safeDecodeURIComponent(href.slice(1));
           this.previewContentEl.querySelector(`#${CSS.escape(id)}`)?.scrollIntoView({
             behavior: 'smooth',
           });
           if (anchor.classList.contains('heading-anchor')) {
-            void navigator.clipboard?.writeText(href);
-            this.showToast(t('toast.sectionLinkCopied'));
+            void this.copyTextWithToast(href, t('toast.sectionLinkCopied'));
           }
         } else if (
-          href.startsWith('https://') ||
-          href.startsWith('http://') ||
-          href.startsWith('mailto:')
+          /^https?:\/\//i.test(href) ||
+          /^mailto:/i.test(href)
         ) {
           e.preventDefault();
-          void backend.openExternalUrl(href);
+          void backend.openExternalUrl(href).catch((err) => {
+            console.error('Externer Link konnte nicht geöffnet werden:', err);
+            this.showToast(err instanceof Error ? err.message : String(err));
+          });
         } else if (/\.md(?:#.*)?$/i.test(href) && this.activeTab?.parentDir) {
           e.preventDefault();
           const hashIdx = href.indexOf('#');
-          const hashId = hashIdx >= 0 ? decodeURIComponent(href.slice(hashIdx + 1)) : '';
+          const hashId = hashIdx >= 0 ? safeDecodeURIComponent(href.slice(hashIdx + 1)) : '';
           const joined = resolveRelativeMarkdownPath(this.activeTab.parentDir, href);
-          void this.openFileByPath(joined).then(() => {
-            if (hashId) {
+          void this.openFileByPath(joined).then((opened) => {
+            if (opened && hashId) {
               requestAnimationFrame(() => {
                 this.previewContentEl
                   .querySelector(`#${CSS.escape(hashId)}`)
@@ -3457,6 +3514,8 @@ class SemyraApp {
               });
             }
           });
+        } else {
+          e.preventDefault();
         }
       }
     });
@@ -3478,7 +3537,7 @@ class SemyraApp {
     // Status bar interactive buttons
     this.statusPathBtn.addEventListener('click', () => {
       const p = this.activeTab?.path ?? this.explorer.rootPath;
-      if (p) void backend.revealInExplorer(p);
+      if (p) this.revealPathInExplorer(p);
     });
 
     this.statusCursorEl.addEventListener('click', () => {
@@ -3657,7 +3716,7 @@ class SemyraApp {
           this.openEditorReplacePanel();
         } else if (mod && !e.altKey && !e.shiftKey && key === 'n') {
           consume();
-          newTabFn();
+          this.createNewTab();
         } else if (mod && !e.altKey && !e.shiftKey && key === 'o') {
           consume();
           void this.triggerOpenFilesDialog();
@@ -3764,7 +3823,7 @@ class SemyraApp {
           void this.toggleZen();
         } else if (e.key === 'F1') {
           consume();
-          shortcutsDialog.showModal();
+          this.openShortcutsDialog();
         }
       },
       { capture: true },
@@ -3802,6 +3861,8 @@ class SemyraApp {
         return;
       }
       if (entry.path) {
+        const prevIndex = this.navHistoryIndex;
+        this.navHistoryIndex = idx;
         this.navigatingHistoryDepth++;
         let opened = false;
         try {
@@ -3811,15 +3872,79 @@ class SemyraApp {
         }
         if (navSeq !== this.navHistorySeq) return;
         if (opened) {
-          this.navHistoryIndex = idx;
           if (this.activeTab) {
             entry.tabId = this.activeTab.id;
           }
           return;
         }
+        this.navHistoryIndex = prevIndex;
       }
       idx += delta;
     }
+  }
+
+  private applyTableAction(action: string): void {
+    switch (action) {
+      case 'row-above':
+        if (this.editor.modifyTable({ type: 'insert-row', direction: 'above' })) {
+          this.showToast(t('toast.tableRowAbove'));
+        }
+        break;
+      case 'row-below':
+        if (this.editor.modifyTable({ type: 'insert-row', direction: 'below' })) {
+          this.showToast(t('toast.tableRowBelow'));
+        }
+        break;
+      case 'delete-row':
+        if (this.editor.modifyTable({ type: 'delete-row' })) {
+          this.showToast(t('toast.tableRowDeleted'));
+        }
+        break;
+      case 'col-left':
+        if (this.editor.modifyTable({ type: 'insert-col', direction: 'left' })) {
+          this.showToast(t('toast.tableColLeft'));
+        }
+        break;
+      case 'col-right':
+        if (this.editor.modifyTable({ type: 'insert-col', direction: 'right' })) {
+          this.showToast(t('toast.tableColRight'));
+        }
+        break;
+      case 'delete-col':
+        if (this.editor.modifyTable({ type: 'delete-col' })) {
+          this.showToast(t('toast.tableColDeleted'));
+        }
+        break;
+      case 'align':
+        this.alignActiveMarkdownTables();
+        break;
+    }
+  }
+
+  private openShortcutsDialog(): void {
+    const dialog = document.getElementById('shortcuts-dialog') as HTMLDialogElement | null;
+    if (dialog && !dialog.open) {
+      dialog.showModal();
+    }
+  }
+
+  private async copyTextWithToast(text: string, successMessage: string): Promise<boolean> {
+    try {
+      await navigator.clipboard.writeText(text);
+      this.showToast(successMessage);
+      return true;
+    } catch (err) {
+      console.error('Kopieren in die Zwischenablage fehlgeschlagen:', err);
+      this.showToast(t('toast.copyFailed'));
+      return false;
+    }
+  }
+
+  private revealPathInExplorer(path: string): void {
+    void backend.revealInExplorer(path).catch((err) => {
+      console.error('Pfad konnte nicht im Explorer geöffnet werden:', err);
+      this.showToast(err instanceof Error ? err.message : String(err));
+    });
   }
 
   private openFormatOptionPopover(

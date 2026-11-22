@@ -94,4 +94,45 @@ describe('DocumentCloseController', () => {
     expect(autoSave.schedule).not.toHaveBeenCalled();
     expect(controller.isClosing(document)).toBe(true);
   });
+
+  it('keeps a tab open when save fails or document revision changes during prompt', async () => {
+    const document = dirtyDocument('Draft');
+    const { controller, files, autoSave, actions } = closeController([document]);
+    actions.promptTab.mockResolvedValue('save');
+    files.save.mockResolvedValueOnce(false);
+
+    await expect(controller.closeTab(document.id)).resolves.toBe(false);
+    expect(actions.removeTab).not.toHaveBeenCalled();
+    expect(autoSave.schedule).toHaveBeenCalledTimes(1);
+
+    actions.promptTab.mockImplementationOnce(async () => {
+      document.revision = 2;
+      return 'discard';
+    });
+    await expect(controller.closeTab(document.id)).resolves.toBe(false);
+    expect(actions.removeTab).not.toHaveBeenCalled();
+    expect(autoSave.schedule).toHaveBeenCalledTimes(2);
+  });
+
+  it('aborts window close cleanly when prepareWindowClose returns false or closeNativeWindow throws', async () => {
+    const document = dirtyDocument('Draft');
+    const { controller, autoSave, actions } = closeController([document]);
+    actions.promptWindow.mockResolvedValue('discard');
+    actions.prepareWindowClose.mockResolvedValueOnce(false);
+
+    await controller.closeWindow();
+    expect(actions.closeNativeWindow).not.toHaveBeenCalled();
+    expect(actions.onWindowCloseAborted).toHaveBeenCalledTimes(1);
+    expect(controller.isClosing(document)).toBe(false);
+    expect(autoSave.schedule).toHaveBeenCalledTimes(1);
+
+    const err = new Error('native close failed');
+    actions.prepareWindowClose.mockResolvedValueOnce(true);
+    actions.closeNativeWindow.mockRejectedValueOnce(err);
+    await controller.closeWindow();
+    expect(actions.onWindowCloseError).toHaveBeenCalledExactlyOnceWith(err);
+    expect(actions.onWindowCloseAborted).toHaveBeenCalledTimes(2);
+    expect(controller.isClosing(document)).toBe(false);
+    expect(autoSave.schedule).toHaveBeenCalledTimes(2);
+  });
 });

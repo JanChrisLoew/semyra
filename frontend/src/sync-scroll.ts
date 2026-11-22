@@ -27,10 +27,40 @@ function escapeId(id: string): string {
   return id.replace(/([^\w-])/g, '\\$1');
 }
 
+function setTimeoutSafe(fn: () => void, ms: number): number {
+  if (typeof window !== 'undefined' && typeof window.setTimeout === 'function') {
+    return window.setTimeout(fn, ms);
+  }
+  return globalThis.setTimeout(fn, ms) as unknown as number;
+}
+
+function clearTimeoutSafe(id: number | undefined): void {
+  if (id === undefined) return;
+  if (typeof window !== 'undefined' && typeof window.clearTimeout === 'function') {
+    window.clearTimeout(id);
+  } else {
+    globalThis.clearTimeout(id);
+  }
+}
+
+function isPreviewElementRendered(el: HTMLElement, rect: DOMRect): boolean {
+  if (el.closest('[hidden]')) return false;
+  const closedDetails = el.closest('details:not([open])');
+  if (closedDetails && closedDetails !== el) {
+    const summary = closedDetails.querySelector(':scope > summary');
+    if (!summary || !summary.contains(el)) return false;
+  }
+  if ((rect.width ?? 0) === 0 && rect.height === 0 && rect.top === 0 && rect.bottom === 0) {
+    return false;
+  }
+  return true;
+}
+
 export class SyncScrollController {
   private enabled = true;
   private scrollSyncLock: 'editor' | 'preview' | null = null;
   private scrollUnlockTimer: number | undefined;
+  private suppressUntil = 0;
   private lastActiveSlug: string | null = null;
   private deps: SyncScrollDeps;
 
@@ -90,7 +120,7 @@ export class SyncScrollController {
     this.cachedOutlineRef = null;
   }
 
-  public destroy(): void {
+  private clearPendingScheduledSync(): void {
     if (
       this.pendingRafId !== null &&
       typeof window !== 'undefined' &&
@@ -100,15 +130,16 @@ export class SyncScrollController {
       this.pendingRafId = null;
     }
     if (this.pendingTimeoutId !== null) {
-      if (typeof window !== 'undefined') {
-        window.clearTimeout(this.pendingTimeoutId);
-      } else {
-        globalThis.clearTimeout(this.pendingTimeoutId);
-      }
+      clearTimeoutSafe(this.pendingTimeoutId);
       this.pendingTimeoutId = null;
     }
     this.pendingSyncDirection = null;
-    window.clearTimeout(this.scrollUnlockTimer);
+  }
+
+  public destroy(): void {
+    this.clearPendingScheduledSync();
+    clearTimeoutSafe(this.scrollUnlockTimer);
+    this.scrollUnlockTimer = undefined;
     this.mutationObserver?.disconnect();
     this.mutationObserver = null;
     this.resizeObserver?.disconnect();
@@ -119,18 +150,23 @@ export class SyncScrollController {
     this.invalidateCache();
   }
 
+  public suppressFor(durationMs = 120): void {
+    this.clearPendingScheduledSync();
+    this.suppressUntil = Date.now() + Math.max(0, durationMs);
+  }
+
   public lockScrollForNavigation(source: 'editor' | 'preview', durationMs = 450): void {
     this.scrollSyncLock = source;
-    window.clearTimeout(this.scrollUnlockTimer);
-    this.scrollUnlockTimer = window.setTimeout(() => {
+    clearTimeoutSafe(this.scrollUnlockTimer);
+    this.scrollUnlockTimer = setTimeoutSafe(() => {
       this.scrollSyncLock = null;
     }, durationMs);
   }
 
   private lockScrollSource(source: 'editor' | 'preview'): void {
     this.scrollSyncLock = source;
-    window.clearTimeout(this.scrollUnlockTimer);
-    this.scrollUnlockTimer = window.setTimeout(() => {
+    clearTimeoutSafe(this.scrollUnlockTimer);
+    this.scrollUnlockTimer = setTimeoutSafe(() => {
       this.scrollSyncLock = null;
     }, 90);
   }
@@ -156,7 +192,9 @@ export class SyncScrollController {
     for (const el of nodes) {
       const line = Number(el.getAttribute('data-line'));
       if (!Number.isFinite(line)) continue;
-      const top = el.getBoundingClientRect().top - paneRect.top + scrollTop;
+      const rect = el.getBoundingClientRect();
+      if (!isPreviewElementRendered(el, rect)) continue;
+      const top = rect.top - paneRect.top + scrollTop;
       if (anchors.length === 0 || anchors[anchors.length - 1].line !== line) {
         anchors.push({ line, top });
       }
@@ -180,7 +218,9 @@ export class SyncScrollController {
     for (const item of outline) {
       const el = previewContentEl.querySelector<HTMLElement>(`#${escapeId(item.slug)}`);
       if (!el) continue;
-      const top = el.getBoundingClientRect().top - paneRect.top + scrollTop;
+      const rect = el.getBoundingClientRect();
+      if (!isPreviewElementRendered(el, rect)) continue;
+      const top = rect.top - paneRect.top + scrollTop;
       anchors.push({ slug: item.slug, top });
     }
 
@@ -230,6 +270,9 @@ export class SyncScrollController {
   }
 
   private scheduleSync(direction: 'editor' | 'preview'): void {
+    if (Date.now() < this.suppressUntil) {
+      return;
+    }
     // Do not let a locked echo overwrite a pending active-direction sync.
     if (
       this.pendingSyncDirection !== null &&

@@ -11,6 +11,19 @@ export function installProgressiveEnhancements(): void {
 
   if (!('commandForElement' in HTMLButtonElement.prototype)) {
     void import('invokers-polyfill');
+    document.addEventListener('click', (e) => {
+      const btn = (e.target as Element | null)?.closest?.(
+        'button[command="close"][commandfor]',
+      ) as HTMLButtonElement | null;
+      if (!btn) return;
+      const targetId = btn.getAttribute('commandfor');
+      if (!targetId) return;
+      const target = document.getElementById(targetId);
+      if (target && 'close' in target && typeof (target as HTMLDialogElement).close === 'function') {
+        const dialog = target as HTMLDialogElement;
+        if (dialog.open) dialog.close();
+      }
+    });
   }
 
   if (!('focusGroup' in HTMLElement.prototype)) {
@@ -54,14 +67,26 @@ export function installProgressiveEnhancements(): void {
         e.clientY > r.bottom
       );
     };
-    for (const dialog of document.querySelectorAll<HTMLDialogElement>('dialog[closedby="any"]')) {
-      let pressedOutside = false;
-      dialog.addEventListener('pointerdown', (e) => {
-        pressedOutside = outside(e, dialog);
-      });
-      dialog.addEventListener('pointerup', (e) => {
-        if (pressedOutside && outside(e, dialog)) dialog.close();
-      });
-    }
+    let pressedDialog: HTMLDialogElement | null = null;
+    document.addEventListener('pointerdown', (e) => {
+      const target = e.target;
+      if (
+        target instanceof HTMLDialogElement &&
+        target.open &&
+        target.getAttribute('closedby') === 'any' &&
+        outside(e, target)
+      ) {
+        pressedDialog = target;
+      } else {
+        pressedDialog = null;
+      }
+    });
+    document.addEventListener('pointerup', (e) => {
+      const dialog = pressedDialog;
+      pressedDialog = null;
+      if (dialog && dialog.open && e.target === dialog && outside(e, dialog)) {
+        dialog.close();
+      }
+    });
   }
 }

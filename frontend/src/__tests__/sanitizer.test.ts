@@ -171,4 +171,77 @@ describe('safeSetMarkdownHTML', () => {
     expect(host.querySelector('.prompt-tag-body p')?.getAttribute('data-line')).toBe('4');
     expect(host.querySelector('script')).toBeNull();
   });
+
+  it('uniquifies SVG IDs when restoring identical Mermaid diagrams from cache and supports explicit theme option', async () => {
+    mockMermaidRender.mockImplementation(async (id: string) => ({
+      svg: `<svg id="${id}" viewBox="0 0 100 50"><style>#${id} .edge{}</style><marker id="${id}_arrow"></marker></svg>`,
+    }));
+
+    const host = document.createElement('article');
+    await safeSetMarkdownHTML(
+      host,
+      '<div class="mermaid-wrapper" data-line="1" data-mermaid="graph LR; X--&gt;Y"><pre class="mermaid-source"><code>graph LR; X--&gt;Y</code></pre></div>' +
+        '<div class="mermaid-wrapper" data-line="5" data-mermaid="graph LR; X--&gt;Y"><pre class="mermaid-source"><code>graph LR; X--&gt;Y</code></pre></div>',
+      { theme: 'dark' },
+    );
+
+    const svgs = host.querySelectorAll('svg');
+    expect(svgs).toHaveLength(2);
+    expect(svgs[0].id).toBeTruthy();
+    expect(svgs[1].id).toBeTruthy();
+    expect(svgs[0].id).not.toBe(svgs[1].id);
+    expect(svgs[1].innerHTML).toContain(`#${svgs[1].id}`);
+    expect(mockMermaidInitialize).toHaveBeenCalledWith(
+      expect.objectContaining({ securityLevel: 'strict', theme: 'dark' }),
+    );
+  });
+
+  it('preserves <details open> state when nested inside list items', async () => {
+    const host = document.createElement('article');
+    await safeSetMarkdownHTML(
+      host,
+      '<ul data-line="1"><li data-line="1"><details><summary>Mehr</summary><p>Alt</p></details></li></ul>',
+    );
+    const details = host.querySelector('details') as HTMLDetailsElement;
+    details.open = true;
+
+    await safeSetMarkdownHTML(
+      host,
+      '<ul data-line="1"><li data-line="1"><details><summary>Mehr</summary><p>Neu</p></details></li></ul>',
+    );
+    const nextDetails = host.querySelector('details') as HTMLDetailsElement;
+    expect(nextDetails.open).toBe(true);
+    expect(nextDetails.querySelector('p')?.textContent).toBe('Neu');
+  });
+
+  it('preserves <details open> state when nested inside another <details> or table cell', async () => {
+    const host = document.createElement('article');
+    await safeSetMarkdownHTML(
+      host,
+      [
+        '<details data-line="1"><summary>Außen</summary><details data-line="2"><summary>Innen</summary><p>Alt</p></details></details>',
+        '<div class="table-wrapper" data-line="5"><table><thead><tr><th>Spalte</th></tr></thead><tbody><tr><td><details data-line="6"><summary>Zelle</summary><p>Alt Zelle</p></details></td></tr></tbody></table></div>',
+      ].join(''),
+    );
+    const detailsList = Array.from(host.querySelectorAll('details')) as HTMLDetailsElement[];
+    expect(detailsList).toHaveLength(3);
+    detailsList[0].open = true;
+    detailsList[1].open = true;
+    detailsList[2].open = true;
+
+    await safeSetMarkdownHTML(
+      host,
+      [
+        '<details data-line="1"><summary>Außen</summary><details data-line="2"><summary>Innen</summary><p>Neu</p></details></details>',
+        '<div class="table-wrapper" data-line="5"><table><thead><tr><th>Spalte</th></tr></thead><tbody><tr><td><details data-line="6"><summary>Zelle</summary><p>Neu Zelle</p></details></td></tr></tbody></table></div>',
+      ].join(''),
+    );
+    const nextDetails = Array.from(host.querySelectorAll('details')) as HTMLDetailsElement[];
+    expect(nextDetails).toHaveLength(3);
+    expect(nextDetails[0].open).toBe(true);
+    expect(nextDetails[1].open).toBe(true);
+    expect(nextDetails[1].querySelector('p')?.textContent).toBe('Neu');
+    expect(nextDetails[2].open).toBe(true);
+    expect(nextDetails[2].querySelector('p')?.textContent).toBe('Neu Zelle');
+  });
 });

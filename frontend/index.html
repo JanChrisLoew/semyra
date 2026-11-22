@@ -308,7 +308,7 @@
         </select>
       </div>
       <div class="dialog-actions">
-        <button type="submit" value="cancel" class="dialog-btn" data-i18n="tableDialog.cancel">Abbrechen</button>
+        <button type="button" value="cancel" command="close" commandfor="table-dialog" class="dialog-btn" data-i18n="tableDialog.cancel">Abbrechen</button>
         <button type="submit" value="insert" class="dialog-btn primary" data-i18n="tableDialog.insert">Einfügen</button>
       </div>
     </form>
@@ -464,7 +464,7 @@
       <input id="new-file-name" name="filename" type="text" placeholder="z. B. Notizen.md" data-i18n-placeholder="newFileDialog.placeholder" autocomplete="off" autofocus>
       <p id="new-file-error" class="form-error" aria-live="polite"></p>
       <div class="dialog-actions">
-        <button type="submit" value="cancel" class="dialog-btn" data-i18n="newFileDialog.cancel">Abbrechen</button>
+        <button type="button" value="cancel" command="close" commandfor="new-file-dialog" class="dialog-btn" data-i18n="newFileDialog.cancel">Abbrechen</button>
         <button type="submit" id="new-file-submit-btn" value="create" class="dialog-btn primary" data-i18n="newFileDialog.create">Erstellen</button>
       </div>
     </form>
@@ -916,7 +916,7 @@
       </div>
       <div class="doc-stat-card">
         <span class="doc-stat-label" data-i18n="docStats.structure">Struktur</span>
-        <span class="doc-stat-value"><span id="stat-paragraphs">0</span> Absätze</span>
+        <span class="doc-stat-value"><span id="stat-paragraphs">0</span> <span data-i18n="docStats.paragraphsLabel">Absätze</span></span>
         <span class="doc-stat-sub" id="stat-lines">0 Zeilen</span>
       </div>
       <div class="doc-stat-card">
@@ -1020,7 +1020,7 @@
       <label for="goto-line-input" data-i18n="gotoLine.label">Zeilennummer (optional :Spalte)</label>
       <input id="goto-line-input" type="text" inputmode="numeric" placeholder="z. B. 42 oder 42:10" data-i18n-placeholder="gotoLine.placeholder" autocomplete="off" autofocus>
       <div class="dialog-actions">
-        <button type="submit" value="cancel" class="dialog-btn" data-i18n="gotoLine.cancel">Abbrechen</button>
+        <button type="button" value="cancel" command="close" commandfor="goto-line-dialog" class="dialog-btn" data-i18n="gotoLine.cancel">Abbrechen</button>
         <button type="submit" value="confirm" class="dialog-btn primary" data-i18n="gotoLine.go">Springen</button>
       </div>
     </form>

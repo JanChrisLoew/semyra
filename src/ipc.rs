@@ -19,9 +19,12 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Sender};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use wry::RequestAsyncResponder;
+
+const MAX_LOCAL_ASSET_BYTES: u64 = 50 * 1024 * 1024;
 
 #[derive(RustEmbed)]
 #[folder = "frontend/dist"]
@@ -46,10 +49,12 @@ impl WorkerPool {
         let count = size.max(1);
         let (sender, receiver) = mpsc::channel::<WorkerJob>();
         let shared_rx = Arc::new(Mutex::new(receiver));
+        let mut spawned = 0usize;
 
         for idx in 0..count {
             let rx = Arc::clone(&shared_rx);
-            let _ = std::thread::Builder::new()
+            let pool_name = name.to_owned();
+            match std::thread::Builder::new()
                 .name(format!("semyra-ipc-{name}-{idx}"))
                 .spawn(move || loop {
                     let job = {
@@ -60,18 +65,34 @@ impl WorkerPool {
                     };
                     match job {
                         Ok(task) => {
-                            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(task));
+                            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(task)).is_err()
+                            {
+                                eprintln!("IPC-Worker-Panik in Pool '{pool_name}' abgefangen.");
+                            }
                         }
                         Err(_) => break,
                     }
-                });
+                }) {
+                Ok(_) => spawned += 1,
+                Err(err) => {
+                    eprintln!("Worker-Thread {idx} für Pool '{name}' konnte nicht gestartet werden: {err}");
+                }
+            }
         }
 
+        if spawned == 0 {
+            crate::show_fatal_error_and_exit(
+                "Semyra – Thread-Pool-Fehler",
+                &format!("Kein Worker-Thread für IPC-Pool '{name}' verfügbar."),
+            );
+        }
         Self { sender }
     }
 
     fn execute(&self, job: impl FnOnce() + Send + 'static) {
-        let _ = self.sender.send(Box::new(job));
+        if let Err(err) = self.sender.send(Box::new(job)) {
+            eprintln!("IPC-Job konnte nicht eingereiht werden: {err}");
+        }
     }
 }
 
@@ -80,9 +101,18 @@ fn ipc_worker_pool() -> &'static WorkerPool {
     POOL.get_or_init(|| WorkerPool::new("general", default_worker_count()))
 }
 
+pub(crate) fn spawn_background(job: impl FnOnce() + Send + 'static) {
+    ipc_worker_pool().execute(job);
+}
+
 fn draft_worker_pool() -> &'static WorkerPool {
     static POOL: OnceLock<WorkerPool> = OnceLock::new();
     POOL.get_or_init(|| WorkerPool::new("drafts", 1))
+}
+
+fn dialog_worker_pool() -> &'static WorkerPool {
+    static POOL: OnceLock<WorkerPool> = OnceLock::new();
+    POOL.get_or_init(|| WorkerPool::new("dialogs", 1))
 }
 
 fn render_worker_pool(doc_key: Option<&str>) -> &'static WorkerPool {
@@ -91,6 +121,54 @@ fn render_worker_pool(doc_key: Option<&str>) -> &'static WorkerPool {
         return POOL.get_or_init(|| WorkerPool::new("preview", 1));
     }
     ipc_worker_pool()
+}
+
+struct ResponderGuard(Option<RequestAsyncResponder>);
+
+impl ResponderGuard {
+    fn new(responder: RequestAsyncResponder) -> Self {
+        Self(Some(responder))
+    }
+
+    fn respond(mut self, response: Response<Cow<'static, [u8]>>) {
+        if let Some(responder) = self.0.take() {
+            responder.respond(response);
+        }
+    }
+}
+
+impl Drop for ResponderGuard {
+    fn drop(&mut self) {
+        if let Some(responder) = self.0.take() {
+            responder.respond(err_json(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Interner Serverfehler bei der Verarbeitung der Anfrage.",
+            ));
+        }
+    }
+}
+
+static DIALOG_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn is_dialog_active() -> bool {
+    DIALOG_ACTIVE.load(Ordering::SeqCst)
+}
+
+struct DialogActiveGuard;
+
+impl DialogActiveGuard {
+    fn try_acquire() -> Option<Self> {
+        DIALOG_ACTIVE
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()
+            .map(|_| Self)
+    }
+}
+
+impl Drop for DialogActiveGuard {
+    fn drop(&mut self) {
+        DIALOG_ACTIVE.store(false, Ordering::SeqCst);
+    }
 }
 
 /// Tracks the latest queued revision token per document key so stale render jobs
@@ -416,11 +494,98 @@ fn query_param(query: Option<&str>, key: &str) -> Option<String> {
     None
 }
 
+struct LocalAssetHeaders {
+    content_type: String,
+    csp: Option<&'static str>,
+    content_disposition: Option<&'static str>,
+}
+
+fn classify_local_asset_headers(mime: &mime_guess::Mime) -> LocalAssetHeaders {
+    let essence = mime.essence_str();
+    let is_safe_raster_or_media = matches!(
+        essence,
+        "image/png"
+            | "image/jpeg"
+            | "image/gif"
+            | "image/webp"
+            | "image/bmp"
+            | "image/x-icon"
+            | "image/vnd.microsoft.icon"
+            | "image/avif"
+    ) || mime.type_() == "video"
+        || mime.type_() == "audio";
+
+    if is_safe_raster_or_media {
+        LocalAssetHeaders {
+            content_type: mime.to_string(),
+            csp: None,
+            content_disposition: None,
+        }
+    } else if essence == "image/svg+xml" {
+        LocalAssetHeaders {
+            content_type: "image/svg+xml".to_string(),
+            csp: Some("sandbox"),
+            content_disposition: None,
+        }
+    } else {
+        LocalAssetHeaders {
+            content_type: "application/octet-stream".to_string(),
+            csp: Some("sandbox"),
+            content_disposition: Some("attachment"),
+        }
+    }
+}
+
+fn read_bounded_local_asset(
+    target: &Path,
+    max_bytes: u64,
+) -> Result<Vec<u8>, (StatusCode, &'static str)> {
+    use std::io::Read;
+
+    let file = match fs::File::open(target) {
+        Ok(file) => file,
+        Err(_) if target.is_dir() => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "Pfad verweist nicht auf eine Datei.",
+            ));
+        }
+        Err(_) => return Err((StatusCode::NOT_FOUND, "Bilddatei nicht gefunden.")),
+    };
+    let meta = file
+        .metadata()
+        .map_err(|_| (StatusCode::NOT_FOUND, "Bilddatei nicht gefunden."))?;
+    if !meta.is_file() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Pfad verweist nicht auf eine Datei.",
+        ));
+    }
+    if meta.len() > max_bytes {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "Lokale Ressource überschreitet das Größenlimit von 50 MB.",
+        ));
+    }
+    let mut bytes = Vec::with_capacity((meta.len() as usize).min(1024 * 1024));
+    file.take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|_| (StatusCode::NOT_FOUND, "Bilddatei nicht gefunden."))?;
+    if bytes.len() as u64 > max_bytes {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "Lokale Ressource überschreitet das Größenlimit von 50 MB.",
+        ));
+    }
+    Ok(bytes)
+}
+
 pub fn handle_protocol_request(
     state: AppState,
     request: http::Request<Vec<u8>>,
     responder: RequestAsyncResponder,
 ) {
+    let responder = ResponderGuard::new(responder);
     let path = request.uri().path().to_string();
     let query = request.uri().query().map(|s| s.to_string());
     let body = request.into_body();
@@ -440,21 +605,26 @@ pub fn handle_protocol_request(
                 ));
                 return;
             }
-            match fs::read(&target) {
+            match read_bounded_local_asset(&target, MAX_LOCAL_ASSET_BYTES) {
                 Ok(bytes) => {
-                    let mime = mime_guess::from_path(&target)
-                        .first_or_octet_stream()
-                        .to_string();
-                    let resp = Response::builder()
+                    let mime = mime_guess::from_path(&target).first_or_octet_stream();
+                    let headers = classify_local_asset_headers(&mime);
+                    let mut builder = Response::builder()
                         .status(StatusCode::OK)
-                        .header("Content-Type", mime)
-                        .header("Cache-Control", "no-cache")
-                        .body(Cow::Owned(bytes))
-                        .unwrap();
+                        .header("Content-Type", headers.content_type)
+                        .header("X-Content-Type-Options", "nosniff")
+                        .header("Cache-Control", "no-cache");
+                    if let Some(csp) = headers.csp {
+                        builder = builder.header("Content-Security-Policy", csp);
+                    }
+                    if let Some(disp) = headers.content_disposition {
+                        builder = builder.header("Content-Disposition", disp);
+                    }
+                    let resp = builder.body(Cow::Owned(bytes)).unwrap();
                     responder.respond(resp);
                 }
-                Err(_) => {
-                    responder.respond(err_json(StatusCode::NOT_FOUND, "Bilddatei nicht gefunden."));
+                Err((status, msg)) => {
+                    responder.respond(err_json(status, msg));
                 }
             }
         });
@@ -502,25 +672,28 @@ fn handle_api_route(
     route: &str,
     body: Vec<u8>,
     state: AppState,
-    responder: RequestAsyncResponder,
+    responder: ResponderGuard,
 ) {
     match route {
         "startup" => {
-            let payload = state
-                .inner
-                .lock()
-                .map(|g| {
-                    let mut s = g.startup.clone();
-                    s.ui_prefs = g.ui_prefs.clone();
-                    s
-                })
-                .unwrap_or(crate::state::StartupPayload {
-                    initial_files: Vec::new(),
-                    initial_folder: None,
-                    recovered_drafts: Vec::new(),
-                    ui_prefs: UiSessionPrefs::default(),
-                });
-            responder.respond(ok_json(&payload));
+            state.mark_frontend_ready();
+            ipc_worker_pool().execute(move || {
+                let payload = state
+                    .inner
+                    .lock()
+                    .map(|g| {
+                        let mut s = g.startup.clone();
+                        s.ui_prefs = g.ui_prefs.clone();
+                        s
+                    })
+                    .unwrap_or(crate::state::StartupPayload {
+                        initial_files: Vec::new(),
+                        initial_folder: None,
+                        recovered_drafts: Vec::new(),
+                        ui_prefs: UiSessionPrefs::default(),
+                    });
+                responder.respond(ok_json(&payload));
+            });
         }
 
         "prefs/save" => {
@@ -528,18 +701,24 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Einstellungen"));
                 return;
             };
-            let Ok(mut guard) = state.inner.lock() else {
-                responder.respond(err_json(StatusCode::INTERNAL_SERVER_ERROR, "Einstellungen sind nicht verfügbar."));
-                return;
-            };
-            if req.revision > guard.ui_prefs_revision {
-                guard.ui_prefs_revision = req.revision;
-                guard.ui_prefs = req.prefs;
-            }
-            drop(guard);
             ipc_worker_pool().execute(move || {
+                {
+                    let Ok(mut guard) = state.inner.lock() else {
+                        responder.respond(err_json(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Einstellungen sind nicht verfügbar.",
+                        ));
+                        return;
+                    };
+                    if req.revision > guard.ui_prefs_revision {
+                        guard.ui_prefs_revision = req.revision;
+                        guard.ui_prefs = req.prefs;
+                    }
+                }
                 let result = crate::window_prefs::update_window_prefs(|disk| {
-                    let guard = state.inner.lock()
+                    let guard = state
+                        .inner
+                        .lock()
                         .map_err(|_| std::io::Error::other("Einstellungen sind nicht verfügbar."))?;
                     if req.revision != guard.ui_prefs_revision {
                         return Ok(false);
@@ -930,9 +1109,29 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige URL"));
                 return;
             };
-            if crate::navigation::classify_url(&req.url) == crate::navigation::NavigationTarget::External
+            if crate::navigation::classify_url(&req.url)
+                != crate::navigation::NavigationTarget::External
             {
-                let _ = state.proxy.send_event(UserEvent::OpenExternalUrl(req.url));
+                responder.respond(err_json(
+                    StatusCode::BAD_REQUEST,
+                    "Externe URL wurde aus Sicherheitsgründen blockiert.",
+                ));
+                return;
+            }
+            let Ok(parsed) = url::Url::parse(&req.url) else {
+                responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige URL"));
+                return;
+            };
+            if state
+                .proxy
+                .send_event(UserEvent::OpenExternalUrl(parsed.as_str().to_owned()))
+                .is_err()
+            {
+                responder.respond(err_json(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Hauptfenster konnte nicht erreicht werden.",
+                ));
+                return;
             }
             responder.respond(ok_json(&serde_json::json!({ "ok": true })));
         }
@@ -941,14 +1140,17 @@ fn handle_api_route(
             let req_lang = serde_json::from_slice::<DialogLangReq>(&body)
                 .ok()
                 .and_then(|r| r.lang);
-            ipc_worker_pool().execute(move || {
+            let Some(dialog_guard) = DialogActiveGuard::try_acquire() else {
+                responder.respond(err_json(
+                    StatusCode::CONFLICT,
+                    "Ein Dateidialog ist bereits geöffnet.",
+                ));
+                return;
+            };
+            dialog_worker_pool().execute(move || {
+                let _dialog_guard = dialog_guard;
                 let is_en = req_lang.as_deref().unwrap_or(&state.get_language()) == "en";
-                let start_dir = state
-                    .inner
-                    .lock()
-                    .ok()
-                    .and_then(|g| g.workspace_folder.clone())
-                    .or_else(dirs::document_dir);
+                let start_dir = default_dialog_dir(&state, None);
 
                 let title = if is_en {
                     "Open Markdown or Text File"
@@ -992,13 +1194,30 @@ fn handle_api_route(
 
                 let picked = dlg.pick_files().unwrap_or_default();
                 let mut files = Vec::new();
+                let mut errors = Vec::new();
                 for path in picked {
-                    if let Ok(payload) = read_text_file(&path) {
-                        state.allow_file_parent(&path);
-                        files.push(payload);
+                    match read_text_file(&path) {
+                        Ok(payload) => {
+                            state.allow_file_parent(&path);
+                            files.push(payload);
+                        }
+                        Err(err) => {
+                            let name = path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("Datei");
+                            errors.push(format!("{name}: {err}"));
+                        }
                     }
                 }
-                responder.respond(ok_json(&serde_json::json!({ "files": files })));
+                if files.is_empty() && !errors.is_empty() {
+                    responder.respond(err_json(StatusCode::BAD_REQUEST, errors.join(" | ")));
+                } else {
+                    responder.respond(ok_json(&serde_json::json!({
+                        "files": files,
+                        "errors": errors
+                    })));
+                }
             });
         }
 
@@ -1006,15 +1225,18 @@ fn handle_api_route(
             let req_lang = serde_json::from_slice::<DialogLangReq>(&body)
                 .ok()
                 .and_then(|r| r.lang);
+            let Some(dialog_guard) = DialogActiveGuard::try_acquire() else {
+                responder.respond(err_json(
+                    StatusCode::CONFLICT,
+                    "Ein Dateidialog ist bereits geöffnet.",
+                ));
+                return;
+            };
             let revision = state.begin_workspace_change();
-            ipc_worker_pool().execute(move || {
+            dialog_worker_pool().execute(move || {
+                let _dialog_guard = dialog_guard;
                 let is_en = req_lang.as_deref().unwrap_or(&state.get_language()) == "en";
-                let start_dir = state
-                    .inner
-                    .lock()
-                    .ok()
-                    .and_then(|g| g.workspace_folder.clone())
-                    .or_else(dirs::document_dir);
+                let start_dir = default_dialog_dir(&state, None);
 
                 let title = if is_en {
                     "Open Workspace Folder"
@@ -1047,20 +1269,17 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Speicher-Anfrage"));
                 return;
             };
-            ipc_worker_pool().execute(move || {
+            let Some(dialog_guard) = DialogActiveGuard::try_acquire() else {
+                responder.respond(err_json(
+                    StatusCode::CONFLICT,
+                    "Ein Dateidialog ist bereits geöffnet.",
+                ));
+                return;
+            };
+            dialog_worker_pool().execute(move || {
+                let _dialog_guard = dialog_guard;
                 let is_en = req.lang.as_deref().unwrap_or(&state.get_language()) == "en";
-                let start_dir = req
-                    .default_dir
-                    .as_ref()
-                    .map(PathBuf::from)
-                    .or_else(|| {
-                        state
-                            .inner
-                            .lock()
-                            .ok()
-                            .and_then(|g| g.workspace_folder.clone())
-                    })
-                    .or_else(dirs::document_dir);
+                let start_dir = default_dialog_dir(&state, req.default_dir.as_deref());
 
                 let default_fallback = if is_en { "Untitled.md" } else { "Unbenannt.md" };
                 let file_name = req
@@ -1130,7 +1349,15 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige Export-Anfrage"));
                 return;
             };
-            ipc_worker_pool().execute(move || {
+            let Some(dialog_guard) = DialogActiveGuard::try_acquire() else {
+                responder.respond(err_json(
+                    StatusCode::CONFLICT,
+                    "Ein Dateidialog ist bereits geöffnet.",
+                ));
+                return;
+            };
+            dialog_worker_pool().execute(move || {
+                let _dialog_guard = dialog_guard;
                 let is_en = req.lang.as_deref().unwrap_or(&state.get_language()) == "en";
                 let default_stem = if is_en { "Document" } else { "Dokument" };
                 let stem = Path::new(&req.title)
@@ -1138,18 +1365,7 @@ fn handle_api_route(
                     .and_then(|s| s.to_str())
                     .unwrap_or(default_stem);
                 let html_name = format!("{stem}.html");
-                let start_dir = req
-                    .default_dir
-                    .as_ref()
-                    .map(PathBuf::from)
-                    .or_else(|| {
-                        state
-                            .inner
-                            .lock()
-                            .ok()
-                            .and_then(|g| g.workspace_folder.clone())
-                    })
-                    .or_else(dirs::document_dir);
+                let start_dir = default_dialog_dir(&state, req.default_dir.as_deref());
 
                 let title = if is_en { "Export as HTML" } else { "Als HTML exportieren" };
                 let filter = if is_en { "HTML Document (*.html)" } else { "HTML-Dokument (*.html)" };
@@ -1205,7 +1421,15 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige PDF-Export-Anfrage"));
                 return;
             };
-            ipc_worker_pool().execute(move || {
+            let Some(dialog_guard) = DialogActiveGuard::try_acquire() else {
+                responder.respond(err_json(
+                    StatusCode::CONFLICT,
+                    "Ein Dateidialog ist bereits geöffnet.",
+                ));
+                return;
+            };
+            dialog_worker_pool().execute(move || {
+                let _dialog_guard = dialog_guard;
                 let is_en = req.lang.as_deref().unwrap_or(&state.get_language()) == "en";
                 let default_stem = if is_en { "Document" } else { "Dokument" };
                 let stem = Path::new(&req.title)
@@ -1213,18 +1437,7 @@ fn handle_api_route(
                     .and_then(|s| s.to_str())
                     .unwrap_or(default_stem);
                 let pdf_name = format!("{stem}.pdf");
-                let start_dir = req
-                    .default_dir
-                    .as_ref()
-                    .map(PathBuf::from)
-                    .or_else(|| {
-                        state
-                            .inner
-                            .lock()
-                            .ok()
-                            .and_then(|g| g.workspace_folder.clone())
-                    })
-                    .or_else(dirs::document_dir);
+                let start_dir = default_dialog_dir(&state, req.default_dir.as_deref());
 
                 let title = if is_en { "Export as PDF" } else { "Als PDF exportieren" };
                 let filter = if is_en { "PDF Document (*.pdf)" } else { "PDF-Dokument (*.pdf)" };
@@ -1240,20 +1453,13 @@ fn handle_api_route(
 
                 if let Some(chosen) = dlg.save_file() {
                     let cleaned = clean_windows_path(&chosen);
-                    let Ok(mut guard) = state.inner.lock() else {
-                        responder.respond(err_json(
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "Interner Status für PDF-Export gesperrt.",
-                        ));
-                        return;
-                    };
-                    let token = guard.next_pdf_token;
-                    guard.next_pdf_token = guard.next_pdf_token.wrapping_add(1);
-                    guard.pending_pdf_exports.insert(token, cleaned);
-                    responder.respond(ok_json(&serde_json::json!({
-                        "chosen": true,
-                        "token": token
-                    })));
+                    match state.insert_pdf_export(cleaned) {
+                        Ok(token) => responder.respond(ok_json(&serde_json::json!({
+                            "chosen": true,
+                            "token": token
+                        }))),
+                        Err(err) => responder.respond(err_json(StatusCode::INTERNAL_SERVER_ERROR, err)),
+                    }
                 } else {
                     responder.respond(ok_json(&serde_json::json!({ "chosen": false })));
                 }
@@ -1265,21 +1471,15 @@ fn handle_api_route(
                 responder.respond(err_json(StatusCode::BAD_REQUEST, "Ungültige PDF-Export-Anfrage"));
                 return;
             };
-            let target_opt = state
-                .inner
-                .lock()
-                .ok()
-                .and_then(|mut g| g.pending_pdf_exports.remove(&req.token));
-
-            let Some(cleaned) = target_opt else {
-                responder.respond(err_json(
-                    StatusCode::FORBIDDEN,
-                    "Ungültiges oder bereits eingelöstes PDF-Export-Token.",
-                ));
-                return;
-            };
-
             ipc_worker_pool().execute(move || {
+                let Some(cleaned) = state.take_pdf_export(req.token) else {
+                    responder.respond(err_json(
+                        StatusCode::FORBIDDEN,
+                        "Ungültiges oder bereits eingelöstes PDF-Export-Token.",
+                    ));
+                    return;
+                };
+
                 let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
                 if state
                     .proxy
@@ -1308,7 +1508,11 @@ fn handle_api_route(
                     Ok(Err(err)) => {
                         responder.respond(err_json(StatusCode::INTERNAL_SERVER_ERROR, err))
                     }
-                    Err(_) => responder.respond(err_json(
+                    Err(RecvTimeoutError::Disconnected) => responder.respond(err_json(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "PDF-Export wurde unerwartet abgebrochen.",
+                    )),
+                    Err(RecvTimeoutError::Timeout) => responder.respond(err_json(
                         StatusCode::GATEWAY_TIMEOUT,
                         "Zeitüberschreitung beim Erstellen der PDF-Datei.",
                     )),
@@ -1318,6 +1522,19 @@ fn handle_api_route(
 
         _ => responder.respond(err_json(StatusCode::NOT_FOUND, "Unbekannter API-Endpunkt")),
     }
+}
+
+fn default_dialog_dir(state: &AppState, override_dir: Option<&str>) -> Option<PathBuf> {
+    override_dir
+        .map(PathBuf::from)
+        .or_else(|| {
+            state
+                .inner
+                .lock()
+                .ok()
+                .and_then(|g| g.workspace_folder.clone())
+        })
+        .or_else(dirs::document_dir)
 }
 
 #[cfg(test)]
@@ -1526,5 +1743,70 @@ mod tests {
         let doc1_t2 = coalescer.register("doc-1", Some(2));
         assert!(coalescer.is_superseded("doc-1", oldest_t1));
         assert!(!coalescer.is_superseded("doc-1", doc1_t2));
+    }
+
+    #[test]
+    fn classify_local_asset_headers_sandboxes_svg_and_forces_download_for_active_types() {
+        let png = mime_guess::from_ext("png").first_or_octet_stream();
+        let png_headers = classify_local_asset_headers(&png);
+        assert_eq!(png_headers.content_type, "image/png");
+        assert!(png_headers.csp.is_none());
+        assert!(png_headers.content_disposition.is_none());
+
+        let svg = mime_guess::from_ext("svg").first_or_octet_stream();
+        let svg_headers = classify_local_asset_headers(&svg);
+        assert_eq!(svg_headers.content_type, "image/svg+xml");
+        assert_eq!(svg_headers.csp, Some("sandbox"));
+        assert!(svg_headers.content_disposition.is_none());
+
+        let html = mime_guess::from_ext("html").first_or_octet_stream();
+        let html_headers = classify_local_asset_headers(&html);
+        assert_eq!(html_headers.content_type, "application/octet-stream");
+        assert_eq!(html_headers.csp, Some("sandbox"));
+        assert_eq!(html_headers.content_disposition, Some("attachment"));
+    }
+
+    #[test]
+    fn worker_pool_survives_panics_and_executes_subsequent_jobs() {
+        let pool = WorkerPool::new("panic-test", 1);
+        let (tx, rx) = mpsc::channel();
+        pool.execute(|| panic!("simulated worker panic"));
+        pool.execute(move || {
+            let _ = tx.send(42u32);
+        });
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_secs(5))
+                .expect("worker should recover after panic"),
+            42
+        );
+    }
+
+    #[test]
+    fn dialog_active_guard_prevents_concurrent_dialogs_until_dropped() {
+        let first = DialogActiveGuard::try_acquire().expect("first dialog should acquire");
+        assert!(DialogActiveGuard::try_acquire().is_none());
+        drop(first);
+        let second = DialogActiveGuard::try_acquire().expect("should re-acquire after drop");
+        drop(second);
+    }
+
+    #[test]
+    fn read_bounded_local_asset_enforces_size_limit_from_single_handle() {
+        let dir = std::env::temp_dir().join(format!("semyra-local-asset-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let ok_file = dir.join("ok.png");
+        let big_file = dir.join("big.png");
+        fs::write(&ok_file, b"12345").unwrap();
+        fs::write(&big_file, b"123456").unwrap();
+
+        assert_eq!(read_bounded_local_asset(&ok_file, 5).unwrap(), b"12345");
+        let err = read_bounded_local_asset(&big_file, 5).unwrap_err();
+        assert_eq!(err.0, StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(
+            read_bounded_local_asset(&dir, 5).unwrap_err().0,
+            StatusCode::BAD_REQUEST
+        );
+
+        fs::remove_dir_all(dir).unwrap();
     }
 }

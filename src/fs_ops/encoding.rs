@@ -2,6 +2,7 @@ use super::normalize_existing_path;
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize)]
@@ -132,6 +133,18 @@ pub fn read_text_file(path: &Path) -> Result<FilePayload, String> {
     })
 }
 
+fn read_checked_bytes(path: &Path) -> std::io::Result<Result<Vec<u8>, String>> {
+    let meta = fs::metadata(path)?;
+    if meta.len() > MAX_TEXT_FILE_BYTES {
+        let size_mb = meta.len() as f64 / (1024.0 * 1024.0);
+        let limit_mb = MAX_TEXT_FILE_BYTES / (1024 * 1024);
+        return Ok(Err(format!(
+            "Datei ist zu groß ({size_mb:.1} MB). Maximal erlaubte Dateigröße: {limit_mb} MB."
+        )));
+    }
+    fs::read(path).map(Ok)
+}
+
 pub fn write_text_file_if_unchanged(
     path: &Path,
     content: &str,
@@ -142,8 +155,8 @@ pub fn write_text_file_if_unchanged(
     convert_windows1252: bool,
 ) -> Result<Option<(String, &'static str)>, String> {
     let _guard = lock_text_writes()?;
-    let encoding = match fs::read(path) {
-        Ok(bytes) => {
+    let encoding = match read_checked_bytes(path) {
+        Ok(Ok(bytes)) => {
             let (text, encoding) = decode_text_bytes(&bytes);
             let line_ending = if text.contains("\r\n") { "CRLF" } else { "LF" };
             if text.replace("\r\n", "\n") != expected_content
@@ -157,6 +170,7 @@ pub fn write_text_file_if_unchanged(
                 encoding
             }
         }
+        Ok(Err(size_err)) => return Err(size_err),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(err) => return Err(format!("Datei konnte nicht gelesen werden: {err}")),
     };
@@ -172,11 +186,52 @@ pub(super) fn replace_text_file(
     encoding: &str,
 ) -> Result<(), String> {
     let _guard = lock_text_writes()?;
-    let current = fs::read(path).map_err(|err| format!("Datei konnte nicht gelesen werden: {err}"))?;
+    let current = match read_checked_bytes(path) {
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(size_err)) => return Err(size_err),
+        Err(err) => return Err(format!("Datei konnte nicht gelesen werden: {err}")),
+    };
     if current != expected_bytes {
         return Err("Die Datei wurde während des Ersetzens geändert.".to_string());
     }
     write_text_file_unlocked(path, content, prefer_crlf, encoding).map(|_| ())
+}
+
+/// Creates a brand-new UTF-8 file atomically (`create_new(true)`), failing if it already exists.
+pub fn create_new_text_file(
+    path: &Path,
+    content: &str,
+    prefer_crlf: bool,
+    already_exists_msg: &str,
+) -> Result<String, String> {
+    use std::io::Write;
+    let _guard = lock_text_writes()?;
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Ordner konnte nicht erstellt werden: {e}"))?;
+        }
+    }
+    let normalized = content.replace("\r\n", "\n");
+    let final_str = if prefer_crlf {
+        normalized.replace('\n', "\r\n")
+    } else {
+        normalized
+    };
+    let bytes = encode_text(&final_str, "UTF-8")?;
+    let mut file = match fs::OpenOptions::new().write(true).create_new(true).open(path) {
+        Ok(f) => f,
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(already_exists_msg.to_string());
+        }
+        Err(err) => return Err(format!("Datei konnte nicht erstellt werden: {err}")),
+    };
+    if let Err(err) = file.write_all(&bytes).and_then(|()| file.sync_data()) {
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err(format!("Datei konnte nicht gespeichert werden: {err}"));
+    }
+    Ok(normalize_existing_path(path).to_string_lossy().into_owned())
 }
 
 /// Writes UTF-8 text atomically via a sibling temporary file and rename.
@@ -209,8 +264,31 @@ pub(super) fn lock_text_writes() -> Result<std::sync::MutexGuard<'static, ()>, S
     TEXT_WRITES.lock().map_err(|e| e.to_string())
 }
 
+fn resolve_symlink_target(path: &Path) -> std::path::PathBuf {
+    if !fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return path.to_path_buf();
+    }
+    if let Ok(canon) = fs::canonicalize(path) {
+        return super::clean_windows_path(&canon);
+    }
+    if let Ok(link_target) = fs::read_link(path) {
+        let resolved = if link_target.is_absolute() {
+            link_target
+        } else {
+            path.parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."))
+                .join(link_target)
+        };
+        return super::clean_windows_path(&resolved);
+    }
+    path.to_path_buf()
+}
+
 fn write_text_file_unlocked(path: &Path, content: &str, prefer_crlf: bool, encoding: &str) -> Result<String, String> {
-    if let Some(parent) = path.parent() {
+    let target_path = resolve_symlink_target(path);
+
+    if let Some(parent) = target_path.parent() {
         if !parent.as_os_str().is_empty() && !parent.exists() {
             fs::create_dir_all(parent)
                 .map_err(|e| format!("Ordner konnte nicht erstellt werden: {e}"))?;
@@ -223,11 +301,13 @@ fn write_text_file_unlocked(path: &Path, content: &str, prefer_crlf: bool, encod
     } else {
         normalized
     };
-    write_file_atomically(path, &encode_text(&final_str, encoding)?)
+    write_file_atomically(&target_path, &encode_text(&final_str, encoding)?)
         .map_err(|e| format!("Datei konnte nicht gespeichert werden: {e}"))?;
-    let canon = normalize_existing_path(path);
+    let canon = normalize_existing_path(&target_path);
     Ok(canon.to_string_lossy().into_owned())
 }
+
+static ATOMIC_TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn write_file_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
@@ -235,7 +315,8 @@ pub(crate) fn write_file_atomically(path: &Path, bytes: &[u8]) -> std::io::Resul
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let tmp_name = format!(".semyra-save-{}-{nanos:x}.tmp", std::process::id());
+    let seq = ATOMIC_TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp_name = format!(".semyra-save-{}-{nanos:x}-{seq}.tmp", std::process::id());
     let tmp_path = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -243,9 +324,23 @@ pub(crate) fn write_file_atomically(path: &Path, bytes: &[u8]) -> std::io::Resul
         .join(tmp_name);
 
     let mut file = fs::File::create_new(&tmp_path)?;
-    let written = file.write_all(bytes);
+    let written = file.write_all(bytes).and_then(|()| file.sync_data());
     drop(file);
-    let result = written.and_then(|()| fs::rename(&tmp_path, path));
+    let result = written.and_then(|()| {
+        let mut attempts = 0;
+        loop {
+            match fs::rename(&tmp_path, path) {
+                Ok(()) => return Ok(()),
+                Err(err)
+                    if err.kind() == std::io::ErrorKind::PermissionDenied && attempts < 3 =>
+                {
+                    attempts += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(15));
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    });
     if result.is_err() {
         let _ = fs::remove_file(&tmp_path);
     }
@@ -331,6 +426,11 @@ mod tests {
         let err = read_text_file(&path).unwrap_err();
         assert!(err.contains("zu groß"), "unexpected error: {err}");
         assert!(err.contains("25 MB"), "unexpected error: {err}");
+
+        let guarded_err =
+            write_text_file_if_unchanged(&path, "small", false, "small", None, false, false)
+                .unwrap_err();
+        assert!(guarded_err.contains("zu groß"), "unexpected error: {guarded_err}");
 
         fs::remove_file(path).unwrap();
     }

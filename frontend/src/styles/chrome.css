@@ -77,7 +77,7 @@
 }
 
 .brand-title .brand-dot {
-  color: var(--color-unsaved-dot);
+  color: var(--color-accent);
   font-weight: 800;
 }
 
@@ -109,7 +109,7 @@
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--color-unsaved-dot);
+  background: var(--color-accent);
   display: inline-block;
   flex-shrink: 0;
 }

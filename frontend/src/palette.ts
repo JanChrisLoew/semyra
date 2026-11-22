@@ -173,19 +173,28 @@ export class CommandPaletteController {
       this.renderFiltered();
     });
 
-    this.input.addEventListener('keydown', (e) => {
+    this.dialog.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowDown') {
         if (this.visibleEntries.length === 0) return;
         e.preventDefault();
         this.selectedIndex = (this.selectedIndex + 1) % this.visibleEntries.length;
         this.updateSelectionHighlight();
+        if (document.activeElement !== this.input) {
+          this.input.focus();
+        }
       } else if (e.key === 'ArrowUp') {
         if (this.visibleEntries.length === 0) return;
         e.preventDefault();
         this.selectedIndex =
           (this.selectedIndex - 1 + this.visibleEntries.length) % this.visibleEntries.length;
         this.updateSelectionHighlight();
+        if (document.activeElement !== this.input) {
+          this.input.focus();
+        }
       } else if (e.key === 'Enter') {
+        if (document.activeElement instanceof HTMLButtonElement && this.resultsEl.contains(document.activeElement)) {
+          return;
+        }
         e.preventDefault();
         const chosen = this.visibleEntries[this.selectedIndex]?.item;
         if (chosen) {
@@ -289,6 +298,7 @@ export class CommandPaletteController {
       const isSelected = idx === this.selectedIndex;
       const btn = document.createElement('button');
       btn.type = 'button';
+      btn.tabIndex = -1;
       btn.id = `palette-option-${idx}`;
       btn.setAttribute('role', 'option');
       btn.setAttribute('aria-selected', isSelected ? 'true' : 'false');

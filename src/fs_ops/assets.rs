@@ -1,8 +1,99 @@
 use super::normalize_existing_path;
 use base64::Engine;
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static ASSET_SEQ: AtomicU64 = AtomicU64::new(0);
+
+fn current_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+fn create_unique_asset_file(
+    dir: &Path,
+    stem: &str,
+    ext: &str,
+    try_plain_first: bool,
+) -> io::Result<(PathBuf, fs::File)> {
+    if try_plain_first {
+        let plain_name = if ext.is_empty() {
+            stem.to_string()
+        } else {
+            format!("{stem}.{ext}")
+        };
+        let plain_path = dir.join(plain_name);
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&plain_path)
+        {
+            Ok(file) => return Ok((plain_path, file)),
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(err) => return Err(err),
+        }
+    }
+
+    let millis = current_millis();
+    for _ in 0..64 {
+        let seq = ASSET_SEQ.fetch_add(1, Ordering::Relaxed);
+        let name = if ext.is_empty() {
+            format!("{stem}-{millis}-{seq}")
+        } else {
+            format!("{stem}-{millis}-{seq}.{ext}")
+        };
+        let candidate = dir.join(name);
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => return Ok((candidate, file)),
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(err),
+        }
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "Eindeutiger Asset-Dateiname konnte nicht erzeugt werden.",
+    ))
+}
+
+fn format_markdown_image(alt: &str, dest: &str) -> String {
+    let mut safe_alt = String::with_capacity(alt.len());
+    for ch in alt.chars() {
+        match ch {
+            '[' | ']' => {
+                safe_alt.push('\\');
+                safe_alt.push(ch);
+            }
+            '\r' | '\n' => safe_alt.push(' '),
+            _ => safe_alt.push(ch),
+        }
+    }
+    let mut safe_dest = String::with_capacity(dest.len());
+    for ch in dest.chars() {
+        match ch {
+            ' ' => safe_dest.push_str("%20"),
+            '#' => safe_dest.push_str("%23"),
+            '?' => safe_dest.push_str("%3F"),
+            '(' => safe_dest.push_str("%28"),
+            ')' => safe_dest.push_str("%29"),
+            '[' => safe_dest.push_str("%5B"),
+            ']' => safe_dest.push_str("%5D"),
+            '<' => safe_dest.push_str("%3C"),
+            '>' => safe_dest.push_str("%3E"),
+            _ => safe_dest.push(ch),
+        }
+    }
+    format!("![{safe_alt}]({safe_dest})")
+}
 
 pub fn save_clipboard_image(
     base_dir: Option<&Path>,
@@ -29,33 +120,34 @@ pub fn save_clipboard_image(
         _ => "png",
     };
 
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    let filename = format!("img-{millis}.{ext}");
-
     let (assets_dir, use_relative) = if let Some(doc_dir) = base_dir.filter(|d| d.is_dir()) {
         (doc_dir.join("assets"), true)
     } else {
-        let fallback = super::app_data_dir()
-            .join("pasted-assets");
+        let fallback = super::app_data_dir().join("pasted-assets");
         (fallback, false)
     };
 
     fs::create_dir_all(&assets_dir)
         .map_err(|e| format!("Asset-Ordner konnte nicht erstellt werden: {e}"))?;
 
-    let saved_file = assets_dir.join(&filename);
-    fs::write(&saved_file, &bytes)
+    let (saved_file, mut file) = create_unique_asset_file(&assets_dir, "img", ext, false)
         .map_err(|e| format!("Bild konnte nicht gespeichert werden: {e}"))?;
+    if let Err(e) = file.write_all(&bytes) {
+        drop(file);
+        let _ = fs::remove_file(&saved_file);
+        return Err(format!("Bild konnte nicht gespeichert werden: {e}"));
+    }
 
     let norm_file = normalize_existing_path(&saved_file);
+    let filename = norm_file
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("img.png");
     let md_snippet = if use_relative {
-        format!("![Screenshot](assets/{filename})")
+        format_markdown_image("Screenshot", &format!("assets/{filename}"))
     } else {
         let forward_path = norm_file.to_string_lossy().replace('\\', "/");
-        format!("![Screenshot](file:///{forward_path})")
+        format_markdown_image("Screenshot", &format!("file:///{forward_path}"))
     };
 
     Ok((norm_file, md_snippet))
@@ -80,40 +172,45 @@ pub fn import_dropped_image(
         let norm_doc_dir = normalize_existing_path(doc_dir);
         if let Ok(rel) = norm_src.strip_prefix(&norm_doc_dir) {
             let rel_fwd = rel.to_string_lossy().replace('\\', "/");
-            return Ok((norm_src, format!("![{alt_raw}]({rel_fwd})")));
+            return Ok((norm_src, format_markdown_image(&alt_raw, &rel_fwd)));
         }
 
         let assets_dir = norm_doc_dir.join("assets");
         fs::create_dir_all(&assets_dir)
             .map_err(|e| format!("Asset-Ordner konnte nicht erstellt werden: {e}"))?;
-        let orig_name = norm_src
+        let stem = norm_src
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("bild");
+        let ext = norm_src
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("png");
+        let (dest, mut dst_file) = create_unique_asset_file(&assets_dir, stem, ext, true)
+            .map_err(|e| format!("Bild konnte nicht kopiert werden: {e}"))?;
+        let copy_res = fs::File::open(&norm_src).and_then(|mut src_file| io::copy(&mut src_file, &mut dst_file));
+        if let Err(e) = copy_res {
+            drop(dst_file);
+            let _ = fs::remove_file(&dest);
+            return Err(format!("Bild konnte nicht kopiert werden: {e}"));
+        }
+        let norm_dest = normalize_existing_path(&dest);
+        let final_name = norm_dest
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("bild.png");
-        let mut dest = assets_dir.join(orig_name);
-        if dest.exists() {
-            let ext = norm_src
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("png");
-            let millis = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_millis())
-                .unwrap_or(0);
-            dest = assets_dir.join(format!("{alt_raw}-{millis}.{ext}"));
-        }
-        fs::copy(&norm_src, &dest)
-            .map_err(|e| format!("Bild konnte nicht kopiert werden: {e}"))?;
-        let final_name = dest
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(orig_name);
-        let norm_dest = normalize_existing_path(&dest);
-        return Ok((norm_dest, format!("![{alt_raw}](assets/{final_name})")));
+        return Ok((
+            norm_dest.clone(),
+            format_markdown_image(&alt_raw, &format!("assets/{final_name}")),
+        ));
     }
 
     let forward_path = norm_src.to_string_lossy().replace('\\', "/");
-    Ok((norm_src, format!("![{alt_raw}](file:///{forward_path})")))
+    Ok((
+        norm_src.clone(),
+        format_markdown_image(&alt_raw, &format!("file:///{forward_path}")),
+    ))
 }
 
 #[cfg(test)]
@@ -146,6 +243,33 @@ mod tests {
         let (_, rel_snippet) = import_dropped_image(Some(&tmp), &saved_img).unwrap();
         assert!(rel_snippet.contains("(assets/img-"));
 
+        // Rapid pastes produce unique files without overwriting
+        let (img2, _) = save_clipboard_image(Some(&tmp), "image/png", tiny_png).unwrap();
+        let (img3, _) = save_clipboard_image(Some(&tmp), "image/png", tiny_png).unwrap();
+        assert_ne!(img2, img3);
+
+        // Filenames with spaces, parentheses, and brackets escape cleanly in Markdown snippets
+        let outside_tmp = std::env::temp_dir().join(format!("semyra_outside_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&outside_tmp);
+        fs::create_dir_all(&outside_tmp).unwrap();
+        let special_src = outside_tmp.join("Foto (1) [Entwurf].png");
+        fs::write(&special_src, b"png").unwrap();
+        let (_, special_snippet) = import_dropped_image(Some(&tmp), &special_src).unwrap();
+        assert_eq!(
+            special_snippet,
+            "![Foto (1) \\[Entwurf\\]](assets/Foto%20%281%29%20%5BEntwurf%5D.png)"
+        );
+
+        let hash_src = outside_tmp.join("foto #1.png");
+        fs::write(&hash_src, b"png").unwrap();
+        let (_, hash_snippet) = import_dropped_image(Some(&tmp), &hash_src).unwrap();
+        assert_eq!(hash_snippet, "![foto #1](assets/foto%20%231.png)");
+        assert_eq!(
+            format_markdown_image("foto #1?v=2", "assets/foto #1?v=2.png"),
+            "![foto #1?v=2](assets/foto%20%231%3Fv=2.png)"
+        );
+
+        let _ = fs::remove_dir_all(&outside_tmp);
         let _ = fs::remove_dir_all(&tmp);
     }
 }

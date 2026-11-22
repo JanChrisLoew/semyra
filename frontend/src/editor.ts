@@ -303,7 +303,24 @@ export class MarkdownEditorController {
     return EditorView.contentAttributes.of({
       spellcheck: enabled ? 'true' : 'false',
       lang: this.appLanguage,
+      'aria-label': this.appLanguage === 'en' ? 'Markdown Editor' : 'Markdown-Editor',
     });
+  }
+
+  private languageEffects(): StateEffect<unknown>[] {
+    return [
+      this.i18nCompartment.reconfigure(
+        EditorState.phrases.of(this.appLanguage === 'de' ? germanCodeMirrorPhrases : {}),
+      ),
+      this.placeholderCompartment.reconfigure(
+        placeholder(
+          this.appLanguage === 'de'
+            ? 'Schreibe hier dein Markdown…'
+            : 'Write your Markdown here…',
+        ),
+      ),
+      this.spellcheckCompartment.reconfigure(this.spellcheckExtension(this.spellcheckEnabled)),
+    ];
   }
 
   private isInsideCodeContext(state: EditorState, pos: number): boolean {
@@ -586,7 +603,6 @@ export class MarkdownEditorController {
         },
       }),
       EditorView.contentAttributes.of({
-        'aria-label': 'Markdown-Editor',
         role: 'textbox',
       }),
       EditorView.updateListener.of((update) => {
@@ -728,19 +744,7 @@ export class MarkdownEditorController {
     if (this.appLanguage === lang) return;
     this.appLanguage = lang;
     this.view.dispatch({
-      effects: [
-        this.i18nCompartment.reconfigure(
-          EditorState.phrases.of(lang === 'de' ? germanCodeMirrorPhrases : {}),
-        ),
-        this.placeholderCompartment.reconfigure(
-          placeholder(
-            lang === 'de'
-              ? 'Schreibe hier dein Markdown…'
-              : 'Write your Markdown here…',
-          ),
-        ),
-        this.spellcheckCompartment.reconfigure(this.spellcheckExtension(this.spellcheckEnabled)),
-      ],
+      effects: this.languageEffects(),
     });
   }
 
@@ -757,7 +761,7 @@ export class MarkdownEditorController {
     this.view.dispatch({
       effects: [
         this.wordWrapCompartment.reconfigure(this.wordWrapExtension(this.wordWrapEnabled)),
-        this.spellcheckCompartment.reconfigure(this.spellcheckExtension(this.spellcheckEnabled)),
+        ...this.languageEffects(),
       ],
     });
     requestAnimationFrame(() => {
@@ -1020,15 +1024,16 @@ export class MarkdownEditorController {
       this.view.focus();
     };
 
+    const isEn = this.appLanguage === 'en';
     switch (action) {
       case 'bold':
-        wrapInline('**', 'fetter Text');
+        wrapInline('**', isEn ? 'bold text' : 'fetter Text');
         break;
       case 'italic':
-        wrapInline('*', 'kursiver Text');
+        wrapInline('*', isEn ? 'italic text' : 'kursiver Text');
         break;
       case 'strike':
-        wrapInline('~~', 'durchgestrichen');
+        wrapInline('~~', isEn ? 'strikethrough' : 'durchgestrichen');
         break;
       case 'code':
         wrapInline('`', 'code');
@@ -1056,21 +1061,27 @@ export class MarkdownEditorController {
         break;
       case 'alert': {
         const alertType = (option || 'NOTE').toUpperCase();
-        const body = selected || 'Wichtiger Hinweis im Dokument.';
+        const body = selected || (isEn ? 'Important note in the document.' : 'Wichtiger Hinweis im Dokument.');
         this.insertSnippet(`\n> [!${alertType}]\n> ${body}\n`);
         break;
       }
       case 'codeblock': {
         const lang = (option ?? 'rust').trim();
         const defaultCode =
-          lang === 'rust' ? 'println!("Hallo aus Rust!");' : lang === 'text' ? 'Text' : '// Code';
+          lang === 'rust'
+            ? isEn
+              ? 'println!("Hello from Rust!");'
+              : 'println!("Hallo aus Rust!");'
+            : lang === 'text'
+              ? 'Text'
+              : '// Code';
         const inner = selected || defaultCode;
         const snippet = `\n\`\`\`${lang}\n${inner}\n\`\`\`\n`;
         this.insertSnippet(snippet);
         break;
       }
       case 'link': {
-        const label = selected || 'Linktext';
+        const label = selected || (isEn ? 'Link text' : 'Linktext');
         const insert = `[${label}](https://)`;
         this.view.dispatch({
           changes: { from: range.from, to: range.to, insert },
@@ -1083,7 +1094,7 @@ export class MarkdownEditorController {
         break;
       }
       case 'image': {
-        const alt = selected || 'Bildbeschreibung';
+        const alt = selected || (isEn ? 'Image description' : 'Bildbeschreibung');
         if (this.callbacks.onPickImage) {
           void this.callbacks.onPickImage().then((pickedPath) => {
             const trimmed = pickedPath?.trim();
@@ -1091,7 +1102,7 @@ export class MarkdownEditorController {
             this.insertSnippet(`![${alt}](${trimmed})`);
           });
         } else {
-          this.insertSnippet(`![${alt}](./bild.png)`);
+          this.insertSnippet(`![${alt}](${isEn ? './image.png' : './bild.png'})`);
         }
         break;
       }
@@ -1103,7 +1114,9 @@ export class MarkdownEditorController {
         break;
       case 'mermaid':
         this.insertSnippet(
-          `\n\`\`\`mermaid\nflowchart LR\n  A["Markdown Eingabe"] --> B["Rust Parser (pulldown-cmark)"]\n  B --> C["Live-Vorschau in Windows 11"]\n\`\`\`\n`,
+          isEn
+            ? `\n\`\`\`mermaid\nflowchart LR\n  A["Markdown Input"] --> B["Rust Parser (pulldown-cmark)"]\n  B --> C["Live Preview in Windows 11"]\n\`\`\`\n`
+            : `\n\`\`\`mermaid\nflowchart LR\n  A["Markdown Eingabe"] --> B["Rust Parser (pulldown-cmark)"]\n  B --> C["Live-Vorschau in Windows 11"]\n\`\`\`\n`,
         );
         break;
       case 'hr':

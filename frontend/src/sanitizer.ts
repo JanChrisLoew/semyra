@@ -27,17 +27,24 @@ let domPurifyPromise: Promise<{
 }> | undefined;
 
 function loadDOMPurify() {
-  domPurifyPromise ??= import('dompurify').then((mod) => {
-    const candidate = (mod.default ?? mod) as unknown as {
-      isSupported?: boolean;
-      sanitize?: (source: string, config?: Record<string, unknown>) => string;
-      (win?: Window): { sanitize: (source: string, config?: Record<string, unknown>) => string };
-    };
-    if (candidate.isSupported && typeof candidate.sanitize === 'function') {
-      return { sanitize: candidate.sanitize.bind(candidate) };
-    }
-    return candidate(window);
-  });
+  if (!domPurifyPromise) {
+    domPurifyPromise = import('dompurify')
+      .then((mod) => {
+        const candidate = (mod.default ?? mod) as unknown as {
+          isSupported?: boolean;
+          sanitize?: (source: string, config?: Record<string, unknown>) => string;
+          (win?: Window): { sanitize: (source: string, config?: Record<string, unknown>) => string };
+        };
+        if (candidate.isSupported && typeof candidate.sanitize === 'function') {
+          return { sanitize: candidate.sanitize.bind(candidate) };
+        }
+        return candidate(window);
+      })
+      .catch((err) => {
+        domPurifyPromise = undefined;
+        throw err;
+      });
+  }
   return domPurifyPromise;
 }
 
@@ -55,18 +62,25 @@ function supportsNativeSetHTMLSanitizer(): boolean {
       nativeSetHTMLSupported = false;
       return false;
     }
-    probe.setHTML('<p data-line="1" onclick="x()">ok</p><script>x()</script>', {
-      sanitizer: {
-        elements: ['p'],
-        attributes: ['data-line'],
+    probe.setHTML(
+      '<p data-line="1" onclick="x()">ok</p><a href="javascript:alert(1)">x</a><script>x()</script>',
+      {
+        sanitizer: {
+          elements: ['p', 'a'],
+          attributes: ['data-line', 'href'],
+        },
       },
-    });
+    );
     const p = probe.querySelector('p');
+    const a = probe.querySelector('a');
+    const href = a?.getAttribute('href') ?? '';
     nativeSetHTMLSupported =
-      probe.children.length === 1 &&
+      probe.children.length === 2 &&
       p !== null &&
       p.getAttribute('data-line') === '1' &&
       !p.hasAttribute('onclick') &&
+      a !== null &&
+      !/^\s*javascript:/i.test(href) &&
       probe.querySelector('script') === null;
   } catch {
     nativeSetHTMLSupported = false;
@@ -99,11 +113,22 @@ function renderCachedKatex(tex: string, displayMode: boolean): string | null {
   }
 }
 
+interface CachedMermaidSvg {
+  baseId: string;
+  svg: string;
+}
+
 const MAX_MERMAID_CACHE = 80;
-const mermaidCache = new Map<string, string>();
+const mermaidCache = new Map<string, CachedMermaidSvg>();
 let mermaidModulePromise: Promise<typeof import('mermaid')['default']> | undefined;
 let mermaidCounter = 0;
 let lastMermaidTheme: 'dark' | 'default' | null = null;
+
+export interface SafeRenderOptions {
+  forceLightTheme?: boolean;
+  theme?: 'dark' | 'light';
+  isCurrent?: () => boolean;
+}
 
 function isDarkColorSchemeActive(): boolean {
   const metaContent = document
@@ -124,7 +149,7 @@ function isDarkColorSchemeActive(): boolean {
 export async function safeSetMarkdownHTML(
   container: HTMLElement,
   rawHtml: string,
-  options?: { forceLightTheme?: boolean; isCurrent?: () => boolean },
+  options?: SafeRenderOptions,
 ): Promise<boolean> {
   const staging = document.createElement('div') as HTMLElement & ElementWithSetHTML;
   let insertedViaNative = false;
@@ -179,7 +204,8 @@ export async function safeSetMarkdownHTML(
   // Lazy-load and cache Mermaid diagrams offscreen before reconciling into live DOM
   const mermaidNodes = staging.querySelectorAll<HTMLElement>('.mermaid-wrapper');
   if (mermaidNodes.length > 0) {
-    await renderMermaidBlocksCached(mermaidNodes, Boolean(options?.forceLightTheme));
+    const resolvedTheme = options?.theme ?? (options?.forceLightTheme ? 'light' : undefined);
+    await renderMermaidBlocksCached(mermaidNodes, resolvedTheme);
   }
 
   if (options?.isCurrent?.() === false) return false;
@@ -194,7 +220,7 @@ export async function safeSetMarkdownHTML(
 export async function renderMermaidLightInClone(root: HTMLElement): Promise<void> {
   const mermaidNodes = root.querySelectorAll<HTMLElement>('.mermaid-wrapper[data-mermaid]');
   if (mermaidNodes.length > 0) {
-    await renderMermaidBlocksCached(mermaidNodes, true);
+    await renderMermaidBlocksCached(mermaidNodes, 'light');
   }
 }
 
@@ -266,22 +292,36 @@ function getMermaidDefinition(wrapper: HTMLElement): string {
   return (wrapper.querySelector('pre.mermaid-source code')?.textContent ?? '').trim();
 }
 
+function instantiateCachedMermaidSvg(cached: CachedMermaidSvg): string {
+  const freshId = `semyra-mermaid-${++mermaidCounter}`;
+  if (cached.baseId === freshId) return cached.svg;
+  return cached.svg.split(cached.baseId).join(freshId);
+}
+
 async function renderMermaidBlocksCached(
   nodes: NodeListOf<HTMLElement>,
-  forceLightTheme = false,
+  themeOverride?: 'dark' | 'light',
 ): Promise<void> {
+  const forceLightTheme = themeOverride === 'light';
   const theme: 'dark' | 'default' =
-    !forceLightTheme && isDarkColorSchemeActive() ? 'dark' : 'default';
+    themeOverride === 'dark'
+      ? 'dark'
+      : themeOverride === 'light'
+        ? 'default'
+        : isDarkColorSchemeActive()
+          ? 'dark'
+          : 'default';
 
   // Fast-path: check if every Mermaid diagram in this document is already cached
   let hasUncached = false;
   for (const wrapper of nodes) {
     const def = getMermaidDefinition(wrapper);
     if (!def) continue;
-    const cachedSvg = mermaidCache.get(`${theme}::${def}`);
-    if (cachedSvg !== undefined) {
+    const cached = mermaidCache.get(`${theme}::${def}`);
+    if (cached !== undefined) {
+      const svg = instantiateCachedMermaidSvg(cached);
       wrapper.classList.remove('has-mermaid-error');
-      wrapper.innerHTML = forceLightTheme ? cachedSvg : wrapMermaidHtml(cachedSvg);
+      wrapper.innerHTML = forceLightTheme ? svg : wrapMermaidHtml(svg);
     } else {
       hasUncached = true;
     }
@@ -290,7 +330,14 @@ async function renderMermaidBlocksCached(
   if (!hasUncached) return;
 
   try {
-    mermaidModulePromise ??= import('mermaid').then((m) => m.default);
+    if (!mermaidModulePromise) {
+      mermaidModulePromise = import('mermaid')
+        .then((m) => m.default)
+        .catch((err) => {
+          mermaidModulePromise = undefined;
+          throw err;
+        });
+    }
     const mermaid = await mermaidModulePromise;
 
     for (const wrapper of nodes) {
@@ -299,8 +346,9 @@ async function renderMermaidBlocksCached(
       const cacheKey = `${theme}::${definition}`;
       const existing = mermaidCache.get(cacheKey);
       if (existing !== undefined) {
+        const svg = instantiateCachedMermaidSvg(existing);
         wrapper.classList.remove('has-mermaid-error');
-        wrapper.innerHTML = forceLightTheme ? existing : wrapMermaidHtml(existing);
+        wrapper.innerHTML = forceLightTheme ? svg : wrapMermaidHtml(svg);
         continue;
       }
 
@@ -311,7 +359,7 @@ async function renderMermaidBlocksCached(
           const oldest = mermaidCache.keys().next().value;
           if (oldest !== undefined) mermaidCache.delete(oldest);
         }
-        mermaidCache.set(cacheKey, svg);
+        mermaidCache.set(cacheKey, { baseId: id, svg });
         wrapper.classList.remove('has-mermaid-error');
         wrapper.innerHTML = forceLightTheme ? svg : wrapMermaidHtml(svg);
       } catch (err) {
@@ -408,16 +456,29 @@ function reconcileChildren(container: HTMLElement, staging: HTMLElement): void {
           continue;
         }
 
-        // Recurse into compound block wrappers (lists, blockquotes, alerts, tables, frontmatter, prompt tags)
+        // Recurse into compound block wrappers (lists, blockquotes, alerts, tables, frontmatter, prompt tags, nested details hosts)
         if (
           curEl.tagName === 'UL' ||
           curEl.tagName === 'OL' ||
+          curEl.tagName === 'LI' ||
           curEl.tagName === 'BLOCKQUOTE' ||
+          curEl.tagName === 'SECTION' ||
+          curEl.tagName === 'DETAILS' ||
+          curEl.tagName === 'TD' ||
           curEl.classList.contains('gfm-alert') ||
           curEl.classList.contains('table-wrapper') ||
           curEl.classList.contains('frontmatter-card') ||
           curEl.classList.contains('prompt-tag-block') ||
-          curEl.classList.contains('prompt-tag-body')
+          curEl.classList.contains('prompt-tag-body') ||
+          ((curEl.tagName === 'TABLE' ||
+            curEl.tagName === 'THEAD' ||
+            curEl.tagName === 'TBODY' ||
+            curEl.tagName === 'TR' ||
+            (curEl.tagName === 'DIV' &&
+              !curEl.classList.contains('code-block-wrapper') &&
+              !curEl.classList.contains('mermaid-wrapper') &&
+              !curEl.classList.contains('math-display'))) &&
+            (curEl.querySelector('details') !== null || nextEl.querySelector('details') !== null))
         ) {
           syncElementAttributes(curEl, nextEl);
           reconcileChildren(curEl, nextEl);

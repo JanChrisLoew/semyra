@@ -12,12 +12,167 @@ pub struct ExportImages {
     pub external: usize,
 }
 
+const DANGEROUS_ELEMENTS_SELECTOR: &str = "script, iframe, frame, frameset, object, embed, applet, form, meta, base, link, title, head, noscript, template, portal, textarea, select, option, svg animate, svg set, svg animatetransform, svg animatemotion, svg mpath, svg handler, svg listener";
+
+fn normalized_uri_scheme(value: &str) -> Option<String> {
+    let mut scheme = String::new();
+    for ch in value.chars() {
+        if ch.is_ascii_whitespace() || ch.is_ascii_control() {
+            continue;
+        }
+        if ch == ':' {
+            return (!scheme.is_empty()).then_some(scheme.to_ascii_lowercase());
+        }
+        if matches!(ch, '/' | '?' | '#') {
+            return None;
+        }
+        if scheme.len() < 32 {
+            scheme.push(ch);
+        }
+    }
+    None
+}
+
+fn is_safe_data_image_uri(value: &str) -> bool {
+    let compact: String = value
+        .chars()
+        .filter(|ch| !ch.is_ascii_whitespace() && !ch.is_ascii_control())
+        .collect();
+    let lower = compact.to_ascii_lowercase();
+    [
+        "data:image/png",
+        "data:image/jpeg",
+        "data:image/jpg",
+        "data:image/gif",
+        "data:image/webp",
+        "data:image/bmp",
+        "data:image/svg+xml",
+        "data:image/x-icon",
+        "data:image/avif",
+    ]
+    .iter()
+    .any(|prefix| {
+        lower
+            .strip_prefix(prefix)
+            .is_some_and(|rest| rest.starts_with(';') || rest.starts_with(','))
+    })
+}
+
+fn is_safe_export_uri(tag_name: &str, attr_name: &str, value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with('/') {
+        return true;
+    }
+    let Some(scheme) = normalized_uri_scheme(trimmed) else {
+        return true;
+    };
+    match scheme.as_str() {
+        "http" | "https" | "mailto" | "tel" => true,
+        "data" => matches!(tag_name, "img" | "source") && attr_name == "src" && is_safe_data_image_uri(trimmed),
+        _ => false,
+    }
+}
+
+fn is_safe_mermaid_style(css: &str) -> bool {
+    let lower = css.to_ascii_lowercase();
+    let compact: String = lower
+        .chars()
+        .filter(|ch| !ch.is_ascii_whitespace() && !ch.is_ascii_control())
+        .collect();
+    !lower.contains("@import")
+        && !compact.contains("javascript:")
+        && !compact.contains("expression(")
+        && !compact.contains("</style")
+        && !compact.contains("url(")
+        && !css.contains('\\')
+}
+
+fn sanitize_export_document(doc: &dom_query::Document) {
+    doc.select(DANGEROUS_ELEMENTS_SELECTOR).remove();
+
+    for input in doc.select("input").iter() {
+        let is_checkbox = input
+            .attr("type")
+            .is_some_and(|t| t.eq_ignore_ascii_case("checkbox"));
+        let has_task_class = input
+            .attr("class")
+            .is_some_and(|c| c.split_whitespace().any(|cls| cls == "task-checkbox"));
+        if !(is_checkbox && has_task_class) {
+            input.remove();
+        }
+    }
+
+    for btn in doc.select("button").iter() {
+        let allowed = btn.attr("class").is_some_and(|c| {
+            c.split_whitespace()
+                .any(|cls| cls == "copy-code-btn" || cls == "mermaid-action-btn")
+        });
+        if !allowed {
+            btn.remove();
+        }
+    }
+
+    for style in doc.select("style").iter() {
+        let in_mermaid_svg = style.ancestors(None).iter().any(|anc| {
+            anc.nodes()
+                .first()
+                .and_then(|n| n.node_name())
+                .is_some_and(|n| n.eq_ignore_ascii_case("svg"))
+        }) && style.ancestors(None).iter().any(|anc| {
+            anc.attr("class")
+                .is_some_and(|c| c.split_whitespace().any(|cls| cls == "mermaid-wrapper"))
+        });
+        let is_export_theme_style = style
+            .attr("data-semyra-export-theme")
+            .is_some_and(|theme| matches!(theme.as_ref(), "light" | "dark"));
+        if !(in_mermaid_svg || is_export_theme_style) || !is_safe_mermaid_style(&style.text()) {
+            style.remove();
+        }
+    }
+
+    for el in doc.select("*").iter() {
+        let tag_name = el
+            .nodes()
+            .first()
+            .and_then(|n| n.node_name())
+            .map(|n| n.as_ref().to_ascii_lowercase())
+            .unwrap_or_default();
+        let attrs = el.attrs();
+        for attr in attrs {
+            let name_lower = attr.name.local.as_ref().to_ascii_lowercase();
+            if name_lower.starts_with("on")
+                || matches!(
+                    name_lower.as_str(),
+                    "srcdoc" | "formaction" | "dynsrc" | "lowsrc"
+                )
+            {
+                el.remove_attr(&attr.name.local);
+                continue;
+            }
+            if matches!(
+                name_lower.as_str(),
+                "href" | "xlink:href" | "src" | "action" | "poster" | "background" | "data" | "cite" | "longdesc"
+            ) && !is_safe_export_uri(&tag_name, &name_lower, &attr.value)
+            {
+                el.remove_attr(&attr.name.local);
+            }
+        }
+    }
+}
+
+pub fn sanitize_export_html(html: &str) -> String {
+    let doc = dom_query::Document::fragment(html);
+    sanitize_export_document(&doc);
+    doc.html_root().inner_html().to_string()
+}
+
 /// Resolve actual image elements in both the WebView snapshot and the native render fallback.
 pub fn inline_local_asset_images<F>(html: &str, is_en: bool, is_allowed: F) -> (String, ExportImages)
 where
     F: Fn(&Path) -> bool,
 {
     let doc = dom_query::Document::fragment(html);
+    sanitize_export_document(&doc);
     let mut counts = ExportImages::default();
     doc.select("picture > source").remove();
     for img in doc.select("img").iter() {
@@ -63,16 +218,17 @@ where
 }
 
 fn extract_local_asset_query_path(url: &str) -> Option<&str> {
-    let idx = url.find("/api/local-asset?")?;
-    let prefix = &url[..idx];
+    let url_no_frag = url.split('#').next().unwrap_or(url);
+    let idx = url_no_frag.find("/api/local-asset?")?;
+    let prefix = &url_no_frag[..idx];
     if !prefix.is_empty()
-        && prefix != "https://semyra.localhost"
-        && prefix != "http://semyra.localhost"
-        && prefix != "semyra://localhost"
+        && !prefix.eq_ignore_ascii_case("https://semyra.localhost")
+        && !prefix.eq_ignore_ascii_case("http://semyra.localhost")
+        && !prefix.eq_ignore_ascii_case("semyra://localhost")
     {
         return None;
     }
-    let query = &url[idx + "/api/local-asset?".len()..];
+    let query = &url_no_frag[idx + "/api/local-asset?".len()..];
     for pair in query.split('&') {
         let mut parts = pair.splitn(2, '=');
         if parts.next() == Some("path") {
@@ -108,6 +264,7 @@ pub fn build_standalone_html_document(
     markdown: &str,
     is_en: bool,
 ) -> String {
+    let sanitized_body_html = sanitize_export_html(rendered_body_html);
     let language = crate::markdown::document_language(markdown)
         .unwrap_or_else(|| if is_en { "en".into() } else { "de".into() });
     let mut escaped_title = String::new();
@@ -243,7 +400,7 @@ pub fn build_standalone_html_document(
 </head>
 <body>
 <article class="markdown-body">
-{rendered_body_html}
+{sanitized_body_html}
 </article>
 </body>
 </html>
@@ -311,5 +468,80 @@ mod tests {
         assert_eq!(parsed.select("code").text().as_ref(), "src=\"literal\"");
 
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn sanitizes_xss_payloads_while_preserving_mermaid_and_math_export_markup() {
+        let dirty = concat!(
+            "<p>Safe</p>",
+            "<script>alert(1)</script>",
+            "<iframe src=\"https://evil.example\"></iframe>",
+            "<object data=\"evil.swf\"></object>",
+            "<embed src=\"evil.swf\">",
+            "<form action=\"https://evil.example\"><input type=\"text\"><button>Send</button></form>",
+            "<meta http-equiv=\"refresh\" content=\"0;url=evil\">",
+            "<base href=\"https://evil.example/\">",
+            "<style>body{display:none}</style>",
+            "<svg onload=\"alert(1)\"><script>alert(2)</script><path d=\"M0 0\"/></svg>",
+            "<a href=\"javascript:alert(3)\" onclick=\"alert(4)\">Click</a>",
+            "<a href=\"java&#x09;script:alert(5)\">Click2</a>",
+            "<img src=\"data:text/html,<script>alert(6)</script>\" onerror=\"alert(7)\">",
+            "<input type=\"checkbox\" class=\"task-checkbox\" checked>",
+            "<div class=\"mermaid-wrapper\"><svg viewBox=\"0 0 10 10\"><style>.node{fill:#fff;}</style><path d=\"M0 0\"/></svg></div>",
+            "<div class=\"mermaid-wrapper\"><svg viewBox=\"0 0 10 10\"><style>.bad{background:url(https://evil.example/a.png);}</style><a xlink:href=\"javascript:alert(8)\">x</a></svg></div>",
+            "<math><mi>x</mi></math>"
+        );
+        let doc = build_standalone_html_document("Test", dirty, "", false);
+        assert!(!doc.contains("<script>"));
+        assert!(!doc.contains("<iframe"));
+        assert!(!doc.contains("<object"));
+        assert!(!doc.contains("<embed"));
+        assert!(!doc.contains("<form"));
+        assert!(!doc.contains("<base "));
+        assert!(!doc.contains("http-equiv=\"refresh\""));
+        assert!(!doc.contains("body{display:none}"));
+        assert!(!doc.contains("https://evil.example/a.png"));
+        assert!(!doc.contains("onload="));
+        assert!(!doc.contains("onerror="));
+        assert!(!doc.contains("onclick="));
+        assert!(!doc.contains("javascript:"));
+        assert!(!doc.contains("data:text/html"));
+        assert!(doc.contains("input type=\"checkbox\" class=\"task-checkbox\""));
+        assert!(doc.contains(".node{fill:#fff;}"));
+        assert!(doc.contains("<math><mi>x</mi></math>"));
+    }
+
+    #[test]
+    fn extracts_local_asset_query_with_extra_params_fragment_and_case_insensitive_origin() {
+        assert_eq!(
+            extract_local_asset_query_path("HTTPS://SEMYRA.LOCALHOST/api/local-asset?v=1&path=C%3A%5Cimg.png&t=2#frag"),
+            Some("C%3A%5Cimg.png")
+        );
+        assert_eq!(
+            extract_local_asset_query_path("https://evil.example/api/local-asset?path=C%3A%5Cimg.png"),
+            None
+        );
+    }
+
+    #[test]
+    fn preserves_safe_export_theme_style_and_strips_unsafe_styles() {
+        let valid_dark = "<style data-semyra-export-theme=\"dark\">:root { color-scheme: dark !important; }</style><p>Hi</p>";
+        let valid_doc = build_standalone_html_document("Theme", valid_dark, "", false);
+        assert!(valid_doc.contains("<style data-semyra-export-theme=\"dark\">:root { color-scheme: dark !important; }</style>"));
+        assert!(valid_doc.contains("<p>Hi</p>"));
+
+        let fragment = dom_query::Document::fragment(valid_dark);
+        sanitize_export_document(&fragment);
+        assert!(fragment.html_root().inner_html().contains("<style data-semyra-export-theme=\"dark\">:root { color-scheme: dark !important; }</style>"));
+
+        let unsafe_styles = concat!(
+            "<style data-semyra-export-theme=\"dark\">@import url(https://evil.test);</style>",
+            "<style>body{background:url(x)}</style>",
+            "<p>Safe</p>"
+        );
+        let cleaned = build_standalone_html_document("Unsafe", unsafe_styles, "", false);
+        assert!(!cleaned.contains("https://evil.test"));
+        assert!(!cleaned.contains("background:url(x)"));
+        assert!(cleaned.contains("<p>Safe</p>"));
     }
 }

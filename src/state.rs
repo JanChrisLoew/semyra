@@ -5,8 +5,13 @@ use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tao::event_loop::EventLoopProxy;
+
+const PDF_TOKEN_TTL: Duration = Duration::from_secs(600);
+const MAX_PENDING_PDF_EXPORTS: usize = 32;
 
 #[derive(Debug, Clone)]
 pub enum UserEvent {
@@ -37,29 +42,36 @@ pub struct StartupPayload {
     pub ui_prefs: UiSessionPrefs,
 }
 
-pub struct AppStateInner {
-    pub startup: StartupPayload,
-    pub ui_prefs: UiSessionPrefs,
-    pub ui_prefs_revision: u64,
-    pub workspace_folder: Option<PathBuf>,
-    workspace_change_revision: u64,
-    additional_asset_roots: HashSet<PathBuf>,
-    pub watched_paths: HashSet<PathBuf>,
-    pub pending_pdf_exports: HashMap<u64, PathBuf>,
-    pub next_pdf_token: u64,
-    pub watcher: Option<RecommendedWatcher>,
+#[derive(Default)]
+struct WatcherManager {
+    watcher: Option<RecommendedWatcher>,
+    watched_paths: HashSet<PathBuf>,
+    workspace_folder: Option<PathBuf>,
+    workspace_revision: u64,
 }
 
-impl AppStateInner {
-    fn begin_workspace_change(&mut self) -> u64 {
-        self.workspace_change_revision += 1;
-        self.workspace_change_revision
+impl WatcherManager {
+    fn watch_path(&mut self, path: PathBuf, recursive: bool) {
+        if self.watched_paths.contains(&path) {
+            return;
+        }
+        let mode = if recursive {
+            RecursiveMode::Recursive
+        } else {
+            RecursiveMode::NonRecursive
+        };
+        if let Some(watcher) = &mut self.watcher {
+            if watcher.watch(&path, mode).is_ok() {
+                self.watched_paths.insert(path);
+            }
+        }
     }
 
-    fn finish_workspace_change(&mut self, revision: u64, folder: PathBuf) -> bool {
-        if revision != self.workspace_change_revision {
-            return false;
+    fn apply_workspace_change(&mut self, revision: u64, folder: PathBuf) {
+        if revision < self.workspace_revision {
+            return;
         }
+        self.workspace_revision = revision;
         if let Some(previous) = self.workspace_folder.replace(folder.clone()) {
             if previous != folder {
                 if let Some(watcher) = &mut self.watcher {
@@ -69,23 +81,79 @@ impl AppStateInner {
             }
         }
         self.watch_path(folder, true);
+    }
+}
+
+pub struct AppStateInner {
+    pub startup: StartupPayload,
+    pub ui_prefs: UiSessionPrefs,
+    pub ui_prefs_revision: u64,
+    pub workspace_folder: Option<PathBuf>,
+    workspace_change_revision: u64,
+    additional_asset_roots: HashSet<PathBuf>,
+    pending_pdf_exports: HashMap<u64, (PathBuf, Instant)>,
+    next_pdf_token: u64,
+}
+
+impl AppStateInner {
+    #[cfg(test)]
+    fn begin_workspace_change(&mut self) -> u64 {
+        self.workspace_change_revision += 1;
+        self.workspace_change_revision
+    }
+
+    #[cfg(test)]
+    fn finish_workspace_change(&mut self, revision: u64, folder: PathBuf) -> bool {
+        if revision != self.workspace_change_revision {
+            return false;
+        }
+        self.workspace_folder = Some(folder);
         true
     }
 
-    fn watch_path(&mut self, path: PathBuf, recursive: bool) {
-        if self.watched_paths.contains(&path) {
-            return;
+    fn finish_workspace_change_seq(&mut self, revision: u64, latest_seq: u64, folder: PathBuf) -> bool {
+        if revision != latest_seq || revision <= self.workspace_change_revision {
+            return false;
         }
-        let mode = if recursive { RecursiveMode::Recursive } else { RecursiveMode::NonRecursive };
-        if let Some(watcher) = &mut self.watcher {
-            if watcher.watch(&path, mode).is_ok() {
-                self.watched_paths.insert(path);
+        self.workspace_change_revision = revision;
+        self.workspace_folder = Some(folder);
+        true
+    }
+
+    fn insert_pdf_export(&mut self, path: PathBuf) -> u64 {
+        let now = Instant::now();
+        self.pending_pdf_exports
+            .retain(|_, (_, created)| now.saturating_duration_since(*created) < PDF_TOKEN_TTL);
+        while self.pending_pdf_exports.len() >= MAX_PENDING_PDF_EXPORTS {
+            if let Some(oldest_token) = self
+                .pending_pdf_exports
+                .iter()
+                .min_by_key(|(_, (_, created))| *created)
+                .map(|(token, _)| *token)
+            {
+                self.pending_pdf_exports.remove(&oldest_token);
+            } else {
+                break;
             }
         }
+        let token = self.next_pdf_token;
+        self.next_pdf_token = self.next_pdf_token.wrapping_add(1);
+        self.pending_pdf_exports.insert(token, (path, now));
+        token
+    }
+
+    fn take_pdf_export(&mut self, token: u64) -> Option<PathBuf> {
+        let now = Instant::now();
+        self.pending_pdf_exports
+            .remove(&token)
+            .filter(|(_, created)| now.saturating_duration_since(*created) < PDF_TOKEN_TTL)
+            .map(|(path, _)| path)
     }
 
     fn is_local_asset_allowed(&self, path: &Path) -> bool {
-        self.workspace_folder.iter().chain(&self.additional_asset_roots)
+        self.workspace_folder
+            .iter()
+            .chain(&self.additional_asset_roots)
             .any(|root| path.starts_with(root))
     }
 }
@@ -95,6 +163,9 @@ pub struct AppState {
     pub inner: Arc<Mutex<AppStateInner>>,
     pub proxy: EventLoopProxy<UserEvent>,
     pub drafts: Arc<Mutex<Option<DraftStore>>>,
+    watcher: Arc<Mutex<WatcherManager>>,
+    frontend_ready: Arc<AtomicBool>,
+    workspace_revision_seq: Arc<AtomicU64>,
 }
 
 impl AppState {
@@ -153,19 +224,22 @@ impl AppState {
             workspace_folder: initial_folder.clone(),
             workspace_change_revision: 0,
             additional_asset_roots,
-            watched_paths: HashSet::new(),
             pending_pdf_exports: HashMap::new(),
             next_pdf_token: 1,
-            watcher: None,
+        }));
+
+        let watcher_mgr = Arc::new(Mutex::new(WatcherManager {
+            workspace_folder: initial_folder.clone(),
+            ..WatcherManager::default()
         }));
 
         let watcher_proxy = proxy.clone();
-        let watcher_inner = Arc::clone(&inner);
+        let watcher_state = Arc::clone(&watcher_mgr);
         let watcher = RecommendedWatcher::new(
             move |res: Result<Event, notify::Error>| {
                 if let Ok(event) = res {
                     if event.kind.is_modify() || event.kind.is_create() || event.kind.is_remove() {
-                        let watched_roots: Vec<PathBuf> = watcher_inner
+                        let watched_roots: Vec<PathBuf> = watcher_state
                             .lock()
                             .ok()
                             .map(|guard| {
@@ -178,7 +252,9 @@ impl AppState {
                             .unwrap_or_default();
                         // Let the frontend compare the disk contents after any pending save.
                         // A time filter would also hide genuine external changes to the same file.
-                        let paths = event.paths.iter()
+                        let paths = event
+                            .paths
+                            .iter()
                             .filter(|path| !is_ignored_watch_path(path, &watched_roots))
                             .map(|path| clean_windows_path(path).to_string_lossy().into_owned())
                             .collect::<Vec<_>>();
@@ -192,11 +268,18 @@ impl AppState {
         )
         .ok();
 
-        if let Ok(mut guard) = inner.lock() {
+        if let Ok(mut guard) = watcher_mgr.lock() {
             guard.watcher = watcher;
         }
 
-        let state = Self { inner, proxy, drafts: Arc::new(Mutex::new(drafts)) };
+        let state = Self {
+            inner,
+            proxy,
+            drafts: Arc::new(Mutex::new(drafts)),
+            watcher: watcher_mgr,
+            frontend_ready: Arc::new(AtomicBool::new(false)),
+            workspace_revision_seq: Arc::new(AtomicU64::new(0)),
+        };
 
         if let Some(ref folder) = initial_folder {
             state.watch_path(folder, true);
@@ -206,6 +289,29 @@ impl AppState {
         }
 
         state
+    }
+
+    pub fn mark_frontend_ready(&self) {
+        self.frontend_ready.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_frontend_ready(&self) -> bool {
+        self.frontend_ready.load(Ordering::SeqCst)
+    }
+
+    pub fn insert_pdf_export(&self, path: PathBuf) -> Result<u64, String> {
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| "Interner Status für PDF-Export gesperrt.".to_string())?;
+        Ok(guard.insert_pdf_export(path))
+    }
+
+    pub fn take_pdf_export(&self, token: u64) -> Option<PathBuf> {
+        self.inner
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take_pdf_export(token))
     }
 
     pub fn allow_file_parent(&self, file_path: &Path) {
@@ -226,12 +332,24 @@ impl AppState {
     }
 
     pub fn begin_workspace_change(&self) -> Option<u64> {
-        self.inner.lock().ok().map(|mut guard| guard.begin_workspace_change())
+        Some(self.workspace_revision_seq.fetch_add(1, Ordering::SeqCst) + 1)
     }
 
     pub fn finish_workspace_change(&self, revision: u64, folder_path: &Path) -> bool {
+        if revision != self.workspace_revision_seq.load(Ordering::SeqCst) {
+            return false;
+        }
         let norm = normalize_existing_path(folder_path);
-        self.inner.lock().ok().is_some_and(|mut guard| guard.finish_workspace_change(revision, norm))
+        let latest_seq = self.workspace_revision_seq.load(Ordering::SeqCst);
+        let accepted = self.inner.lock().ok().is_some_and(|mut guard| {
+            guard.finish_workspace_change_seq(revision, latest_seq, norm.clone())
+        });
+        if accepted && norm.exists() {
+            if let Ok(mut watcher_guard) = self.watcher.lock() {
+                watcher_guard.apply_workspace_change(revision, norm);
+            }
+        }
+        accepted
     }
 
     /// Registers an auxiliary root (such as the persistent AI Library) for asset
@@ -249,7 +367,7 @@ impl AppState {
         if !norm.exists() {
             return;
         }
-        if let Ok(mut guard) = self.inner.lock() {
+        if let Ok(mut guard) = self.watcher.lock() {
             guard.watch_path(norm, recursive);
         }
     }
@@ -320,10 +438,8 @@ mod tests {
             workspace_folder: Some(PathBuf::from(workspace)),
             workspace_change_revision: 0,
             additional_asset_roots: additional_roots.iter().map(PathBuf::from).collect(),
-            watched_paths: HashSet::new(),
             pending_pdf_exports: HashMap::new(),
             next_pdf_token: 1,
-            watcher: None,
         }
     }
 
@@ -383,5 +499,30 @@ mod tests {
             Path::new(r"C:\build\dist\target\my-workspace\target\debug\app.exe"),
             &roots
         ));
+    }
+
+    #[test]
+    fn pending_pdf_exports_prune_expired_and_cap_total_entries() {
+        let mut state = state_for_workspace(r"C:\repo", &[]);
+        state.pending_pdf_exports.insert(
+            999,
+            (
+                PathBuf::from(r"C:\repo\expired.pdf"),
+                Instant::now() - PDF_TOKEN_TTL - Duration::from_secs(5),
+            ),
+        );
+
+        let mut tokens = Vec::new();
+        for idx in 0..(MAX_PENDING_PDF_EXPORTS + 4) {
+            tokens.push(state.insert_pdf_export(PathBuf::from(format!(r"C:\repo\doc-{idx}.pdf"))));
+        }
+
+        assert!(state.take_pdf_export(999).is_none());
+        assert_eq!(state.pending_pdf_exports.len(), MAX_PENDING_PDF_EXPORTS);
+        assert!(state.take_pdf_export(tokens[0]).is_none());
+        assert_eq!(
+            state.take_pdf_export(*tokens.last().unwrap()),
+            Some(PathBuf::from(format!(r"C:\repo\doc-{}.pdf", MAX_PENDING_PDF_EXPORTS + 3)))
+        );
     }
 }

@@ -40,11 +40,20 @@ impl RecoveryFile {
         Ok(Self { path, lock: Some(lock) })
     }
 
-    fn remove(&self) -> std::io::Result<()> {
+    fn clear_snapshot(&self) -> std::io::Result<()> {
         match fs::remove_file(&self.path) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             result => result,
         }
+    }
+
+    fn remove(&mut self) -> std::io::Result<()> {
+        let res = self.clear_snapshot();
+        if res.is_ok() {
+            drop(self.lock.take());
+            let _ = fs::remove_file(self.path.with_extension("lock"));
+        }
+        res
     }
 }
 
@@ -54,6 +63,21 @@ impl Drop for RecoveryFile {
         if !self.path.exists() {
             let _ = fs::remove_file(self.path.with_extension("lock"));
         }
+    }
+}
+
+fn quarantine_corrupt_recovery_file(file: &mut RecoveryFile) {
+    let mut corrupt_os = file.path.as_os_str().to_os_string();
+    corrupt_os.push(".corrupt");
+    let corrupt_path = PathBuf::from(corrupt_os);
+    if let Err(err) = fs::rename(&file.path, &corrupt_path) {
+        eprintln!(
+            "Defekte Entwurfsdatei '{}' konnte nicht verschoben werden: {err}",
+            file.path.display()
+        );
+    } else {
+        drop(file.lock.take());
+        let _ = fs::remove_file(file.path.with_extension("lock"));
     }
 }
 
@@ -69,20 +93,42 @@ impl DraftStore {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
         let current = RecoveryFile::lock(dir.join(format!("recovery-{}-{timestamp}.json", std::process::id())))?;
+        let current_lock_path = current.path.with_extension("lock");
         let mut recovered = Vec::new();
         let mut entries = Vec::new();
-        for file in fs::read_dir(dir).map_err(|e| e.to_string())?.flatten() {
-            let path = file.path();
-            let name = file.file_name();
+        for entry in fs::read_dir(dir).map_err(|e| e.to_string())?.flatten() {
+            let path = entry.path();
+            let name = entry.file_name();
             let name = name.to_string_lossy();
+            if (name == "recovery.lock" || (name.starts_with("recovery-") && name.ends_with(".lock")))
+                && path != current_lock_path
+            {
+                let json_path = path.with_extension("json");
+                if !json_path.exists() {
+                    if let Ok(mut orphan) = RecoveryFile::lock(json_path) {
+                        let _ = orphan.remove();
+                    }
+                }
+                continue;
+            }
             if !(name == "recovery.json" || (name.starts_with("recovery-") && name.ends_with(".json"))) {
                 continue;
             }
-            let Ok(file) = RecoveryFile::lock(path) else { continue };
+            let Ok(mut file) = RecoveryFile::lock(path) else { continue };
             let Ok(bytes) = fs::read(&file.path) else { continue };
-            let Ok(snapshot) = serde_json::from_slice::<DraftSnapshot>(&bytes) else { continue };
-            entries.extend(snapshot.entries);
-            recovered.push(file);
+            match serde_json::from_slice::<DraftSnapshot>(&bytes) {
+                Ok(snapshot) => {
+                    entries.extend(snapshot.entries);
+                    recovered.push(file);
+                }
+                Err(err) => {
+                    eprintln!(
+                        "Defekte Entwurfsdatei '{}' wird isoliert: {err}",
+                        file.path.display()
+                    );
+                    quarantine_corrupt_recovery_file(&mut file);
+                }
+            }
         }
         Ok((Self { current, recovered, last_revision: 0, closed: false }, entries))
     }
@@ -92,7 +138,7 @@ impl DraftStore {
             return Ok(());
         }
         if entries.is_empty() {
-            self.current.remove().map_err(|e| e.to_string())?;
+            self.current.clear_snapshot().map_err(|e| e.to_string())?;
         } else {
             let bytes = serde_json::to_vec(&DraftSnapshot { entries }).map_err(|e| e.to_string())?;
             crate::fs_ops::encoding::write_file_atomically(&self.current.path, &bytes)
@@ -114,7 +160,7 @@ impl DraftStore {
     }
 
     fn remove_recovered(&mut self) {
-        self.recovered.retain(|file| file.remove().is_err());
+        self.recovered.retain_mut(|file| file.remove().is_err());
     }
 }
 
@@ -260,6 +306,96 @@ mod tests {
         let (last, recovered) = DraftStore::open(&dir).unwrap();
         assert!(recovered.is_empty());
         drop(last);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn close_removes_lock_files_and_open_prunes_orphan_locks() {
+        let dir = std::env::temp_dir().join(format!(
+            "semyra-draft-locks-{}-{}",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let orphan_lock = dir.join("recovery-99999-orphan.lock");
+        fs::write(&orphan_lock, b"").unwrap();
+
+        let (mut store, recovered) = DraftStore::open(&dir).unwrap();
+        assert!(recovered.is_empty());
+        assert!(!orphan_lock.exists(), "orphan lock without json should be pruned on open");
+
+        store.save(1, vec![draft("unsaved")], true).unwrap();
+        store.close(true);
+
+        let remaining_locks: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "lock"))
+            .collect();
+        assert!(remaining_locks.is_empty(), "close() must unlock and remove lock files");
+        drop(store);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn open_quarantines_corrupt_recovery_file_without_blocking_other_drafts() {
+        let dir = std::env::temp_dir().join(format!(
+            "semyra-draft-corrupt-{}-{}",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let bad_path = dir.join("recovery-100-bad.json");
+        let good_path = dir.join("recovery-101-good.json");
+        fs::write(&bad_path, b"{broken json").unwrap();
+        let good_bytes = serde_json::to_vec(&DraftSnapshot {
+            entries: vec![draft("valid draft")],
+        })
+        .unwrap();
+        fs::write(&good_path, good_bytes).unwrap();
+
+        let (mut store, recovered) = DraftStore::open(&dir).unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].content, "valid draft");
+        assert!(!bad_path.exists(), "corrupt recovery json should be moved aside");
+        assert!(dir.join("recovery-100-bad.json.corrupt").exists());
+        assert!(!dir.join("recovery-100-bad.lock").exists());
+
+        store.close(true);
+        drop(store);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn saving_empty_drafts_retains_lock_for_later_edits_until_close() {
+        let dir = std::env::temp_dir().join(format!(
+            "semyra-draft-retain-lock-{}-{}",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let (mut first, _) = DraftStore::open(&dir).unwrap();
+        first.save(1, vec![], false).unwrap();
+        first.save(2, vec![draft("live")], false).unwrap();
+
+        let (mut second, recovered) = DraftStore::open(&dir).unwrap();
+        assert!(
+            recovered.is_empty(),
+            "second window must not steal live draft after empty save"
+        );
+        second.close(false);
+        drop(second);
+
+        first.close(false);
+        let remaining: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            remaining.is_empty(),
+            "close() must remove both json and lock files, found: {remaining:?}"
+        );
+        drop(first);
         fs::remove_dir_all(dir).unwrap();
     }
 }

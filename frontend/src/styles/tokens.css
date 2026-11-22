@@ -54,6 +54,8 @@
   /* Semyra Status & Branding Accents */
   --semyra-unsaved-dot-light: #986c3d;
   --semyra-unsaved-dot-dark: #d0a774;
+  --semyra-warning-light: #8a5a18;
+  --semyra-warning-dark: #e5b567;
 
   /* Semyra Warm Beige Accent Nuance */
   --semyra-warm-neutral-light: #806b55;
@@ -96,6 +98,7 @@
   --color-warm-border: var(--semyra-warm-border-light);
   --color-teal-subtle: var(--semyra-teal-subtle-light);
   --color-unsaved-dot: var(--semyra-unsaved-dot-light);
+  --color-warning: var(--semyra-warning-light);
   --color-danger: var(--semyra-danger-light);
 
   /* Backwards-compatible mappings for existing CSS modules */
@@ -142,6 +145,7 @@
     --color-warm-bg: var(--semyra-warm-bg-dark);
     --color-warm-border: var(--semyra-warm-border-dark);
     --color-unsaved-dot: var(--semyra-unsaved-dot-dark);
+    --color-warning: var(--semyra-warning-dark);
     --color-danger: var(--semyra-danger-dark);
 
     --bg-chrome: var(--color-chrome);
@@ -184,6 +188,7 @@
     --color-warm-bg: light-dark(var(--semyra-warm-bg-light), var(--semyra-warm-bg-dark));
     --color-warm-border: light-dark(var(--semyra-warm-border-light), var(--semyra-warm-border-dark));
     --color-unsaved-dot: light-dark(var(--semyra-unsaved-dot-light), var(--semyra-unsaved-dot-dark));
+    --color-warning: light-dark(var(--semyra-warning-light), var(--semyra-warning-dark));
     --color-danger: light-dark(var(--semyra-danger-light), var(--semyra-danger-dark));
 
     --bg-chrome: var(--color-chrome);

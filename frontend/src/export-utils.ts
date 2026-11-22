@@ -36,11 +36,72 @@ export function renderDocument(
   return backend.renderMarkdown(`${fence}${language}\n${content}\n${fence}`, baseDir, docKey);
 }
 
+export interface ExportThemePalette {
+  bg: string;
+  fg: string;
+  muted: string;
+  border: string;
+  surface: string;
+  surfaceAlt: string;
+  cardBg: string;
+  accent: string;
+  warning: string;
+  syntax: {
+    comment: string;
+    keyword: string;
+    string: string;
+    constant: string;
+    func: string;
+    type: string;
+  };
+}
+
+export const EXPORT_THEME_PALETTES: Record<'light' | 'dark', ExportThemePalette> = {
+  light: {
+    bg: '#ffffff',
+    fg: '#202934',
+    muted: '#506173',
+    border: '#d6dde4',
+    surface: '#f3f5f7',
+    surfaceAlt: '#f0f3f6',
+    cardBg: '#f8fafc',
+    accent: '#426b91',
+    warning: '#986c3d',
+    syntax: {
+      comment: '#6e7781',
+      keyword: '#cf222e',
+      string: '#0a3069',
+      constant: '#0550ae',
+      func: '#8250df',
+      type: '#953800',
+    },
+  },
+  dark: {
+    bg: '#12161e',
+    fg: '#edf2f5',
+    muted: '#8292a2',
+    border: '#323e4d',
+    surface: '#1a212b',
+    surfaceAlt: '#222a35',
+    cardBg: '#1a212b',
+    accent: '#83a5c6',
+    warning: '#d0a774',
+    syntax: {
+      comment: '#8b949e',
+      keyword: '#ff7b72',
+      string: '#a5d6ff',
+      constant: '#79c0ff',
+      func: '#d2a8ff',
+      type: '#ffa657',
+    },
+  },
+};
+
 const ALERT_COLORS: Record<string, string> = {
-  'gfm-alert-note': '#426b91',
+  'gfm-alert-note': EXPORT_THEME_PALETTES.light.accent,
   'gfm-alert-tip': '#24756c',
-  'gfm-alert-important': '#8250df',
-  'gfm-alert-warning': '#986c3d',
+  'gfm-alert-important': EXPORT_THEME_PALETTES.light.syntax.func,
+  'gfm-alert-warning': EXPORT_THEME_PALETTES.light.warning,
   'gfm-alert-caution': '#c42b1c',
 };
 
@@ -210,48 +271,49 @@ export async function buildOfficeFriendlyHtml(
       );
     }
   }
+  const light = EXPORT_THEME_PALETTES.light;
   for (const card of clone.querySelectorAll<HTMLElement>('.frontmatter-card')) {
     card.setAttribute(
       'style',
-      'margin: 0 0 14px 0; border: 1px solid #d6dde4; border-radius: 6px; background-color: #f8fafc; font-size: 9.5pt;',
+      `margin: 0 0 14px 0; border: 1px solid ${light.border}; border-radius: 6px; background-color: ${light.cardBg}; font-size: 9.5pt;`,
     );
   }
   for (const chips of clone.querySelectorAll<HTMLElement>('.frontmatter-chips')) {
     chips.setAttribute(
       'style',
-      'display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; border-bottom: 1px solid #d6dde4;',
+      `display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; border-bottom: 1px solid ${light.border};`,
     );
   }
   for (const chip of clone.querySelectorAll<HTMLElement>('.frontmatter-chip')) {
     chip.setAttribute(
       'style',
-      'display: inline-block; border: 1px solid #d6dde4; border-radius: 4px; background-color: #ffffff; font-size: 9pt;',
+      `display: inline-block; border: 1px solid ${light.border}; border-radius: 4px; background-color: ${light.bg}; font-size: 9pt;`,
     );
   }
   for (const keyEl of clone.querySelectorAll<HTMLElement>('.frontmatter-chip-key')) {
     keyEl.setAttribute(
       'style',
-      'padding: 2px 6px; font-family: Cascadia Mono, Consolas, monospace; font-weight: 600; color: #506173; background-color: #f0f3f6; border-right: 1px solid #d6dde4;',
+      `padding: 2px 6px; font-family: Cascadia Mono, Consolas, monospace; font-weight: 600; color: ${light.muted}; background-color: ${light.surfaceAlt}; border-right: 1px solid ${light.border};`,
     );
   }
   for (const valEl of clone.querySelectorAll<HTMLElement>('.frontmatter-chip-val')) {
-    valEl.setAttribute('style', 'padding: 2px 7px; color: #202934;');
+    valEl.setAttribute('style', `padding: 2px 7px; color: ${light.fg};`);
   }
   for (const block of clone.querySelectorAll<HTMLElement>('.prompt-tag-block')) {
     block.setAttribute(
       'style',
-      'margin: 12px 0; border: 1px solid #d6dde4; border-left: 3px solid #426b91; border-radius: 6px; background-color: #f8fafc;',
+      `margin: 12px 0; border: 1px solid ${light.border}; border-left: 3px solid ${light.accent}; border-radius: 6px; background-color: ${light.cardBg};`,
     );
     const labelEl = block.querySelector<HTMLElement>('.prompt-tag-label');
     if (labelEl) {
       labelEl.setAttribute(
         'style',
-        'padding: 5px 12px; font-family: Cascadia Mono, Consolas, monospace; font-size: 9pt; font-weight: 600; color: #426b91; background-color: #f0f3f6; border-bottom: 1px solid #d6dde4;',
+        `padding: 5px 12px; font-family: Cascadia Mono, Consolas, monospace; font-size: 9pt; font-weight: 600; color: ${light.accent}; background-color: ${light.surfaceAlt}; border-bottom: 1px solid ${light.border};`,
       );
     }
     const bodyEl = block.querySelector<HTMLElement>('.prompt-tag-body');
     if (bodyEl) {
-      bodyEl.setAttribute('style', 'padding: 10px 14px; color: #202934;');
+      bodyEl.setAttribute('style', `padding: 10px 14px; color: ${light.fg};`);
     }
   }
 

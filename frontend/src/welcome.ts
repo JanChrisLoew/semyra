@@ -2,13 +2,13 @@ import { getLanguage, Language } from './i18n';
 
 export const WELCOME_MARKDOWN_DE = `# Willkommen bei Semyra 👋
 
-**Semyra** is your local Markdown editor for Windows 11. Edit the text on the left and see the preview on the right.
+**Semyra** ist dein lokaler Markdown-Editor für Windows 11. Bearbeite den Text links und sieh dir rechts direkt die Live-Vorschau an.
 
-## Share a project as context
+## Projekt als KI-Kontext teilen
 
-1. Open a project folder with **Ctrl + Shift + O**.
-2. Open two files in the Explorer, such as \`README.md\` and \`AGENTS.md\`, and check them in the preview.
-3. Press **Ctrl + Shift + P** to open the **Command Palette**, choose **Bundle AI Context**, select both files, and click **Copy Context**.
+1. Öffne einen Projektordner mit **Strg + Umschalt + O**.
+2. Öffne zwei Dateien im Explorer, zum Beispiel \`README.md\` und \`AGENTS.md\`, und prüfe sie in der Vorschau.
+3. Drücke **Strg + Umschalt + P** für die **Befehlspalette**, wähle **Teilen: KI-Kontext bündeln…**, markiere beide Dateien und klicke auf **Kontext kopieren**.
 
 > [!TIP]
 > Drücke **Strg + E** für die **Schnellauswahl** (Dateien & Verlauf) oder **Strg + Umschalt + P** für die **Befehlspalette**. Öffne Dateien über **Strg + O**, füge Screenshots per **Strg + V** ein oder ziehe Dateien & Bilder direkt per **Drag & Drop** ins Fenster!

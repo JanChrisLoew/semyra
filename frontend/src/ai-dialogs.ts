@@ -37,6 +37,7 @@ export interface ExternalDiffDialogDeps {
   localContent: string;
   onKeepLocal: (payload: FilePayload) => void;
   onReloadDisk: () => Promise<void>;
+  onError?: (err: unknown) => void;
 }
 
 export interface CompareDiffDialogOptions {
@@ -57,7 +58,7 @@ const TOKEN_BUDGET_PRESETS = [
   { value: 200000, label: '200k' },
 ] as const;
 
-function bindDialogReturnValueReset(dialog: HTMLDialogElement): void {
+export function bindDialogReturnValueReset(dialog: HTMLDialogElement): void {
   if (dialog.dataset.returnResetBound === '1') return;
   dialog.dataset.returnResetBound = '1';
   dialog.addEventListener('close', () => {
@@ -1092,5 +1093,6 @@ export async function openExternalDiffDialogModal(deps: ExternalDiffDialogDeps):
     });
   } catch (err) {
     console.error('Externer Diff konnte nicht geladen werden:', err);
+    deps.onError?.(err);
   }
 }

@@ -123,47 +123,127 @@ fn slugify(text: &str, counts: &mut HashMap<String, usize>) -> String {
     slug
 }
 
+fn is_ascii_drive_prefix(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'/' || bytes[2] == b'\\')
+}
+
+fn extract_explicit_scheme(raw: &str) -> Option<String> {
+    let mut scheme = String::new();
+    for ch in raw.chars() {
+        if ch.is_ascii_whitespace() || ch.is_ascii_control() {
+            continue;
+        }
+        if ch == ':' {
+            return (!scheme.is_empty()).then_some(scheme.to_ascii_lowercase());
+        }
+        if matches!(ch, '/' | '?' | '#') {
+            return None;
+        }
+        if scheme.len() < 32 {
+            scheme.push(ch);
+        }
+    }
+    None
+}
+
+fn sanitize_link_url(raw_url: &str) -> &str {
+    let trimmed = raw_url.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("/api/local-asset?") {
+        return trimmed;
+    }
+    if let Some(scheme) = extract_explicit_scheme(trimmed) {
+        if !matches!(scheme.as_str(), "http" | "https" | "mailto") {
+            return "#";
+        }
+    }
+    trimmed
+}
+
+fn encode_local_asset_path(path: &Path) -> String {
+    let path_str = path.to_string_lossy();
+    let encoded = utf8_percent_encode(&path_str, NON_ALPHANUMERIC).to_string();
+    format!("/api/local-asset?path={encoded}")
+}
+
+fn strip_query_and_fragment(url: &str) -> &str {
+    let before_frag = url.split('#').next().unwrap_or(url);
+    before_frag.split('?').next().unwrap_or(before_frag)
+}
+
 fn resolve_asset_url(raw_url: &str, base_dir: Option<&Path>) -> String {
     let trimmed = raw_url.trim();
     if trimmed.is_empty()
-        || trimmed.starts_with("http://")
-        || trimmed.starts_with("https://")
-        || trimmed.starts_with("data:")
-        || trimmed.starts_with("mailto:")
         || trimmed.starts_with('#')
+        || trimmed.get(..7).is_some_and(|s| s.eq_ignore_ascii_case("http://"))
+        || trimmed.get(..8).is_some_and(|s| s.eq_ignore_ascii_case("https://"))
+        || trimmed.get(..11).is_some_and(|s| s.eq_ignore_ascii_case("data:image/"))
+        || trimmed.get(..7).is_some_and(|s| s.eq_ignore_ascii_case("mailto:"))
+        || trimmed.starts_with("/api/local-asset?")
     {
         return trimmed.to_string();
     }
 
-    // Handle file:// or file:/// URLs
-    let stripped_file = trimmed
-        .strip_prefix("file:///")
-        .or_else(|| trimmed.strip_prefix("file://"));
-    if let Some(stripped) = stripped_file {
-        let normalized = stripped.replace('/', "\\");
-        let encoded = utf8_percent_encode(&normalized, NON_ALPHANUMERIC).to_string();
-        return format!("/api/local-asset?path={encoded}");
+    // Handle file:// or file:/// URLs (case-insensitive)
+    if trimmed.get(..7).is_some_and(|s| s.eq_ignore_ascii_case("file://")) {
+        let mut rest = &trimmed[7..];
+        let is_unc = if let Some(after_slash) = rest.strip_prefix('/') {
+            rest = after_slash;
+            false
+        } else if rest
+            .get(..10)
+            .is_some_and(|s| s.eq_ignore_ascii_case("localhost/"))
+        {
+            rest = &rest[10..];
+            false
+        } else {
+            !is_ascii_drive_prefix(rest)
+        };
+        let path_part = strip_query_and_fragment(rest);
+        let decoded = percent_encoding::percent_decode_str(path_part).decode_utf8_lossy();
+        let mut normalized = decoded.replace('/', "\\");
+        if is_unc && !normalized.starts_with(r"\\") {
+            normalized = format!(r"\\{normalized}");
+        }
+        return encode_local_asset_path(Path::new(&normalized));
     }
 
-    // Handle absolute paths (e.g. C:\... or C:/...) regardless of whether base_dir is present
-    let candidate = Path::new(trimmed);
+    let path_part = strip_query_and_fragment(trimmed);
+    let decoded = percent_encoding::percent_decode_str(path_part).decode_utf8_lossy();
+    let candidate = Path::new(decoded.as_ref());
     if candidate.is_absolute() {
-        let path_str = candidate.to_string_lossy();
-        let encoded = utf8_percent_encode(&path_str, NON_ALPHANUMERIC).to_string();
-        return format!("/api/local-asset?path={encoded}");
+        return encode_local_asset_path(candidate);
     }
 
     if let Some(dir) = base_dir {
         let full = dir.join(candidate);
-        let path_str = full.to_string_lossy();
-        let encoded = utf8_percent_encode(&path_str, NON_ALPHANUMERIC).to_string();
-        return format!("/api/local-asset?path={encoded}");
+        return encode_local_asset_path(&full);
+    }
+
+    if extract_explicit_scheme(trimmed).is_some() {
+        return "#".to_string();
     }
 
     trimmed.to_string()
 }
 
+const MAX_HIGHLIGHT_BYTES: usize = 128 * 1024;
+const MAX_HIGHLIGHT_LINE_CHARS: usize = 4_000;
+
 fn highlight_code(lang: &str, code: &str) -> String {
+    if code.len() > MAX_HIGHLIGHT_BYTES
+        || code
+            .lines()
+            .any(|line| line.len() > MAX_HIGHLIGHT_LINE_CHARS && line.chars().count() > MAX_HIGHLIGHT_LINE_CHARS)
+    {
+        let mut fallback = String::with_capacity(code.len() + 16);
+        escape_html(&mut fallback, code);
+        return fallback;
+    }
+
     let ss = syntax_set();
     let lower_lang = lang.to_ascii_lowercase();
     let token = match lower_lang.as_str() {
@@ -251,10 +331,20 @@ fn parse_frontmatter_chips(yaml: &str) -> Vec<(String, String)> {
         {
             continue;
         }
-        if (val.starts_with('"') && val.ends_with('"') && val.len() >= 2)
-            || (val.starts_with('\'') && val.ends_with('\'') && val.len() >= 2)
-        {
-            val = &val[1..val.len() - 1];
+        if val.starts_with('"') && val.len() >= 2 {
+            if let Some(end_q) = val[1..].find('"').map(|idx| idx + 1) {
+                let trailing = val[end_q + 1..].trim_start();
+                if trailing.is_empty() || trailing.starts_with('#') {
+                    val = &val[1..end_q];
+                }
+            }
+        } else if val.starts_with('\'') && val.len() >= 2 {
+            if let Some(end_q) = val[1..].find('\'').map(|idx| idx + 1) {
+                let trailing = val[end_q + 1..].trim_start();
+                if trailing.is_empty() || trailing.starts_with('#') {
+                    val = &val[1..end_q];
+                }
+            }
         } else if let Some(comment_idx) = val.find(" #").or_else(|| val.find("\t#")) {
             val = val[..comment_idx].trim_end();
         }
@@ -356,41 +446,78 @@ fn match_prompt_tag_open(line: &str) -> Option<(&'static str, Option<&str>)> {
                 .and_then(|s| s.strip_suffix(tag))
                 .and_then(|s| s.strip_suffix("</"))
             {
-                return Some((tag, Some(inner)));
+                let close_tag = format!("</{tag}>");
+                if !inner.contains(&close_tag) {
+                    return Some((tag, Some(inner)));
+                }
             }
         }
     }
     None
 }
 
-fn find_closing_prompt_tag(lines: &[LineSpan<'_>], open_idx: usize, tag: &str) -> Option<usize> {
+const MAX_PROMPT_TAG_DEPTH: usize = 16;
+
+fn compute_prompt_tag_matches(lines: &[LineSpan<'_>], start_idx: usize) -> Vec<Option<usize>> {
+    let mut matches = vec![None; lines.len()];
+    let mut stacks: [Vec<usize>; PROMPT_TAGS.len()] = Default::default();
     let mut fence: Option<(char, usize)> = None;
-    let mut depth = 1usize;
-    for (j, line) in lines.iter().enumerate().skip(open_idx + 1) {
+
+    for (idx, line) in lines.iter().enumerate().skip(start_idx) {
         let was_in_fence = fence.is_some();
         update_fence_state(line.text, &mut fence);
         if was_in_fence || fence.is_some() {
             continue;
         }
-        if line.text.starts_with('\t') || (line.text.len() - line.text.trim_start_matches(' ').len()) >= 4 {
+        if line.text.starts_with('\t')
+            || (line.text.len() - line.text.trim_start_matches(' ').len()) >= 4
+        {
             continue;
         }
         let trimmed = line.text.trim();
-        if trimmed.len() == tag.len() + 2
-            && trimmed.starts_with('<')
-            && trimmed.ends_with('>')
-            && &trimmed[1..trimmed.len() - 1] == tag
-        {
-            depth += 1;
-        } else if trimmed.len() == tag.len() + 3
-            && trimmed.starts_with("</")
-            && trimmed.ends_with('>')
-            && &trimmed[2..trimmed.len() - 1] == tag
-        {
-            depth -= 1;
-            if depth == 0 {
-                return Some(j);
+        if let Some((tag, None)) = match_prompt_tag_open(line.text) {
+            if let Some(tag_idx) = PROMPT_TAGS.iter().position(|&t| t == tag) {
+                stacks[tag_idx].push(idx);
             }
+        } else if let Some(inner_close) = trimmed.strip_prefix("</").and_then(|s| s.strip_suffix('>'))
+        {
+            if let Some(tag_idx) = PROMPT_TAGS.iter().position(|&t| t == inner_close) {
+                if let Some(open_idx) = stacks[tag_idx].pop() {
+                    matches[open_idx] = Some(idx);
+                }
+            }
+        }
+    }
+
+    matches
+}
+
+fn yaml_frontmatter_end_byte(src: &str) -> Option<usize> {
+    let first_nl = src.find('\n')?;
+    let mut pos = first_nl + 1;
+    let mut candidate_end = None;
+    while pos < src.len() {
+        let next_nl = src[pos..].find('\n').map(|idx| pos + idx);
+        let line_end = next_nl.unwrap_or(src.len());
+        let line_text = src[pos..line_end].strip_suffix('\r').unwrap_or(&src[pos..line_end]).trim();
+        if line_text == "---" || line_text == "..." {
+            candidate_end = Some(next_nl.map_or(src.len(), |nl| nl + 1));
+            break;
+        }
+        pos = match next_nl {
+            Some(nl) => nl + 1,
+            None => break,
+        };
+    }
+    let slice = &src[..candidate_end?];
+    let mut parser =
+        Parser::new_ext(slice, Options::ENABLE_YAML_STYLE_METADATA_BLOCKS).into_offset_iter();
+    if !matches!(parser.next(), Some((Event::Start(Tag::MetadataBlock(_)), _))) {
+        return None;
+    }
+    for (event, range) in parser {
+        if matches!(event, Event::End(TagEnd::MetadataBlock(_))) {
+            return Some(range.end);
         }
     }
     None
@@ -450,6 +577,7 @@ pub fn render_markdown(markdown: &str, base_dir: Option<&Path>) -> RenderResult 
         base_dir,
         0,
         true,
+        0,
         &mut outline,
         &mut slug_counts,
         &mut html,
@@ -467,16 +595,30 @@ pub fn render_markdown(markdown: &str, base_dir: Option<&Path>) -> RenderResult 
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_markdown_fragment(
     src: &str,
     base_dir: Option<&Path>,
     line_offset: usize,
     is_document_start: bool,
+    depth: usize,
     outline: &mut Vec<HeadingItem>,
     slug_counts: &mut HashMap<String, usize>,
     html: &mut String,
 ) {
     if src.is_empty() {
+        return;
+    }
+    if depth >= MAX_PROMPT_TAG_DEPTH {
+        render_markdown_pulldown(
+            src,
+            base_dir,
+            line_offset,
+            is_document_start,
+            outline,
+            slug_counts,
+            html,
+        );
         return;
     }
 
@@ -488,20 +630,14 @@ fn render_markdown_fragment(
 
     // Skip YAML frontmatter at document start so prompt tags inside comments/values aren't split
     if is_document_start && !lines.is_empty() && lines[0].text.trim() == "---" {
-        if let Some(end_idx) = lines
-            .iter()
-            .enumerate()
-            .skip(1)
-            .find(|(_, l)| {
-                let t = l.text.trim();
-                t == "---" || t == "..."
-            })
-            .map(|(idx, _)| idx)
-        {
-            i = end_idx + 1;
+        if let Some(meta_end) = yaml_frontmatter_end_byte(src) {
+            while i < lines.len() && lines[i].start < meta_end {
+                i += 1;
+            }
         }
     }
 
+    let closing_matches = compute_prompt_tag_matches(&lines, i);
     let mut fence: Option<(char, usize)> = None;
     while i < lines.len() {
         let was_in_fence = fence.is_some();
@@ -536,6 +672,7 @@ fn render_markdown_fragment(
                         base_dir,
                         abs_line - 1,
                         false,
+                        depth + 1,
                         outline,
                         slug_counts,
                         html,
@@ -549,7 +686,7 @@ fn render_markdown_fragment(
                 continue;
             }
 
-            if let Some(close_idx) = find_closing_prompt_tag(&lines, i, tag) {
+            if let Some(close_idx) = closing_matches[i] {
                 let before = &src[slice_start..lines[i].start];
                 if !before.is_empty() {
                     render_markdown_pulldown(
@@ -574,6 +711,7 @@ fn render_markdown_fragment(
                             base_dir,
                             line_offset + lines[i + 1].line_num - 1,
                             false,
+                            depth + 1,
                             outline,
                             slug_counts,
                             html,
@@ -635,7 +773,7 @@ fn render_markdown_pulldown(
     let mut in_heading: Option<(u8, usize, Option<String>, String, String)> = None; // (level, line, custom_id, plain_text, inner_html)
     let mut in_code_block: Option<(String, usize, String)> = None; // (lang, line, buffer)
     let mut in_metadata: Option<(usize, String)> = None; // (line, raw_yaml)
-    let mut in_image: Option<(String, String, String)> = None; // (resolved_src, title, alt_buffer)
+    let mut in_image: Option<(String, String, String, usize)> = None; // (resolved_src, title, alt_buffer, nested_depth)
     let mut table_alignments: Vec<Alignment> = Vec::new();
     let mut in_table_head = false;
     let mut current_cell_idx = 0usize;
@@ -676,10 +814,17 @@ fn render_markdown_pulldown(
             continue;
         }
 
-        // If inside an image tag, collect alt text until TagEnd::Image
-        if let Some((ref src, ref title, ref mut alt_buf)) = in_image {
+        // If inside an image tag, collect alt text until matching TagEnd::Image
+        if let Some((ref src, ref title, ref mut alt_buf, ref mut nested_depth)) = in_image {
             match event {
+                Event::Start(Tag::Image { .. }) => {
+                    *nested_depth += 1;
+                }
                 Event::End(TagEnd::Image) => {
+                    if *nested_depth > 0 {
+                        *nested_depth -= 1;
+                        continue;
+                    }
                     let target = if let Some((_, _, _, _, ref mut h_html)) = in_heading {
                         h_html
                     } else {
@@ -874,8 +1019,9 @@ fn render_markdown_pulldown(
                     } else {
                         &mut html
                     };
+                    let safe_href = sanitize_link_url(&dest_url);
                     target.push_str("<a href=\"");
-                    escape_html(target, &dest_url);
+                    escape_html(target, safe_href);
                     target.push('"');
                     if !title.is_empty() {
                         target.push_str(" title=\"");
@@ -888,7 +1034,7 @@ fn render_markdown_pulldown(
                     dest_url, title, ..
                 } => {
                     let resolved = resolve_asset_url(&dest_url, base_dir);
-                    in_image = Some((resolved, title.into_string(), String::new()));
+                    in_image = Some((resolved, title.into_string(), String::new(), 0));
                 }
                 Tag::FootnoteDefinition(name) => {
                     html.push_str(&format!(
@@ -913,8 +1059,14 @@ fn render_markdown_pulldown(
                     if let Some((lvl, h_line, custom_id, plain_text, inner_html)) =
                         in_heading.take()
                     {
-                        let slug = custom_id
-                            .unwrap_or_else(|| slugify(&plain_text, &mut slug_counts));
+                        let slug = match custom_id {
+                            Some(id) => {
+                                let count = slug_counts.entry(id.clone()).or_insert(0);
+                                *count += 1;
+                                id
+                            }
+                            None => slugify(&plain_text, &mut slug_counts),
+                        };
                         outline.push(HeadingItem {
                             level: lvl,
                             text: plain_text.trim().to_string(),
@@ -1063,11 +1215,16 @@ fn render_markdown_pulldown(
             }
 
             Event::FootnoteReference(name) => {
-                html.push_str("<sup class=\"footnote-ref\"><a href=\"#fn-");
-                escape_html(&mut html, &name);
-                html.push_str("\">[");
-                escape_html(&mut html, &name);
-                html.push_str("]</a></sup>");
+                let target = if let Some((_, _, _, _, ref mut h_html)) = in_heading {
+                    h_html
+                } else {
+                    &mut html
+                };
+                target.push_str("<sup class=\"footnote-ref\"><a href=\"#fn-");
+                escape_html(target, &name);
+                target.push_str("\">[");
+                escape_html(target, &name);
+                target.push_str("]</a></sup>");
             }
 
             Event::SoftBreak => {
@@ -1200,5 +1357,70 @@ mod tests {
         let res = render_markdown("<role>🦀äöü>\n\n<role>🦀äöü</role>\n", None);
         assert!(res.html.contains("data-prompt-tag=\"role\""));
         assert!(res.html.contains("🦀äöü"));
+    }
+
+    #[test]
+    fn hardens_links_prompt_depth_footnotes_and_asset_urls() {
+        // Unsafe link schemes neutralized while safe links and data:image/ remain intact
+        let links = render_markdown(
+            "[x](javascript:alert(1)) [y](java\tscript:alert(2)) [z](data:text/html,<script>1</script>) [f](file:///C:/secret.txt) [ok](https://example.com) ![bad](data:text/html,<script>1</script>) ![ok](data:image/png;base64,iVBORw==)",
+            None,
+        );
+        assert!(!links.html.contains("javascript:"));
+        assert!(!links.html.contains("data:text/html"));
+        assert!(!links.html.contains("file:///C:/secret.txt"));
+        assert!(links.html.contains("href=\"#\""));
+        assert!(links.html.contains("href=\"https://example.com\""));
+        assert!(links.html.contains("src=\"data:image/png;base64,iVBORw==\""));
+
+        // Deeply nested prompt tags cap safely without stack overflow
+        let deep = format!(
+            "{}\nhello\n{}",
+            "<role>\n".repeat(40),
+            "</role>\n".repeat(40)
+        );
+        let deep_res = render_markdown(&deep, None);
+        assert!(deep_res.html.contains("hello"));
+
+        // HR at line 0 does not swallow prompt tags before closing ---
+        let hr_doc = "---\n\n<role>\nInside\n</role>\n\n---";
+        let hr_res = render_markdown(hr_doc, None);
+        assert!(hr_res.html.contains("data-prompt-tag=\"role\""));
+
+        // Multiple inline prompt tags on one line don't merge into one prompt-tag-block
+        let multi_inline = render_markdown("<role>a</role> <role>b</role>", None);
+        assert!(!multi_inline.html.contains("data-prompt-tag"));
+
+        // Footnote inside heading renders inside <h1>
+        let fn_heading = render_markdown("# Titel[^1]\n\n[^1]: Note", None);
+        let h1_start = fn_heading.html.find("<h1 ").unwrap();
+        let fn_pos = fn_heading.html.find("class=\"footnote-ref\"").unwrap();
+        assert!(fn_pos > h1_start);
+
+        // Nested image inside alt text doesn't close outer image early
+        let nested_img = render_markdown("![outer ![inner](b.png)](a.png)", Some(Path::new(r"C:\Docs")));
+        assert_eq!(nested_img.html.matches("<img ").count(), 1);
+
+        // Frontmatter quoted value with inline comment and custom heading id collision avoidance
+        let fm = "---\ntitle: \"Demo\" # comment\n---\n\n# A {#dup}\n\n# dup\n";
+        let fm_res = render_markdown(fm, None);
+        assert!(fm_res.html.contains("<span class=\"frontmatter-chip-val\">Demo</span>"));
+        assert_eq!(fm_res.outline[0].slug, "dup");
+        assert_eq!(fm_res.outline[1].slug, "dup-1");
+
+        // Asset URL edge cases: case-insensitive schemes, passthrough, percent-decoding, query/frag, UNC
+        assert_eq!(resolve_asset_url("HTTPS://example.com/a.png", Some(Path::new(r"C:\Docs"))), "HTTPS://example.com/a.png");
+        assert_eq!(resolve_asset_url("/api/local-asset?path=abc", Some(Path::new(r"C:\Docs"))), "/api/local-asset?path=abc");
+        let space_img = resolve_asset_url("my%20img.png?v=1#dark", Some(Path::new(r"C:\Docs")));
+        assert!(!space_img.contains("%2520"));
+        assert!(!space_img.contains("dark"));
+        let unc = resolve_asset_url("file://server/share/img.png", None);
+        assert!(unc.starts_with("/api/local-asset?path=%5C%5Cserver"));
+
+        // Oversized code block skips syntect span expansion
+        let long_line = "a".repeat(MAX_HIGHLIGHT_LINE_CHARS + 50);
+        let highlighted = highlight_code("rust", &long_line);
+        assert!(!highlighted.contains("hl-"));
+        assert_eq!(highlighted.len(), long_line.len());
     }
 }

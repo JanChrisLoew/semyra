@@ -462,4 +462,40 @@ describe('WorkspaceSearchController', () => {
       [{ path: 'C:\\Projekte\\Notes\\A.md', contentVersion: 'a-v1' }],
     );
   });
+
+  it('disables replaceAllBtn immediately while the replace confirmation dialog is open', async () => {
+    const mockResults: SearchFileResult[] = [
+      {
+        path: 'C:\\Projekte\\Notes\\A.md',
+        relPath: 'A.md',
+        name: 'A.md',
+        occurrenceCount: 1,
+        matchingLines: 1,
+        contentVersion: 'a-v1',
+        matches: [{ line: 1, column: 1, preview: 'old text' }],
+      },
+    ];
+    vi.spyOn(backend, 'searchWorkspace').mockResolvedValue({ results: mockResults });
+    const dialog = document.createElement('dialog');
+    dialog.id = 'workspace-replace-dialog';
+    const msgEl = document.createElement('p');
+    msgEl.id = 'workspace-replace-dialog-msg';
+    dialog.appendChild(msgEl);
+    dialog.showModal = vi.fn();
+    document.body.appendChild(dialog);
+
+    const controller = createController();
+    searchInputEl.value = 'old';
+    await controller.runSearch();
+    expect(replaceAllBtn.disabled).toBe(false);
+
+    const replacing = controller.runReplaceAll();
+    expect(replaceAllBtn.disabled).toBe(true);
+
+    dialog.returnValue = 'cancel';
+    dialog.dispatchEvent(new Event('close'));
+    await replacing;
+    expect(replaceAllBtn.disabled).toBe(false);
+    dialog.remove();
+  });
 });

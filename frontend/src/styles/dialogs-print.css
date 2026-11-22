@@ -669,7 +669,7 @@ dialog.settings-dialog {
 }
 
 .status-lint-badge.is-warning {
-  color: light-dark(#8a5a18, #e5b567);
+  color: var(--color-warning);
 }
 
 .status-lint-badge.is-error {
@@ -1072,7 +1072,7 @@ dialog.modal-dialog.external-diff-dialog {
 }
 
 .diff-line-row.is-added {
-  background: light-dark(rgba(36, 117, 108, 0.14), rgba(99, 185, 172, 0.16));
+  background: color-mix(in srgb, var(--color-teal-subtle) 15%, transparent);
 }
 
 .diff-line-row.is-removed {
@@ -1157,7 +1157,7 @@ dialog.modal-dialog.external-diff-dialog {
   padding: 4px 10px;
   border-radius: var(--radius-sm);
   border: 1px dashed var(--border-subtle);
-  background: light-dark(rgba(66, 107, 145, 0.06), rgba(131, 165, 198, 0.08));
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
   color: var(--fg-secondary);
   font-family: var(--font-ui);
   font-size: 11.5px;
@@ -1165,7 +1165,7 @@ dialog.modal-dialog.external-diff-dialog {
 }
 
 .diff-collapsed-row:hover {
-  background: light-dark(rgba(66, 107, 145, 0.12), rgba(131, 165, 198, 0.15));
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
   color: var(--fg-primary);
 }
 
@@ -1183,8 +1183,8 @@ dialog.modal-dialog.external-diff-dialog {
 }
 
 .lint-issue-row.is-warning .lint-issue-severity {
-  background: light-dark(#fef0c7, #473212);
-  color: light-dark(#935300, #fec84b);
+  background: color-mix(in srgb, var(--color-warning) 16%, transparent);
+  color: var(--color-warning);
 }
 
 .lint-issue-line {
@@ -1235,6 +1235,24 @@ dialog.modal-dialog.external-diff-dialog {
 @media print {
   :root {
     color-scheme: light !important;
+    --color-canvas: #ffffff !important;
+    --color-chrome: #f3f5f7 !important;
+    --color-sidebar: #eaeff4 !important;
+    --color-surface: #ffffff !important;
+    --color-surface-raised: #f6f8fa !important;
+    --color-border: #d0d7de !important;
+    --color-text-primary: #181c24 !important;
+    --color-text-secondary: #4b5563 !important;
+    --color-text-muted: #59636e !important;
+    --color-text-inverse: #ffffff !important;
+    --color-accent: var(--semyra-accent-light) !important;
+    --color-accent-hover: var(--semyra-accent-hover-light) !important;
+    --color-accent-subtle: var(--semyra-accent-subtle-light) !important;
+    --color-accent-border: #afb8c1 !important;
+    --color-teal-subtle: var(--semyra-teal-subtle-light) !important;
+    --color-unsaved-dot: var(--semyra-unsaved-dot-light) !important;
+    --color-warning: var(--semyra-warning-light) !important;
+    --color-danger: var(--semyra-danger-light) !important;
     --bg-surface: #ffffff !important;
     --bg-subtle: #f6f8fa !important;
     --bg-elevated: #ffffff !important;
@@ -1271,6 +1289,10 @@ dialog.modal-dialog.external-diff-dialog {
   .status-toast,
   .drop-overlay,
   .copy-code-btn,
+  .mermaid-actions,
+  .preview-scroll-top-btn,
+  .preview-find-bar,
+  .format-expand-btn,
   .context-popover,
   dialog {
     display: none !important;

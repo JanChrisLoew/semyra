@@ -306,6 +306,7 @@
 }
 
 .recent-entry-row:hover .recent-remove-btn,
+.recent-entry-row:focus-within .recent-remove-btn,
 .recent-remove-btn:focus-visible {
   display: inline-flex;
 }
