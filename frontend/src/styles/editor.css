@@ -1,0 +1,853 @@
+/* ==========================================================================
+   Split Container, View Modes & CodeMirror 6 Host Styling
+   ========================================================================== */
+
+.split-container {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-surface);
+  container-name: split-view;
+  container-type: inline-size;
+}
+
+.editor-pane {
+  position: relative;
+  flex: 0 1 var(--split-ratio);
+  min-width: 220px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  container-type: inline-size;
+}
+
+/* Size-Aware Styling: Automatically collapse format button labels when editor pane width is constrained */
+@container (max-width: 760px) {
+  .format-buttons-scroll .fmt-btn .fmt-label {
+    display: none;
+  }
+  .format-buttons-scroll .fmt-btn {
+    padding: 0 6px;
+    min-width: 26px;
+    gap: 0;
+  }
+}
+
+/* Contextual Format Bar embedded in Editor Pane */
+.editor-format-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 8px;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  min-height: 32px;
+  gap: 4px;
+}
+
+.editor-format-bar.is-collapsed {
+  display: none !important;
+}
+
+.format-buttons-scroll {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex: 1;
+  min-width: 0;
+}
+
+.format-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  padding-left: 4px;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.format-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background-color 100ms ease, color 100ms ease;
+}
+
+.format-toggle-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+}
+
+.format-toggle-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.format-expand-btn {
+  /* In flow (not floating) so it never covers the first editor lines */
+  position: relative;
+  align-self: flex-end;
+  flex-shrink: 0;
+  margin: 4px 10px 2px 0;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--fg-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  opacity: 0.65;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.format-expand-btn[hidden] {
+  display: none !important;
+}
+
+.format-expand-btn:hover,
+.format-expand-btn:focus-visible {
+  opacity: 1;
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+}
+
+.format-expand-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.split-resizer {
+  position: relative;
+  width: 5px;
+  cursor: col-resize;
+  background: var(--border-subtle);
+  flex-shrink: 0;
+  touch-action: none;
+  transition: background-color 120ms ease;
+}
+
+/* Enlarged invisible hit zone around the thin splitter */
+.split-resizer::before {
+  content: '';
+  position: absolute;
+  inset: 0 -4px;
+}
+
+.split-container[data-orientation="horizontal"] .split-resizer::before {
+  inset: -4px 0;
+}
+
+.split-resizer:hover,
+.split-resizer:focus-visible,
+.split-resizer.is-dragging {
+  background: var(--accent);
+}
+
+.split-resizer:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.preview-pane {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 220px;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 28px 38px 64px 38px;
+  user-select: text;
+  container-type: scroll-state;
+}
+
+/* Floating "Back to Top" Pill (scroll-position-aware-elements) */
+.preview-scroll-top-btn {
+  position: sticky;
+  bottom: 24px;
+  float: right;
+  margin-top: -36px;
+  margin-right: 12px;
+  z-index: 25;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--fg-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(10px);
+  transition: opacity 180ms ease, transform 180ms ease, visibility 180ms ease, background-color 120ms ease, color 120ms ease;
+  pointer-events: none;
+}
+
+.preview-scroll-top-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.preview-pane.is-scrolled .preview-scroll-top-btn {
+  opacity: 0.92;
+  visibility: visible;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+@container scroll-state(scrollable: top) {
+  .preview-scroll-top-btn {
+    opacity: 0.92;
+    visibility: visible;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+}
+
+.preview-scroll-top-btn:hover {
+  opacity: 1;
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+  border-color: var(--border-strong);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+}
+
+/* Inline Find-in-Page bar for Preview-only mode */
+.preview-find-bar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  margin: -14px 0 16px auto;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+
+.preview-find-bar[hidden] {
+  display: none;
+}
+
+.preview-find-search {
+  display: flex;
+  align-items: center;
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.preview-find-input {
+  flex: 1 1 160px;
+  min-width: 0;
+  max-width: 100%;
+  height: 26px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--bg-surface);
+  color: var(--fg-primary);
+  font-size: 12.5px;
+  font-family: inherit;
+}
+
+.preview-find-input:focus {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
+
+.preview-find-count {
+  min-width: 38px;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--fg-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+mark.preview-find-match {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+mark.preview-find-match.is-current {
+  background: var(--accent);
+  color: var(--color-text-inverse);
+  outline: 1px solid var(--accent);
+}
+
+.goto-line-dialog {
+  width: min(360px, 92vw);
+}
+
+/* Horizontal Split Orientation */
+.split-container[data-orientation="horizontal"] {
+  flex-direction: column;
+}
+
+.split-container[data-orientation="horizontal"] .editor-pane {
+  flex: 0 1 var(--split-ratio);
+  width: auto;
+  min-width: 0;
+  min-height: 120px;
+}
+
+.split-container[data-orientation="horizontal"] .split-resizer {
+  width: auto;
+  height: 5px;
+  cursor: row-resize;
+}
+
+.split-container[data-orientation="horizontal"] .preview-pane {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 120px;
+  padding: 20px 32px 50px 32px;
+}
+
+/* Responsive auto-stacking when split container width is constrained (< 680px) in vertical split */
+@container split-view (max-width: 680px) {
+  .split-container:not([data-orientation="horizontal"]) {
+    flex-direction: column;
+  }
+
+  .split-container:not([data-orientation="horizontal"]) .editor-pane {
+    width: auto;
+    min-width: 0;
+    min-height: 120px;
+  }
+
+  .split-container:not([data-orientation="horizontal"]) .split-resizer {
+    width: auto;
+    height: 5px;
+    cursor: row-resize;
+  }
+
+  .split-container:not([data-orientation="horizontal"]) .split-resizer::before {
+    inset: -4px 0;
+  }
+
+  .split-container:not([data-orientation="horizontal"]) .preview-pane {
+    min-width: 0;
+    min-height: 120px;
+    padding: 20px 24px 48px 24px;
+  }
+}
+
+/* View Modes */
+.app-shell[data-view="editor"] .split-resizer,
+.app-shell[data-view="editor"] .preview-pane {
+  display: none;
+}
+.app-shell[data-view="editor"] .editor-pane {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+
+/* Optional centered text column in editor-only view (Alt+Umschalt+B); gutter and scrollbar stay at the edges */
+.app-shell[data-view="editor"][data-editor-width="centered"] .codemirror-host .cm-content {
+  max-width: 100ch;
+  margin-inline: auto;
+}
+
+/* Full Reading View Mode (Lesen) */
+.app-shell[data-view="preview"] .editor-pane,
+.app-shell[data-view="preview"] .split-resizer,
+.app-shell[data-view="preview"] .format-bar {
+  display: none;
+}
+.app-shell[data-view="preview"] .preview-pane {
+  width: 100%;
+  background: var(--bg-surface);
+  padding: 28px clamp(20px, 4vw, 56px) 64px;
+}
+.app-shell[data-view="preview"] .markdown-body {
+  max-width: none;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+}
+
+/* Optional centered reading sheet when "Zentrierte Textspalte" is enabled */
+.app-shell[data-view="preview"][data-editor-width="centered"] .preview-pane {
+  background: var(--bg-chrome);
+  padding: 36px 24px 96px 24px;
+}
+.app-shell[data-view="preview"][data-editor-width="centered"] .markdown-body {
+  max-width: 880px;
+  margin: 0 auto;
+  min-height: calc(100vh - 170px);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: clamp(28px, 4vw, 56px) clamp(24px, 5vw, 72px) 64px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+}
+
+@media (max-width: 768px) {
+  .app-shell[data-view="preview"][data-editor-width="centered"] .preview-pane {
+    padding: 12px 8px 60px 8px;
+  }
+  .app-shell[data-view="preview"][data-editor-width="centered"] .markdown-body {
+    padding: 24px 20px 40px 20px;
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+  }
+}
+
+/* Split-View Mode: flows seamlessly in right half */
+.app-shell[data-view="split"] .preview-pane {
+  background: var(--bg-surface);
+  padding: 28px clamp(20px, 3vw, 48px) 64px;
+}
+.app-shell[data-view="split"] .markdown-body {
+  max-width: none;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+}
+
+
+/* Zen Mode: Pure distraction-free writing canvas with smooth mouse-reveal top bar */
+.app-shell.is-zen .sidebar,
+.app-shell.is-zen .status-bar,
+.app-shell.is-zen .tabs-bar-row,
+.app-shell.is-zen .editor-format-bar {
+  display: none !important;
+}
+
+.app-shell.is-zen .top-chrome {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  transform: translateY(-100%);
+  opacity: 0;
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1), opacity 200ms ease;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* Invisible hover trigger strip at the very top of the window (20px active area) */
+.app-shell.is-zen .top-chrome::after {
+  content: '';
+  position: absolute;
+  bottom: -20px;
+  left: 0;
+  right: 0;
+  height: 22px;
+}
+
+.app-shell.is-zen .top-chrome:hover,
+.app-shell.is-zen .top-chrome:has(:popover-open) {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+/* Exit Zen Button (visible exclusively during Zen mode) */
+.exit-zen-btn {
+  display: none !important;
+}
+
+.app-shell.is-zen .exit-zen-btn {
+  display: inline-flex !important;
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: var(--bg-active);
+  font-weight: 500;
+}
+
+/* Zen Mode: Typography & Workspace */
+.app-shell.is-zen .workspace-area {
+  height: 100vh;
+}
+
+.app-shell.is-zen .editor-pane {
+  background: var(--bg-surface);
+}
+
+.app-shell.is-zen .codemirror-host .cm-scroller {
+  padding: 0;
+}
+
+.app-shell.is-zen .codemirror-host .cm-gutters {
+  opacity: 0.35;
+  border-right-color: transparent;
+  transition: opacity 160ms ease;
+}
+
+.app-shell.is-zen .codemirror-host .cm-gutters:hover {
+  opacity: 1;
+}
+
+/* Zen Mode: Full width by default without fixed cap */
+.app-shell.is-zen .codemirror-host .cm-content {
+  max-width: none;
+  margin-inline: 0;
+  padding: 36px 28px 240px;
+  font-size: calc(15px * var(--doc-zoom));
+  line-height: 1.8;
+}
+
+/* Centered writing column in Zen mode ONLY when "Zentrierte Textspalte" is enabled */
+.app-shell.is-zen[data-editor-width="centered"] .codemirror-host .cm-content {
+  max-width: 84ch;
+  margin-inline: auto;
+  padding: 48px 28px 240px;
+}
+
+.app-shell.is-zen[data-view="preview"] .preview-pane {
+  padding: 36px clamp(20px, 4vw, 56px) 180px;
+}
+
+.app-shell.is-zen[data-view="preview"] .markdown-body {
+  max-width: none;
+  margin-inline: 0;
+}
+
+.app-shell.is-zen[data-view="preview"][data-editor-width="centered"] .markdown-body {
+  max-width: 84ch;
+  margin-inline: auto;
+}
+
+/* CodeMirror 6 Host Styling */
+.codemirror-host {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+.codemirror-host .cm-editor {
+  height: 100%;
+  background: transparent;
+  color: var(--fg-primary);
+  font-size: calc(14.5px * var(--doc-zoom));
+}
+
+.codemirror-host .cm-editor.cm-focused {
+  outline: none;
+}
+
+.codemirror-host .cm-scroller {
+  font-family: var(--font-mono);
+  line-height: 1.65;
+  padding: 16px 0 48px 0;
+}
+
+.codemirror-host .cm-content {
+  padding: 0 18px;
+  caret-color: var(--fg-primary);
+}
+
+.codemirror-host .cm-cursor,
+.codemirror-host .cm-cursor-primary,
+.codemirror-host .cm-cursor-secondary {
+  border-left: 1.5px solid var(--fg-primary) !important;
+}
+
+.codemirror-host .cm-dropCursor {
+  border-left: 2px solid var(--accent) !important;
+}
+
+.codemirror-host .cm-gutters {
+  background: transparent;
+  border-right: 1px solid var(--border-subtle);
+  color: var(--fg-muted);
+  font-size: 12px;
+  padding-left: 6px;
+}
+
+.codemirror-host .cm-activeLine {
+  background: color-mix(in srgb, var(--fg-primary) 4%, transparent);
+}
+
+.codemirror-host .cm-activeLineGutter {
+  background: transparent;
+  color: var(--fg-primary);
+  font-weight: 600;
+}
+
+.codemirror-host .cm-selectionBackground,
+.codemirror-host .cm-editor.cm-focused .cm-selectionBackground {
+  background: color-mix(in srgb, var(--accent) 24%, transparent) !important;
+}
+
+/* Code Folding Gutter & Placeholder */
+.codemirror-host .cm-foldGutter .cm-gutterElement {
+  padding: 0 4px;
+  cursor: pointer;
+  color: var(--fg-muted);
+  user-select: none;
+  transition: color 120ms ease;
+}
+
+.codemirror-host .cm-foldGutter .cm-gutterElement:hover {
+  color: var(--fg-primary);
+}
+
+.codemirror-host .cm-foldPlaceholder {
+  background: var(--bg-active);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 0 6px;
+  margin: 0 4px;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+/* Windows 11 Fluent Search & Replace Panel (Strg+F / Strg+H) */
+.codemirror-host .cm-panels {
+  background: var(--bg-elevated);
+  color: var(--fg-primary);
+  border-bottom: 1px solid var(--border-subtle);
+  font-family: var(--font-ui);
+  z-index: 5;
+}
+
+.codemirror-host .cm-panels.cm-panels-top {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.codemirror-host .cm-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 8px 34px 8px 12px;
+  font-size: 12.5px;
+  position: relative;
+}
+
+.codemirror-host .cm-search input.cm-textfield {
+  height: 28px;
+  padding: 0 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-subtle);
+  color: var(--fg-primary);
+  font-family: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+
+.codemirror-host .cm-search input.cm-textfield:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.codemirror-host .cm-search button.cm-button {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-subtle);
+  background-image: none;
+  color: var(--fg-primary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-transform: none;
+}
+
+.codemirror-host .cm-search button.cm-button:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.codemirror-host .cm-search button.cm-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.codemirror-host .cm-search label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.codemirror-host .cm-search label input[type="checkbox"] {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.codemirror-host .cm-panel button[name="close"] {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  border: 0;
+  background: transparent;
+  color: var(--fg-secondary);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.codemirror-host .cm-panel button[name="close"]:hover {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+}
+
+/* ==========================================================================
+   Fluent Popover: Detailed Document Statistics
+   ========================================================================== */
+
+.doc-stats-popover {
+  position: fixed;
+  bottom: 34px;
+  right: 18px;
+  margin: 0;
+  padding: 16px 18px;
+  width: 320px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  color: var(--fg-primary);
+  font-family: inherit;
+  z-index: 1000;
+}
+
+.doc-stats-popover::backdrop {
+  background: transparent;
+}
+
+.doc-stats-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.doc-stats-header h3 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--fg-primary);
+}
+
+.doc-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.doc-stat-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.doc-stat-card.full-width {
+  grid-column: span 2;
+}
+
+.doc-stat-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--fg-muted);
+  font-weight: 500;
+  margin-bottom: 3px;
+}
+
+.doc-stat-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg-primary);
+}
+
+.doc-stat-sub {
+  font-size: 10.5px;
+  color: var(--fg-secondary);
+  margin-top: 2px;
+}
+
+.doc-stat-flex {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.doc-stat-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+}
+
+.doc-stat-badge.accent {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+
+.doc-stat-grade {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--fg-secondary);
+}
+
+.doc-stat-desc {
+  font-size: 10px;
+  color: var(--fg-muted);
+}

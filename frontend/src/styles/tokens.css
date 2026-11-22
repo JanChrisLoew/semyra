@@ -1,0 +1,313 @@
+/* ==========================================================================
+   Semyra – Design Tokens, Color Scheme, Scrollbars & Base Accessibility
+   Harmonized Design System (Midnight / Slate Dark · Pure White / Slate Light)
+   ========================================================================== */
+
+:root {
+  /* --- Semyra Canonical Theme Tokens (Midnight · Slate · Steel · Ice White · Steel Blue · Warm Beige) --- */
+  --semyra-canvas-light: #ffffff;
+  --semyra-canvas-dark: #12161e;
+
+  --semyra-chrome-light: #f3f5f7;
+  --semyra-chrome-dark: #161b24;
+
+  --semyra-sidebar-light: #eaeff4;
+  --semyra-sidebar-dark: #1a212b;
+
+  --semyra-surface-light: #ffffff;
+  --semyra-surface-dark: #202935;
+
+  --semyra-surface-raised-light: #f0f3f6;
+  --semyra-surface-raised-dark: #273240;
+
+  --semyra-border-light: #d6dde4;
+  --semyra-border-dark: #323e4d;
+
+  --semyra-text-primary-light: #202934;
+  --semyra-text-primary-dark: #edf2f5;
+
+  --semyra-text-secondary-light: #506173;
+  --semyra-text-secondary-dark: #a2b1c0;
+
+  --semyra-text-muted-light: #596b7d;
+  --semyra-text-muted-dark: #8d9dad;
+
+  --semyra-text-inverse-light: #ffffff;
+  --semyra-text-inverse-dark: #12161e;
+
+  /* Primary Interaction Accent: Steel Blue */
+  --semyra-accent-light: #426b91;
+  --semyra-accent-dark: #83a5c6;
+
+  --semyra-accent-hover-light: #345b7e;
+  --semyra-accent-hover-dark: #9db8d2;
+
+  --semyra-accent-subtle-light: #e4edf5;
+  --semyra-accent-subtle-dark: #223344;
+
+  --semyra-accent-border-light: #9ab3c7;
+  --semyra-accent-border-dark: #55738e;
+
+  --semyra-focus-ring-light: #426b91;
+  --semyra-focus-ring-dark: #83a5c6;
+
+  /* Semyra Status & Branding Accents */
+  --semyra-unsaved-dot-light: #986c3d;
+  --semyra-unsaved-dot-dark: #d0a774;
+  --semyra-warning-light: #8a5a18;
+  --semyra-warning-dark: #e5b567;
+
+  /* Semyra Warm Beige Accent Nuance */
+  --semyra-warm-neutral-light: #806b55;
+  --semyra-warm-neutral-dark: #d5c7b5;
+
+  --semyra-warm-bg-light: rgba(199, 184, 165, 0.20);
+  --semyra-warm-bg-dark: rgba(213, 199, 181, 0.12);
+
+  --semyra-warm-border-light: rgba(180, 160, 138, 0.45);
+  --semyra-warm-border-dark: rgba(213, 199, 181, 0.32);
+
+  /* Sparingly used functional nuances */
+  --semyra-teal-subtle-light: #24756c;
+  --semyra-teal-subtle-dark: #63b9ac;
+
+  --semyra-danger-light: #c42b1c;
+  --semyra-danger-dark: #ff99a4;
+
+  --semyra-scrollbar-thumb-light: rgba(80, 97, 115, 0.4);
+  --semyra-scrollbar-thumb-dark: rgba(138, 154, 169, 0.35);
+
+  /* Fallback defaults for browsers without light-dark() (Light by default) */
+  --color-canvas: var(--semyra-canvas-light);
+  --color-chrome: var(--semyra-chrome-light);
+  --color-sidebar: var(--semyra-sidebar-light);
+  --color-surface: var(--semyra-surface-light);
+  --color-surface-raised: var(--semyra-surface-raised-light);
+  --color-border: var(--semyra-border-light);
+  --color-text-primary: var(--semyra-text-primary-light);
+  --color-text-secondary: var(--semyra-text-secondary-light);
+  --color-text-muted: var(--semyra-text-muted-light);
+  --color-text-inverse: var(--semyra-text-inverse-light);
+  --color-accent: var(--semyra-accent-light);
+  --color-accent-hover: var(--semyra-accent-hover-light);
+  --color-accent-subtle: var(--semyra-accent-subtle-light);
+  --color-accent-border: var(--semyra-accent-border-light);
+  --color-focus-ring: var(--semyra-focus-ring-light);
+  --color-warm-neutral: var(--semyra-warm-neutral-light);
+  --color-warm-bg: var(--semyra-warm-bg-light);
+  --color-warm-border: var(--semyra-warm-border-light);
+  --color-teal-subtle: var(--semyra-teal-subtle-light);
+  --color-unsaved-dot: var(--semyra-unsaved-dot-light);
+  --color-warning: var(--semyra-warning-light);
+  --color-danger: var(--semyra-danger-light);
+
+  /* Backwards-compatible mappings for existing CSS modules */
+  --bg-chrome: var(--color-chrome);
+  --bg-sidebar: var(--color-sidebar);
+  --bg-surface: var(--color-canvas);
+  --bg-elevated: var(--color-surface);
+  --bg-subtle: var(--color-surface-raised);
+  --bg-hover: rgba(32, 41, 52, 0.06);
+  --bg-active: var(--color-accent-subtle);
+  --fg-primary: var(--color-text-primary);
+  --fg-secondary: var(--color-text-secondary);
+  --fg-muted: var(--color-text-muted);
+  --border-subtle: var(--color-border);
+  --border-strong: var(--color-accent-border);
+  --accent: var(--color-accent);
+  --accent-hover: var(--color-accent-hover);
+  --accent-fg: var(--color-text-inverse);
+  --danger: var(--color-danger);
+  --warm-neutral: var(--color-warm-neutral);
+  --warm-bg: var(--color-warm-bg);
+  --warm-border: var(--color-warm-border);
+  --scrollbar-thumb: var(--semyra-scrollbar-thumb-light);
+  --scrollbar-track: transparent;
+
+  @media (prefers-color-scheme: dark) {
+    --color-canvas: var(--semyra-canvas-dark);
+    --color-chrome: var(--semyra-chrome-dark);
+    --color-sidebar: var(--semyra-sidebar-dark);
+    --color-surface: var(--semyra-surface-dark);
+    --color-surface-raised: var(--semyra-surface-raised-dark);
+    --color-border: var(--semyra-border-dark);
+    --color-text-primary: var(--semyra-text-primary-dark);
+    --color-text-secondary: var(--semyra-text-secondary-dark);
+    --color-text-muted: var(--semyra-text-muted-dark);
+    --color-text-inverse: var(--semyra-text-inverse-dark);
+    --color-accent: var(--semyra-accent-dark);
+    --color-accent-hover: var(--semyra-accent-hover-dark);
+    --color-accent-subtle: var(--semyra-accent-subtle-dark);
+    --color-accent-border: var(--semyra-accent-border-dark);
+    --color-focus-ring: var(--semyra-focus-ring-dark);
+    --color-teal-subtle: var(--semyra-teal-subtle-dark);
+    --color-warm-neutral: var(--semyra-warm-neutral-dark);
+    --color-warm-bg: var(--semyra-warm-bg-dark);
+    --color-warm-border: var(--semyra-warm-border-dark);
+    --color-unsaved-dot: var(--semyra-unsaved-dot-dark);
+    --color-warning: var(--semyra-warning-dark);
+    --color-danger: var(--semyra-danger-dark);
+
+    --bg-chrome: var(--color-chrome);
+    --bg-sidebar: var(--color-sidebar);
+    --bg-surface: var(--color-canvas);
+    --bg-elevated: var(--color-surface);
+    --bg-subtle: var(--color-surface-raised);
+    --bg-hover: rgba(238, 243, 247, 0.07);
+    --bg-active: var(--color-accent-subtle);
+    --fg-primary: var(--color-text-primary);
+    --fg-secondary: var(--color-text-secondary);
+    --fg-muted: var(--color-text-muted);
+    --border-subtle: var(--color-border);
+    --border-strong: var(--color-accent-border);
+    --accent: var(--color-accent);
+    --accent-hover: var(--color-accent-hover);
+    --accent-fg: var(--color-text-inverse);
+    --danger: var(--color-danger);
+    --scrollbar-thumb: var(--semyra-scrollbar-thumb-dark);
+  }
+
+  @supports (color: light-dark(white, black)) {
+    --color-canvas: light-dark(var(--semyra-canvas-light), var(--semyra-canvas-dark));
+    --color-chrome: light-dark(var(--semyra-chrome-light), var(--semyra-chrome-dark));
+    --color-sidebar: light-dark(var(--semyra-sidebar-light), var(--semyra-sidebar-dark));
+    --color-surface: light-dark(var(--semyra-surface-light), var(--semyra-surface-dark));
+    --color-surface-raised: light-dark(var(--semyra-surface-raised-light), var(--semyra-surface-raised-dark));
+    --color-border: light-dark(var(--semyra-border-light), var(--semyra-border-dark));
+    --color-text-primary: light-dark(var(--semyra-text-primary-light), var(--semyra-text-primary-dark));
+    --color-text-secondary: light-dark(var(--semyra-text-secondary-light), var(--semyra-text-secondary-dark));
+    --color-text-muted: light-dark(var(--semyra-text-muted-light), var(--semyra-text-muted-dark));
+    --color-text-inverse: light-dark(var(--semyra-text-inverse-light), var(--semyra-text-inverse-dark));
+    --color-accent: light-dark(var(--semyra-accent-light), var(--semyra-accent-dark));
+    --color-accent-hover: light-dark(var(--semyra-accent-hover-light), var(--semyra-accent-hover-dark));
+    --color-accent-subtle: light-dark(var(--semyra-accent-subtle-light), var(--semyra-accent-subtle-dark));
+    --color-accent-border: light-dark(var(--semyra-accent-border-light), var(--semyra-accent-border-dark));
+    --color-focus-ring: light-dark(var(--semyra-focus-ring-light), var(--semyra-focus-ring-dark));
+    --color-teal-subtle: light-dark(var(--semyra-teal-subtle-light), var(--semyra-teal-subtle-dark));
+    --color-warm-neutral: light-dark(var(--semyra-warm-neutral-light), var(--semyra-warm-neutral-dark));
+    --color-warm-bg: light-dark(var(--semyra-warm-bg-light), var(--semyra-warm-bg-dark));
+    --color-warm-border: light-dark(var(--semyra-warm-border-light), var(--semyra-warm-border-dark));
+    --color-unsaved-dot: light-dark(var(--semyra-unsaved-dot-light), var(--semyra-unsaved-dot-dark));
+    --color-warning: light-dark(var(--semyra-warning-light), var(--semyra-warning-dark));
+    --color-danger: light-dark(var(--semyra-danger-light), var(--semyra-danger-dark));
+
+    --bg-chrome: var(--color-chrome);
+    --bg-sidebar: var(--color-sidebar);
+    --bg-surface: var(--color-canvas);
+    --bg-elevated: var(--color-surface);
+    --bg-subtle: var(--color-surface-raised);
+    --bg-hover: light-dark(rgba(32, 41, 52, 0.06), rgba(238, 243, 247, 0.07));
+    --bg-active: var(--color-accent-subtle);
+    --fg-primary: var(--color-text-primary);
+    --fg-secondary: var(--color-text-secondary);
+    --fg-muted: var(--color-text-muted);
+    --border-subtle: var(--color-border);
+    --border-strong: var(--color-accent-border);
+    --accent: var(--color-accent);
+    --accent-hover: var(--color-accent-hover);
+    --accent-fg: var(--color-text-inverse);
+    --danger: var(--color-danger);
+    --scrollbar-thumb: light-dark(var(--semyra-scrollbar-thumb-light), var(--semyra-scrollbar-thumb-dark));
+    --scrollbar-track: transparent;
+  }
+
+  /* MANDATORY: Apply color-scheme to :root and reflect <meta name="color-scheme"> override */
+  color-scheme: light dark;
+  accent-color: var(--accent);
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+
+  &:has(> head > meta[name="color-scheme"][content="dark"]) {
+    color-scheme: dark;
+  }
+  &:has(> head > meta[name="color-scheme"][content="light"]) {
+    color-scheme: light;
+  }
+
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "Cascadia Code", "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 11px;
+  --hit-target-min: 24px;
+  --split-ratio: 50%;
+  --doc-zoom: 1;
+}
+
+/* Theme toggle icon visibility without JS dependency */
+.theme-opt-to-light {
+  display: none;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not(:has(> head > meta[name="color-scheme"][content="light"])) .theme-opt-to-dark {
+    display: none;
+  }
+  :root:not(:has(> head > meta[name="color-scheme"][content="light"])) .theme-opt-to-light {
+    display: inline-flex;
+  }
+}
+:root:has(> head > meta[name="color-scheme"][content="dark"]) .theme-opt-to-dark {
+  display: none;
+}
+:root:has(> head > meta[name="color-scheme"][content="dark"]) .theme-opt-to-light {
+  display: inline-flex;
+}
+
+/* Standard Scrollbar Styling (do NOT transition scrollbar-color) */
+.scroller,
+.cm-scroller {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+@supports not (scrollbar-color: auto) {
+  .scroller::-webkit-scrollbar,
+  .cm-scroller::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  .scroller::-webkit-scrollbar-thumb,
+  .cm-scroller::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 5px;
+  }
+  .scroller::-webkit-scrollbar-track,
+  .cm-scroller::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  color: var(--fg-primary);
+  background: var(--bg-surface);
+  user-select: none;
+}
+
+.visually-hidden:where(:not(:focus-within, :active)),
+.sr-only {
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+/* Global High-Contrast Focus Ring */
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 1px;
+}

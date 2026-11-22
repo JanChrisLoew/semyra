@@ -1,0 +1,75 @@
+# Rust / Cargo Build-Artefakte
+/target/
+**/*.rs.bk
+*.pdb
+
+# Frontend Abhängigkeiten & Build-Bundle
+node_modules/
+/frontend/node_modules/
+dist/
+/frontend/dist/
+.vite/
+/frontend/.vite/
+
+# Test-Artefakte & Coverage
+test-results/
+/frontend/test-results/
+playwright-report/
+/frontend/playwright-report/
+blob-report/
+/frontend/blob-report/
+playwright/.cache/
+/frontend/playwright/.cache/
+*-report.json
+/frontend/*-report.json
+coverage/
+/frontend/coverage/
+.nyc_output/
+
+# Logs & Package Manager Debugs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-debug.log*
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+
+# Lokale Umgebungs- & Geheimdateien
+.env
+.env.*
+!.env.example
+
+# Windows & OS Metadaten
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msm
+*.msp
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Editor & IDE Metadaten
+.vs/
+.idea/
+*.suo
+*.user
+*.userosv
+*.sln.docstates
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Lokale Agenten- & Arbeitsdokumente (nicht für das öffentliche Repository)
+/AGENTS.md
+/.agents/
+/WORK_LOG.md
+/docs/

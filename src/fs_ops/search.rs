@@ -1,0 +1,1074 @@
+use super::encoding::{decode_text_bytes, replace_text_file};
+use super::{
+    clean_windows_path, is_markdown_path, is_supported_text_path, normalize_existing_path,
+    visit_filtered_dir_entries,
+};
+use regex::{NoExpand, Regex, RegexBuilder};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+
+const MAX_SEARCH_FILES: usize = 3_500;
+const MAX_SEARCH_FILE_BYTES: u64 = 5 * 1024 * 1024;
+const MAX_SEARCH_GENERATION_ROOTS: usize = 64;
+
+static SEARCH_GENERATIONS: OnceLock<Mutex<HashMap<PathBuf, u64>>> = OnceLock::new();
+static NEXT_SEARCH_TOKEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn begin_search_generation(root: &Path) -> u64 {
+    let map = SEARCH_GENERATIONS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = map.lock().unwrap_or_else(|e| e.into_inner());
+    if !guard.contains_key(root) && guard.len() >= MAX_SEARCH_GENERATION_ROOTS {
+        if let Some(oldest) = guard
+            .iter()
+            .min_by_key(|(_, &token)| token)
+            .map(|(k, _)| k.clone())
+        {
+            guard.remove(&oldest);
+        }
+    }
+    let token = NEXT_SEARCH_TOKEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    guard.insert(root.to_path_buf(), token);
+    token
+}
+
+fn is_search_superseded(root: &Path, token: u64) -> bool {
+    let map = SEARCH_GENERATIONS.get_or_init(|| Mutex::new(HashMap::new()));
+    let guard = map.lock().unwrap_or_else(|e| e.into_inner());
+    guard.get(root).is_some_and(|&latest| latest > token)
+}
+
+fn build_literal_ci_regex(query: &str) -> Option<Regex> {
+    RegexBuilder::new(&regex::escape(query))
+        .case_insensitive(true)
+        .build()
+        .ok()
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchMatchItem {
+    pub line: usize,
+    pub column: usize,
+    pub preview: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchFileResult {
+    pub path: String,
+    pub name: String,
+    pub rel_path: String,
+    pub matches: Vec<SearchMatchItem>,
+    pub occurrence_count: usize,
+    pub matching_lines: usize,
+    pub content_version: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchWorkspaceOutcome {
+    pub results: Vec<SearchFileResult>,
+    pub truncated: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub enum ReplaceTarget {
+    Versioned {
+        path: String,
+        #[serde(rename = "contentVersion")]
+        content_version: String,
+    },
+    Path(String),
+}
+
+fn content_version(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn build_search_regex(
+    query: &str,
+    case_sensitive: bool,
+    use_regex: bool,
+    whole_word: bool,
+) -> Result<Option<Regex>, String> {
+    if !use_regex && !whole_word {
+        return Ok(None);
+    }
+
+    if use_regex && !whole_word {
+        return RegexBuilder::new(query)
+            .case_insensitive(!case_sensitive)
+            .multi_line(true)
+            .build()
+            .map(Some)
+            .map_err(|err| format!("Ungültiger regulärer Ausdruck: {err}"));
+    }
+
+    if use_regex {
+        // Validate the user pattern first so syntax errors report against the original input.
+        if let Err(err) = RegexBuilder::new(query)
+            .case_insensitive(!case_sensitive)
+            .multi_line(true)
+            .build()
+        {
+            return Err(format!("Ungültiger regulärer Ausdruck: {err}"));
+        }
+    }
+
+    let pattern = if use_regex {
+        format!(r"\b(?:{query})\b")
+    } else {
+        format!(r"\b(?:{})\b", regex::escape(query))
+    };
+
+    RegexBuilder::new(&pattern)
+        .case_insensitive(!case_sensitive)
+        .multi_line(true)
+        .build()
+        .map(Some)
+        .map_err(|err| format!("Ungültiger regulärer Ausdruck: {err}"))
+}
+
+#[cfg(test)]
+pub fn search_workspace_files(
+    root: &Path,
+    query: &str,
+    case_sensitive: bool,
+) -> Result<Vec<SearchFileResult>, String> {
+    search_workspace_with_options(root, query, case_sensitive, false, false)
+}
+
+#[cfg(test)]
+pub fn search_workspace_with_options(
+    root: &Path,
+    query: &str,
+    case_sensitive: bool,
+    use_regex: bool,
+    whole_word: bool,
+) -> Result<Vec<SearchFileResult>, String> {
+    search_workspace_with_metadata(root, query, case_sensitive, use_regex, whole_word)
+        .map(|outcome| outcome.results)
+}
+
+pub fn search_workspace_with_metadata(
+    root: &Path,
+    query: &str,
+    case_sensitive: bool,
+    use_regex: bool,
+    whole_word: bool,
+) -> Result<SearchWorkspaceOutcome, String> {
+    search_workspace_with_limit(
+        root,
+        query,
+        case_sensitive,
+        use_regex,
+        whole_word,
+        MAX_SEARCH_FILES,
+    )
+}
+
+fn search_workspace_with_limit(
+    root: &Path,
+    query: &str,
+    case_sensitive: bool,
+    use_regex: bool,
+    whole_word: bool,
+    max_files: usize,
+) -> Result<SearchWorkspaceOutcome, String> {
+    const MAX_PREVIEW_LINES: usize = 300;
+    const MAX_PREVIEW_LINES_PER_FILE: usize = 40;
+
+    let active_query = if use_regex { query } else { query.trim() };
+    if active_query.is_empty() {
+        return Ok(SearchWorkspaceOutcome {
+            results: Vec::new(),
+            truncated: false,
+        });
+    }
+    let norm_root = normalize_existing_path(root);
+    if !norm_root.is_dir() {
+        return Err("Ungültiger Arbeitsordner.".to_string());
+    }
+
+    let compiled_regex = build_search_regex(active_query, case_sensitive, use_regex, whole_word)?;
+    let literal_ci_regex = if compiled_regex.is_none() && !case_sensitive {
+        build_literal_ci_regex(active_query)
+    } else {
+        None
+    };
+
+    let search_token = begin_search_generation(&norm_root);
+
+    let mut scan = WorkspaceScan::default();
+    scan.collect_files_with_limit(&norm_root, 0, max_files);
+    let truncated = scan.truncated;
+
+    let mut results = Vec::new();
+    let mut preview_lines = 0usize;
+
+    for file_path in scan.files {
+        if is_search_superseded(&norm_root, search_token) {
+            return Ok(SearchWorkspaceOutcome {
+                results: Vec::new(),
+                truncated: false,
+            });
+        }
+        let norm = normalize_existing_path(&file_path);
+        if !norm.starts_with(&norm_root) {
+            continue;
+        }
+        if let Ok(meta) = fs::metadata(&norm) {
+            if meta.len() > MAX_SEARCH_FILE_BYTES {
+                continue;
+            }
+        }
+        let Ok(bytes) = fs::read(&norm) else {
+            continue;
+        };
+        let (content, _) = decode_text_bytes(&bytes);
+
+        let text = search_text(&content, compiled_regex.is_some());
+        let preview_limit = MAX_PREVIEW_LINES_PER_FILE.min(MAX_PREVIEW_LINES - preview_lines);
+        let mut file_matches = Vec::new();
+        let mut occurrence_count = 0;
+        let mut matching_lines = 0;
+        let mut line = 1;
+        let mut start = 0;
+        let mut end = text.find('\n').unwrap_or(text.len());
+        let mut previous_match_line = 0;
+        let mut record = |offset: usize| {
+            occurrence_count += 1;
+            while offset > end {
+                line += 1;
+                start = end + 1;
+                end = text[start..].find('\n').map_or(text.len(), |pos| start + pos);
+            }
+            if previous_match_line == line {
+                return;
+            }
+            previous_match_line = line;
+            matching_lines += 1;
+            if file_matches.len() < preview_limit {
+                file_matches.push(SearchMatchItem {
+                    line,
+                    column: text[start..offset].chars().count() + 1,
+                    preview: text[start..end].trim().chars().take(140).collect(),
+                });
+            }
+        };
+        if let Some(re) = &compiled_regex {
+            for found in re.find_iter(&text) {
+                record(found.start());
+            }
+        } else {
+            visit_literal_matches(
+                &text,
+                active_query,
+                case_sensitive,
+                literal_ci_regex.as_ref(),
+                |from, _| record(from),
+            );
+        }
+        preview_lines += file_matches.len();
+
+        if occurrence_count > 0 {
+            let rel_path = norm
+                .strip_prefix(&norm_root)
+                .unwrap_or(&norm)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let name = norm
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("Datei.md")
+                .to_string();
+            results.push(SearchFileResult {
+                path: norm.to_string_lossy().into_owned(),
+                name,
+                rel_path,
+                matches: file_matches,
+                occurrence_count,
+                matching_lines,
+                content_version: content_version(&bytes),
+            });
+        }
+    }
+
+    if is_search_superseded(&norm_root, search_token) {
+        return Ok(SearchWorkspaceOutcome {
+            results: Vec::new(),
+            truncated: false,
+        });
+    }
+
+    Ok(SearchWorkspaceOutcome { results, truncated })
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceReplaceResult {
+    pub files_updated: usize,
+    pub total_replacements: usize,
+    pub updated_paths: Vec<String>,
+    pub failures: Vec<WorkspaceReplaceFailure>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceReplaceFailure {
+    path: String,
+    error: String,
+}
+
+#[derive(Default)]
+struct WorkspaceScan {
+    files: Vec<PathBuf>,
+    failures: Vec<WorkspaceReplaceFailure>,
+    truncated: bool,
+}
+
+impl WorkspaceScan {
+    fn collect_files(&mut self, dir: &Path, depth: usize) {
+        self.collect_files_with_limit(dir, depth, MAX_SEARCH_FILES);
+    }
+
+    fn collect_files_with_limit(&mut self, dir: &Path, depth: usize, max_files: usize) {
+        if depth >= 6 || self.truncated {
+            return;
+        }
+        let mut subdirs = Vec::new();
+        let mut files = Vec::new();
+        let mut failures = Vec::new();
+        visit_filtered_dir_entries(
+            dir,
+            |path, error| {
+                failures.push(WorkspaceReplaceFailure {
+                    path: clean_windows_path(path).to_string_lossy().into_owned(),
+                    error,
+                });
+            },
+            |d| subdirs.push(d),
+            |f| {
+                if is_markdown_path(&f) || is_supported_text_path(&f) {
+                    files.push(f);
+                }
+            },
+        );
+        self.failures.extend(failures);
+        files.sort();
+        subdirs.sort();
+        let remaining = max_files.saturating_sub(self.files.len());
+        if files.len() > remaining {
+            self.truncated = true;
+        }
+        self.files.extend(files.into_iter().take(remaining));
+        for subdir in subdirs {
+            if self.truncated {
+                break;
+            }
+            self.collect_files_with_limit(&subdir, depth + 1, max_files);
+        }
+    }
+}
+
+/// Replaces all occurrences of `query` with `replacement` across Markdown/text files in `root`.
+/// Preserves each file's detected line-ending style via atomic `write_text_file`.
+#[cfg(test)]
+pub fn replace_in_workspace_files(
+    root: &Path,
+    query: &str,
+    replacement: &str,
+    case_sensitive: bool,
+) -> Result<WorkspaceReplaceResult, String> {
+    replace_in_workspace_with_options(root, query, replacement, case_sensitive, false, false, None)
+}
+
+/// Replaces occurrences of `query` with `replacement` across workspace files with regex,
+/// whole-word, and optional `include_files` filtering.
+pub fn replace_in_workspace_with_options(
+    root: &Path,
+    query: &str,
+    replacement: &str,
+    case_sensitive: bool,
+    use_regex: bool,
+    whole_word: bool,
+    include_files: Option<Vec<ReplaceTarget>>,
+) -> Result<WorkspaceReplaceResult, String> {
+    let active_query = if use_regex { query } else { query.trim() };
+    if active_query.is_empty() {
+        return Err("Suchbegriff darf nicht leer sein.".to_string());
+    }
+    let norm_root = normalize_existing_path(root);
+    if !norm_root.is_dir() {
+        return Err("Ungültiger Arbeitsordner.".to_string());
+    }
+
+    let compiled_regex = build_search_regex(active_query, case_sensitive, use_regex, whole_word)?;
+    let literal_ci_regex = if compiled_regex.is_none() && !case_sensitive {
+        build_literal_ci_regex(active_query)
+    } else {
+        None
+    };
+    let mut targets: Option<HashMap<PathBuf, Option<String>>> = include_files.map(|files| {
+        files
+            .into_iter()
+            .map(|target| {
+                let (path, version) = match target {
+                    ReplaceTarget::Versioned { path, content_version } => (path, Some(content_version)),
+                    ReplaceTarget::Path(path) => (path, None),
+                };
+                (normalize_existing_path(Path::new(&path)), version)
+            })
+            .collect()
+    });
+
+    let mut scan = WorkspaceScan::default();
+    scan.collect_files(&norm_root, 0);
+
+    let mut files_updated = 0usize;
+    let mut total_replacements = 0usize;
+    let mut updated_paths = Vec::new();
+    let mut failures = scan.failures;
+
+    for file_path in scan.files {
+        let canon_path = normalize_existing_path(&file_path);
+        if !canon_path.starts_with(&norm_root) {
+            continue;
+        }
+        let (is_targeted, expected) = match &mut targets {
+            Some(targets) => match targets.remove(&canon_path) {
+                Some(version) => (true, version),
+                None => continue,
+            },
+            None => (false, None),
+        };
+        let path = canon_path.to_string_lossy().into_owned();
+        if fs::metadata(&canon_path).is_ok_and(|meta| meta.len() > MAX_SEARCH_FILE_BYTES) {
+            if is_targeted {
+                failures.push(WorkspaceReplaceFailure {
+                    path,
+                    error: "Datei ist für die Ordnersuche zu groß geworden.".into(),
+                });
+            }
+            continue;
+        }
+        let bytes = match fs::read(&canon_path) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                failures.push(WorkspaceReplaceFailure {
+                    path,
+                    error: format!("Datei konnte nicht gelesen werden: {err}"),
+                });
+                continue;
+            }
+        };
+        if expected.is_some_and(|version| version != content_version(&bytes)) {
+            failures.push(WorkspaceReplaceFailure {
+                path,
+                error: "Datei wurde seit der Suche geändert.".into(),
+            });
+            continue;
+        }
+        let (content, encoding) = decode_text_bytes(&bytes);
+        let prefer_crlf = content.contains("\r\n");
+
+        let (updated, count, changed) = if let Some(ref re) = compiled_regex {
+            let normalized = search_text(&content, true);
+            let count = re.find_iter(&normalized).count();
+            if count == 0 {
+                (String::new(), 0, false)
+            } else {
+                let replaced = if use_regex {
+                    re.replace_all(&normalized, replacement).into_owned()
+                } else {
+                    re.replace_all(&normalized, NoExpand(replacement)).into_owned()
+                };
+                let changed = replaced != *normalized;
+                (replaced, count, changed)
+            }
+        } else {
+            let (replaced, count) = replace_text_occurrences(
+                &content,
+                active_query,
+                replacement,
+                case_sensitive,
+                literal_ci_regex.as_ref(),
+            );
+            let changed = count > 0 && replaced != content;
+            (replaced, count, changed)
+        };
+        if changed {
+            match replace_text_file(&canon_path, &updated, prefer_crlf, &bytes, encoding) {
+                Ok(()) => {
+                    files_updated += 1;
+                    total_replacements += count;
+                    updated_paths.push(path);
+                }
+                Err(error) => failures.push(WorkspaceReplaceFailure { path, error }),
+            }
+        }
+    }
+
+    if let Some(targets) = targets {
+        for (path, _) in targets {
+            failures.push(WorkspaceReplaceFailure {
+                path: clean_windows_path(&path).to_string_lossy().into_owned(),
+                error: "Datei wurde im Arbeitsordner nicht mehr gefunden.".into(),
+            });
+        }
+    }
+
+    Ok(WorkspaceReplaceResult {
+        files_updated,
+        total_replacements,
+        updated_paths,
+        failures,
+    })
+}
+
+fn replace_text_occurrences(
+    haystack: &str,
+    query: &str,
+    replacement: &str,
+    case_sensitive: bool,
+    literal_ci_regex: Option<&Regex>,
+) -> (String, usize) {
+    let mut out = String::new();
+    let mut last = 0;
+    let mut count = 0;
+    visit_literal_matches(haystack, query, case_sensitive, literal_ci_regex, |start, end| {
+        out.push_str(&haystack[last..start]);
+        out.push_str(replacement);
+        last = end;
+        count += 1;
+    });
+    if count > 0 {
+        out.push_str(&haystack[last..]);
+    }
+    (out, count)
+}
+
+fn search_text(content: &str, normalize_crlf: bool) -> Cow<'_, str> {
+    if normalize_crlf && content.contains("\r\n") {
+        Cow::Owned(content.replace("\r\n", "\n"))
+    } else {
+        Cow::Borrowed(content)
+    }
+}
+
+fn visit_literal_matches(
+    haystack: &str,
+    query: &str,
+    case_sensitive: bool,
+    literal_ci_regex: Option<&Regex>,
+    mut visit: impl FnMut(usize, usize),
+) {
+    if query.is_empty() {
+        return;
+    }
+    if case_sensitive {
+        for (start, matched) in haystack.match_indices(query) {
+            visit(start, start + matched.len());
+        }
+        return;
+    }
+    if let Some(re) = literal_ci_regex {
+        for found in re.find_iter(haystack) {
+            visit(found.start(), found.end());
+        }
+        return;
+    }
+    if let Some(re) = build_literal_ci_regex(query) {
+        for found in re.find_iter(haystack) {
+            visit(found.start(), found.end());
+        }
+        return;
+    }
+    // Fallback only if regex compilation exceeded size limit for an unusually huge query:
+    // match per character boundary safely without slicing `haystack` with `hay_lower` offsets.
+    let query_lower = query.to_lowercase();
+    let mut hay_lower = String::with_capacity(haystack.len());
+    let mut byte_map: Vec<(u32, u32)> = Vec::with_capacity(haystack.len());
+    let mut utf8_buf = [0u8; 4];
+    for (orig_start, ch) in haystack.char_indices() {
+        let orig_end = orig_start + ch.len_utf8();
+        for lc in ch.to_lowercase() {
+            let encoded = lc.encode_utf8(&mut utf8_buf);
+            hay_lower.push_str(encoded);
+            for _ in 0..encoded.len() {
+                byte_map.push((orig_start as u32, orig_end as u32));
+            }
+        }
+    }
+    for (l_start, matched) in hay_lower.match_indices(&query_lower) {
+        let l_end = l_start + matched.len();
+        if l_end == l_start {
+            continue;
+        }
+        if l_start > 0 && byte_map[l_start].0 == byte_map[l_start - 1].0 {
+            continue;
+        }
+        if l_end < byte_map.len() && byte_map[l_end].1 == byte_map[l_end - 1].1 {
+            continue;
+        }
+        visit(byte_map[l_start].0 as usize, byte_map[l_end - 1].1 as usize);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preview_limits_do_not_limit_occurrences_or_selected_replacements() {
+        let dir = std::env::temp_dir().join(format!("semyra_search_counts_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        for index in 0..9 {
+            fs::write(dir.join(format!("{index}.md")), "alpha alpha\r\n".repeat(50)).unwrap();
+        }
+        let results = search_workspace_files(&dir, "alpha", false).unwrap();
+        assert_eq!(results.len(), 9);
+        assert_eq!(results[0].matches.len(), 40);
+        assert!(results[8].matches.is_empty());
+        assert_eq!(results.iter().map(|file| file.matches.len()).sum::<usize>(), 300);
+        assert!(results.iter().all(|file| file.occurrence_count == 100 && file.matching_lines == 50));
+        let selected = &results[0];
+        let target = ReplaceTarget::Versioned {
+            path: selected.path.clone(),
+            content_version: selected.content_version.clone(),
+        };
+        let replaced = replace_in_workspace_with_options(
+            &dir, "alpha", "beta", false, false, false, Some(vec![target]),
+        ).unwrap();
+        assert_eq!(replaced.total_replacements, selected.occurrence_count);
+        assert_eq!(fs::read_to_string(&selected.path).unwrap(), "beta beta\r\n".repeat(50));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn search_and_replace_share_multiline_and_unicode_match_boundaries() {
+        let dir = std::env::temp_dir().join(format!("semyra_match_boundaries_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("document.md");
+        for (input, query, regex, expected) in [
+            ("one\r\ntwo\r\none\r\ntwo", r"one\ntwo", true, 2),
+            ("İ i", "i", false, 1),
+            ("x\r\n", "$", true, 2),
+        ] {
+            fs::write(&path, input).unwrap();
+            let found = search_workspace_with_options(&dir, query, false, regex, false).unwrap();
+            assert_eq!(found[0].occurrence_count, expected);
+            let replaced = replace_in_workspace_with_options(&dir, query, "!", false, regex, false, None).unwrap();
+            assert_eq!(replaced.total_replacements, expected);
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn scan_records_an_unreadable_path_and_still_collects_other_files() {
+        let dir = std::env::temp_dir().join(format!("semyra_scan_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let missing = dir.join("missing");
+        let document = dir.join("available.md");
+        fs::write(&document, "original").unwrap();
+
+        let mut scan = WorkspaceScan::default();
+        scan.collect_files(&missing, 1);
+        scan.collect_files(&dir, 0);
+
+        assert_eq!(scan.files, [document]);
+        assert_eq!(scan.failures.len(), 1);
+        assert_eq!(scan.failures[0].path, missing.to_string_lossy());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn replaces_across_files_preserving_crlf() {
+        let dir = std::env::temp_dir().join(format!(
+            "semyra_replace_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let file_a = dir.join("a.md");
+        fs::write(&file_a, "Hello MarkLive\r\nmarklive rocks\r\n").unwrap();
+
+        let res = replace_in_workspace_files(&dir, "MarkLive", "Semyra", false).unwrap();
+        assert_eq!(res.files_updated, 1);
+        assert_eq!(res.total_replacements, 2);
+
+        let after = fs::read_to_string(&file_a).unwrap();
+        assert_eq!(after, "Hello Semyra\r\nSemyra rocks\r\n");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn replaces_unicode_case_folding_safely() {
+        // Capital sharp S ('ẞ', 3 bytes -> "ss", 2 bytes) and Turkish dotted I ('İ', 2 bytes -> 3 bytes)
+        // must not panic or corrupt subsequent match byte offsets.
+        let input = "GROẞE Straße İSTANBUL MarkLive und marklive Ende";
+        let (out, count) = replace_text_occurrences(input, "marklive", "Semyra", false, None);
+        assert_eq!(count, 2);
+        assert_eq!(out, "GROẞE Straße İSTANBUL Semyra und Semyra Ende");
+
+        // Case-insensitive match spanning 'ẞ' -> "ss"
+        let (out2, count2) = replace_text_occurrences("GROẞE Straße", "große", "kleine", false, None);
+        assert_eq!(count2, 1);
+        assert_eq!(out2, "kleine Straße");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn reports_locked_file_and_continues_replacing_other_files() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = std::env::temp_dir().join(format!(
+            "semyra_replace_locked_{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        for name in ["a.md", "b.md", "c.md"] {
+            fs::write(dir.join(name), "old").unwrap();
+        }
+        let blocked = dir.join("b.md");
+        // Allow reads of the target while denying replacement of the open file.
+        let lock = fs::OpenOptions::new().read(true).share_mode(1).open(&blocked).unwrap();
+        let result = replace_in_workspace_files(&dir, "old", "new", true).unwrap();
+        assert_eq!(result.files_updated, 2);
+        assert_eq!(result.total_replacements, 2);
+        assert_eq!(result.updated_paths.len(), 2);
+        assert_eq!(result.failures.len(), 1);
+        assert!(result.failures[0].path.ends_with("b.md"));
+        assert_eq!(fs::read_to_string(dir.join("c.md")).unwrap(), "new");
+        assert_eq!(fs::read_to_string(blocked).unwrap(), "old");
+        drop(lock);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn dotfile_parity_between_explorer_quick_open_and_search() {
+        let dir = std::env::temp_dir().join(format!(
+            "semyra_dotfile_parity_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(dir.join(".github")).unwrap();
+        fs::create_dir_all(dir.join(".agents").join("skills").join("demo")).unwrap();
+        fs::create_dir_all(dir.join(".git")).unwrap();
+        fs::create_dir_all(dir.join(".vscode")).unwrap();
+
+        fs::write(dir.join(".github").join("AGENTS.md"), "needle in github\n").unwrap();
+        fs::write(
+            dir.join(".agents").join("skills").join("demo").join("SKILL.md"),
+            "needle in agents\n",
+        )
+        .unwrap();
+        fs::write(dir.join(".cursorrules"), "needle in cursorrules\n").unwrap();
+        fs::write(dir.join(".env.local"), "KEY=needle\n").unwrap();
+        fs::write(dir.join(".git").join("notes.md"), "needle in git\n").unwrap();
+        fs::write(dir.join(".vscode").join("notes.md"), "needle in vscode\n").unwrap();
+
+        let tree = crate::fs_ops::build_directory_tree(&dir, 6).unwrap();
+        let root_children = tree.children.unwrap();
+        let names: Vec<&str> = root_children.iter().map(|n| n.name.as_str()).collect();
+        assert!(names.contains(&".github"));
+        assert!(names.contains(&".agents"));
+        assert!(names.contains(&".cursorrules"));
+        assert!(names.contains(&".env.local"));
+        assert!(!names.contains(&".git"));
+        assert!(!names.contains(&".vscode"));
+
+        let quick_open = crate::fs_ops::list_workspace_markdown_files(&dir).unwrap();
+        let rels: Vec<&str> = quick_open.iter().map(|e| e.rel_path.as_str()).collect();
+        assert!(rels.contains(&".github/AGENTS.md"));
+        assert!(rels.contains(&".agents/skills/demo/SKILL.md"));
+        assert!(rels.contains(&".cursorrules"));
+        assert!(rels.contains(&".env.local"));
+        assert!(!rels.iter().any(|r| r.starts_with(".git/") || r.starts_with(".vscode/")));
+
+        let search_hits = search_workspace_files(&dir, "needle", true).unwrap();
+        let hit_rels: Vec<String> = search_hits
+            .iter()
+            .map(|r| r.rel_path.replace('\\', "/"))
+            .collect();
+        assert!(hit_rels.contains(&".github/AGENTS.md".to_string()));
+        assert!(hit_rels.contains(&".agents/skills/demo/SKILL.md".to_string()));
+        assert!(hit_rels.contains(&".cursorrules".to_string()));
+        assert!(hit_rels.contains(&".env.local".to_string()));
+        assert!(!hit_rels.iter().any(|r| r.starts_with(".git/") || r.starts_with(".vscode/")));
+
+        let replaced = replace_in_workspace_files(&dir, "needle", "updated", true).unwrap();
+        assert_eq!(replaced.files_updated, 4);
+        assert!(fs::read_to_string(dir.join(".github").join("AGENTS.md"))
+            .unwrap()
+            .contains("updated in github"));
+        assert!(fs::read_to_string(dir.join(".cursorrules"))
+            .unwrap()
+            .contains("updated in cursorrules"));
+        assert!(fs::read_to_string(dir.join(".git").join("notes.md"))
+            .unwrap()
+            .contains("needle in git"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn search_and_replace_support_regex_and_report_invalid_patterns() {
+        let dir = std::env::temp_dir().join(format!(
+            "semyra_regex_search_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let file_a = dir.join("notes.md");
+        fs::write(&file_a, "v1.2.0 released\nv10.0.1 draft\n").unwrap();
+
+        let err = search_workspace_with_options(&dir, "(unclosed", true, true, false).unwrap_err();
+        assert!(err.contains("Ungültiger regulärer Ausdruck"));
+
+        let hits = search_workspace_with_options(&dir, r"v(\d+)\.\d+\.\d+", true, true, false).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].matches.len(), 2);
+
+        let replaced = replace_in_workspace_with_options(
+            &dir,
+            r"v(\d+)\.\d+\.\d+",
+            "major-$1",
+            true,
+            true,
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(replaced.files_updated, 1);
+        assert_eq!(replaced.total_replacements, 2);
+        assert_eq!(
+            fs::read_to_string(&file_a).unwrap(),
+            "major-1 released\nmajor-10 draft\n"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn search_and_replace_whole_word_ignores_substrings_and_literal_dollars() {
+        let dir = std::env::temp_dir().join(format!(
+            "semyra_whole_word_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let file_a = dir.join("words.md");
+        fs::write(&file_a, "cat caterpillar Cat scatter\n").unwrap();
+
+        let hits = search_workspace_with_options(&dir, "cat", false, false, true).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].matches.len(), 1);
+        assert_eq!(hits[0].matches[0].column, 1);
+
+        let replaced = replace_in_workspace_with_options(
+            &dir,
+            "cat",
+            "$1-dog",
+            false,
+            false,
+            true,
+            None,
+        )
+        .unwrap();
+        assert_eq!(replaced.files_updated, 1);
+        assert_eq!(replaced.total_replacements, 2);
+        assert_eq!(
+            fs::read_to_string(&file_a).unwrap(),
+            "$1-dog caterpillar $1-dog scatter\n"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn replace_skips_files_changed_or_removed_after_search() {
+        let dir = std::env::temp_dir().join(format!(
+            "semyra_replace_versions_{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let unchanged = dir.join("unchanged.md");
+        let changed = dir.join("changed.md");
+        let removed = dir.join("removed.md");
+        for path in [&unchanged, &changed, &removed] {
+            fs::write(path, "needle\n").unwrap();
+        }
+        let targets = search_workspace_files(&dir, "needle", true)
+            .unwrap()
+            .into_iter()
+            .map(|result| ReplaceTarget::Versioned {
+                path: result.path,
+                content_version: result.content_version,
+            })
+            .collect();
+        fs::write(&changed, "needle\nnew needle\n").unwrap();
+        fs::remove_file(&removed).unwrap();
+
+        let result =
+            replace_in_workspace_with_options(&dir, "needle", "updated", true, false, false, Some(targets))
+                .unwrap();
+        assert_eq!(result.files_updated, 1);
+        assert_eq!(result.total_replacements, 1);
+        assert_eq!(result.failures.len(), 2);
+        assert_eq!(fs::read_to_string(&unchanged).unwrap(), "updated\n");
+        assert_eq!(fs::read_to_string(&changed).unwrap(), "needle\nnew needle\n");
+        assert!(!removed.exists());
+        fs::remove_file(unchanged).unwrap();
+        fs::remove_file(changed).unwrap();
+        fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn replace_respects_include_files_filter() {
+        let dir = std::env::temp_dir().join(format!(
+            "semyra_include_files_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let file_a = dir.join("a.md");
+        let file_b = dir.join("b.md");
+        fs::write(&file_a, "alpha beta\n").unwrap();
+        fs::write(&file_b, "alpha gamma\n").unwrap();
+
+        let empty_res = replace_in_workspace_with_options(
+            &dir,
+            "alpha",
+            "omega",
+            true,
+            false,
+            false,
+            Some(Vec::new()),
+        )
+        .unwrap();
+        assert_eq!(empty_res.files_updated, 0);
+        assert_eq!(empty_res.total_replacements, 0);
+
+        let selected = vec![ReplaceTarget::Path(clean_windows_path(&file_a).to_string_lossy().into_owned())];
+        let res = replace_in_workspace_with_options(
+            &dir,
+            "alpha",
+            "omega",
+            true,
+            false,
+            false,
+            Some(selected),
+        )
+        .unwrap();
+        assert_eq!(res.files_updated, 1);
+        assert_eq!(res.total_replacements, 1);
+        assert_eq!(fs::read_to_string(&file_a).unwrap(), "omega beta\n");
+        assert_eq!(fs::read_to_string(&file_b).unwrap(), "alpha gamma\n");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn regex_search_and_replace_match_line_anchors_consistently() {
+        let dir = std::env::temp_dir().join(format!(
+            "semyra_regex_multiline_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let lf_file = dir.join("lf.md");
+        let crlf_file = dir.join("crlf.md");
+        fs::write(&lf_file, "foo\nbar foo\nbaz\n").unwrap();
+        fs::write(&crlf_file, "foo\r\nbar foo\r\nbaz\r\n").unwrap();
+
+        let hits = search_workspace_with_options(&dir, r"^foo$", true, true, false).unwrap();
+        assert_eq!(hits.len(), 2);
+        assert!(hits.iter().all(|file| file.matches.len() == 1 && file.matches[0].line == 1));
+
+        let res = replace_in_workspace_with_options(
+            &dir,
+            r"^foo$",
+            "qux",
+            true,
+            true,
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(res.files_updated, 2);
+        assert_eq!(res.total_replacements, 2);
+        assert_eq!(fs::read_to_string(&lf_file).unwrap(), "qux\nbar foo\nbaz\n");
+        assert_eq!(
+            fs::read_to_string(&crlf_file).unwrap(),
+            "qux\r\nbar foo\r\nbaz\r\n"
+        );
+
+        // Non-regex query trimming matches between search and replace, and rel_path uses '/'
+        let sub = dir.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        let nested = sub.join("note.md");
+        fs::write(&nested, "alpha beta\n").unwrap();
+        let trimmed_hits = search_workspace_with_options(&dir, " alpha ", false, false, false).unwrap();
+        assert_eq!(trimmed_hits.len(), 1);
+        assert_eq!(trimmed_hits[0].rel_path, "sub/note.md");
+        let trimmed_rep = replace_in_workspace_with_options(
+            &dir,
+            " alpha ",
+            "omega",
+            false,
+            false,
+            false,
+            Some(vec![ReplaceTarget::Path(nested.to_string_lossy().into_owned())]),
+        )
+        .unwrap();
+        assert_eq!(trimmed_rep.files_updated, 1);
+        assert_eq!(fs::read_to_string(&nested).unwrap(), "omega beta\n");
+
+        // Missing unversioned ReplaceTarget::Path is reported in failures
+        let missing_rep = replace_in_workspace_with_options(
+            &dir,
+            "omega",
+            "gamma",
+            false,
+            false,
+            false,
+            Some(vec![ReplaceTarget::Path(dir.join("absent.md").to_string_lossy().into_owned())]),
+        )
+        .unwrap();
+        assert_eq!(missing_rep.failures.len(), 1);
+
+        // Truncated scan flag is set only when the workspace exceeds the file scan cap,
+        // and not when the cap equals the exact number of matching files (even with empty subdirs).
+        fs::create_dir_all(dir.join("z_empty")).unwrap();
+        let capped = search_workspace_with_limit(&dir, "qux", false, false, false, 2).unwrap();
+        assert!(capped.truncated);
+        assert_eq!(capped.results.len(), 2);
+
+        let exact = search_workspace_with_limit(&dir, "qux", false, false, false, 3).unwrap();
+        assert!(!exact.truncated);
+
+        let full = search_workspace_with_limit(&dir, "qux", false, false, false, 10).unwrap();
+        assert!(!full.truncated);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+}

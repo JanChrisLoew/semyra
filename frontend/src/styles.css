@@ -1,0 +1,10 @@
+/* ==========================================================================
+   Semyra – Modular Stylesheet Entry Point (Bundled inline by Vite)
+   ========================================================================== */
+
+@import "./styles/tokens.css";
+@import "./styles/chrome.css";
+@import "./styles/sidebar.css";
+@import "./styles/editor.css";
+@import "./styles/markdown.css";
+@import "./styles/dialogs-print.css";
