@@ -80,7 +80,7 @@ describe('export-utils', () => {
     expect(richHtml).toContain('border-collapse: collapse');
     expect(richHtml).toContain('text-align: center;');
     expect(richHtml).toContain('text-align: right;');
-    expect(richHtml).toContain('border-left: 4px solid #986c3d');
+    expect(richHtml).toContain('border-left: 4px solid #8a5a18');
     expect(richHtml).toContain('src="data:image/png;base64,');
   });
 });

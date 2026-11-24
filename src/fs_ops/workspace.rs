@@ -185,7 +185,17 @@ fn collect_markdown_files_recursive(
     }
 }
 
+#[cfg(test)]
 pub fn create_new_markdown_file(parent_dir: &Path, file_name: &str) -> Result<FilePayload, String> {
+    create_new_markdown_file_with_options(parent_dir, file_name, false, true)
+}
+
+pub fn create_new_markdown_file_with_options(
+    parent_dir: &Path,
+    file_name: &str,
+    is_en: bool,
+    prefer_crlf: bool,
+) -> Result<FilePayload, String> {
     let trimmed = validate_entry_name(file_name)?;
     let final_name = if Path::new(trimmed).extension().is_some()
         || (trimmed.starts_with('.') && trimmed.len() > 1)
@@ -196,15 +206,20 @@ pub fn create_new_markdown_file(parent_dir: &Path, file_name: &str) -> Result<Fi
     };
 
     let full_path = parent_dir.join(&final_name);
-    let exists_err = format!("Die Datei '{final_name}' existiert bereits.");
+    let exists_err = if is_en {
+        format!("The file '{final_name}' already exists.")
+    } else {
+        format!("Die Datei '{final_name}' existiert bereits.")
+    };
     if fs::symlink_metadata(&full_path).is_ok() {
         return Err(exists_err);
     }
 
+    let default_stem = if is_en { "New Document" } else { "Neues Dokument" };
     let stem = Path::new(&final_name)
         .file_stem()
         .and_then(|s| s.to_str())
-        .unwrap_or("Neues Dokument");
+        .unwrap_or(default_stem);
     let ext = Path::new(&final_name)
         .extension()
         .and_then(|e| e.to_str())
@@ -215,9 +230,15 @@ pub fn create_new_markdown_file(parent_dir: &Path, file_name: &str) -> Result<Fi
     let lower_stem = stem.to_ascii_lowercase();
 
     let initial = if lower_name == "skill.md" || (lower_stem == "skill" && ext == "md") {
-        format!(
-            "---\nname: {stem}\ndescription: Beschreibe hier die F\u{e4}higkeit und wann sie genutzt werden soll.\n---\n\n# {stem}\n\n## Anweisungen\n- Schritt 1\n- Schritt 2\n"
-        )
+        if is_en {
+            format!(
+                "---\nname: {stem}\ndescription: Describe the capability here and when it should be used.\n---\n\n# {stem}\n\n## Instructions\n- Step 1\n- Step 2\n"
+            )
+        } else {
+            format!(
+                "---\nname: {stem}\ndescription: Beschreibe hier die F\u{e4}higkeit und wann sie genutzt werden soll.\n---\n\n# {stem}\n\n## Anweisungen\n- Schritt 1\n- Schritt 2\n"
+            )
+        }
     } else if (matches!(
         lower_stem.as_str(),
         "prompt" | "system-prompt" | "system_prompt" | "instructions"
@@ -226,21 +247,35 @@ pub fn create_new_markdown_file(parent_dir: &Path, file_name: &str) -> Result<Fi
         || lower_name == "instructions.md")
         && ext == "md"
     {
-        format!(
-            "# System-Prompt: {stem}\n\n## Rolle & Ziel\nDu bist ein spezialisierter Assistent f\u{fc}r...\n\n## Richtlinien & Einschr\u{e4}nkungen\n- Pr\u{e4}zise und direkte Antworten\n- Schritt-f\u{fc}r-Schritt-Vorgehen bei komplexen Aufgaben\n\n## Kontext & Beispiele\n"
-        )
+        if is_en {
+            format!(
+                "# System Prompt: {stem}\n\n## Role & Goal\nYou are a specialized assistant for...\n\n## Guidelines & Constraints\n- Concise and direct answers\n- Step-by-step approach for complex tasks\n\n## Context & Examples\n"
+            )
+        } else {
+            format!(
+                "# System-Prompt: {stem}\n\n## Rolle & Ziel\nDu bist ein spezialisierter Assistent f\u{fc}r...\n\n## Richtlinien & Einschr\u{e4}nkungen\n- Pr\u{e4}zise und direkte Antworten\n- Schritt-f\u{fc}r-Schritt-Vorgehen bei komplexen Aufgaben\n\n## Kontext & Beispiele\n"
+            )
+        }
     } else if lower_name == ".cursorrules" {
-        "# Cursor & KI-Regeln\n\n- Bevorzuge TypeScript und Rust\n- Halte UI-Komponenten modular und barrierefrei\n\n## Architektur\n".to_string()
+        if is_en {
+            "# Cursor & AI Rules\n\n- Prefer TypeScript and Rust\n- Keep UI components modular and accessible\n\n## Architecture\n".to_string()
+        } else {
+            "# Cursor & KI-Regeln\n\n- Bevorzuge TypeScript und Rust\n- Halte UI-Komponenten modular und barrierefrei\n\n## Architektur\n".to_string()
+        }
     } else {
         match ext.as_str() {
             "json" => "{\n  \n}\n".to_string(),
-            "yaml" | "yml" => "# Konfiguration\n".to_string(),
-            "toml" => "# Konfiguration\n".to_string(),
+            "yaml" | "yml" => {
+                if is_en { "# Configuration\n".to_string() } else { "# Konfiguration\n".to_string() }
+            }
+            "toml" => {
+                if is_en { "# Configuration\n".to_string() } else { "# Konfiguration\n".to_string() }
+            }
             "txt" | "log" | "env" | "ini" => String::new(),
             _ => format!("# {stem}\n\n"),
         }
     };
-    create_new_text_file(&full_path, &initial, true, &exists_err)?;
+    create_new_text_file(&full_path, &initial, prefer_crlf, &exists_err)?;
     read_text_file(&full_path)
 }
 
@@ -280,20 +315,40 @@ fn normalize_skill_slug(raw: &str) -> Result<String, String> {
 }
 
 /// Creates a standard-compliant `<skill-name>/SKILL.md` folder and file.
+#[cfg(test)]
 pub fn create_ai_skill(skills_dir: &Path, raw_skill_name: &str) -> Result<FilePayload, String> {
+    create_ai_skill_with_options(skills_dir, raw_skill_name, false, true)
+}
+
+pub fn create_ai_skill_with_options(
+    skills_dir: &Path,
+    raw_skill_name: &str,
+    is_en: bool,
+    prefer_crlf: bool,
+) -> Result<FilePayload, String> {
     let slug = normalize_skill_slug(raw_skill_name)?;
     let skill_dir = skills_dir.join(&slug);
     let skill_file = skill_dir.join("SKILL.md");
-    let exists_err = format!("Der Skill '{slug}' existiert bereits.");
+    let exists_err = if is_en {
+        format!("The skill '{slug}' already exists.")
+    } else {
+        format!("Der Skill '{slug}' existiert bereits.")
+    };
     if fs::symlink_metadata(&skill_file).is_ok() {
         return Err(exists_err);
     }
     fs::create_dir_all(&skill_dir)
         .map_err(|e| format!("Skill-Ordner konnte nicht erstellt werden: {e}"))?;
-    let initial = format!(
-        "---\nname: {slug}\ndescription: Beschreibe hier präzise, was dieser Skill tut und wann er verwendet werden soll.\n---\n\n# {slug}\n\n## Ziel\n\n## Schritte\n- Schritt 1\n- Schritt 2\n"
-    );
-    create_new_text_file(&skill_file, &initial, true, &exists_err)?;
+    let initial = if is_en {
+        format!(
+            "---\nname: {slug}\ndescription: Precisely describe what this skill does and when it should be used.\n---\n\n# {slug}\n\n## Goal\n\n## Steps\n- Step 1\n- Step 2\n"
+        )
+    } else {
+        format!(
+            "---\nname: {slug}\ndescription: Beschreibe hier präzise, was dieser Skill tut und wann er verwendet werden soll.\n---\n\n# {slug}\n\n## Ziel\n\n## Schritte\n- Schritt 1\n- Schritt 2\n"
+        )
+    };
+    create_new_text_file(&skill_file, &initial, prefer_crlf, &exists_err)?;
     read_text_file(&skill_file)
 }
 
@@ -470,6 +525,14 @@ mod tests {
         let (renamed_path, renamed_name) = rename_fs_entry(&doc_a, "Alpha.md").unwrap();
         assert_eq!(renamed_name, "Alpha.md");
         assert!(rename_fs_entry(Path::new(&renamed_path), "beta.md").is_err());
+
+        let en_yaml = create_new_markdown_file_with_options(&temp, "en-config.yaml", true, false).unwrap();
+        assert_eq!(en_yaml.content, "# Configuration\n");
+        assert_eq!(en_yaml.line_ending, "LF");
+
+        let en_skill = create_ai_skill_with_options(&skills_root, "english-skill", true, false).unwrap();
+        assert!(en_skill.content.contains("## Goal\n"));
+        assert_eq!(en_skill.line_ending, "LF");
 
         let _ = fs::remove_dir_all(&temp);
     }

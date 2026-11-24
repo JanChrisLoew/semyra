@@ -39,7 +39,9 @@ export interface SidebarExplorerDeps {
   onScaffoldAgents?: (targetDir: string) => Promise<void> | void;
   onScaffoldSkill?: (targetDir: string) => Promise<void> | void;
   onBundleWorkspace?: (rootPath: string) => void;
+  onInsertImage?: (imagePath: string) => Promise<void> | void;
   onShowToast?: (message: string) => void;
+  getCreateFileOptions?: () => { lang?: string; preferCrlf?: boolean };
 }
 
 export type SidebarExplorerCallbacks = SidebarExplorerDeps;
@@ -680,6 +682,8 @@ export class SidebarExplorerController {
         this.openEntryDialog('new-file', target.parentDir);
       } else if (action === 'new-folder') {
         this.openEntryDialog('new-folder', target.parentDir);
+      } else if (action === 'insert-image' && !target.isDir && isImagePath(target.name)) {
+        void this.deps.onInsertImage?.(target.path);
       } else if (action === 'rename' && !target.isWorkspaceRoot) {
         this.openEntryDialog('rename', target.path, target.name);
       } else if (action === 'reveal') {
@@ -723,8 +727,9 @@ export class SidebarExplorerController {
       const rawName = entryInput.value;
 
       try {
+        const createOpts = this.deps.getCreateFileOptions?.();
         if (mode === 'new-file') {
-          const created = await backend.createFile(targetPath, rawName);
+          const created = await backend.createFile(targetPath, rawName, createOpts);
           entryDialog.close();
           await this.refresh();
           this.deps.onOpenCreatedFile(created);
@@ -732,13 +737,13 @@ export class SidebarExplorerController {
           const sep = targetPath.includes('\\') ? '\\' : '/';
           const created =
             this.selectedAiKind === 'skill'
-              ? await backend.createAiSkill(`${targetPath}${sep}skills`, rawName)
-              : await backend.createFile(`${targetPath}${sep}prompts`, rawName);
+              ? await backend.createAiSkill(`${targetPath}${sep}skills`, rawName, createOpts)
+              : await backend.createFile(`${targetPath}${sep}prompts`, rawName, createOpts);
           entryDialog.close();
           await this.refresh();
           this.deps.onOpenCreatedFile(created);
         } else if (mode === 'new-skill') {
-          const created = await backend.createAiSkill(targetPath, rawName);
+          const created = await backend.createAiSkill(targetPath, rawName, createOpts);
           entryDialog.close();
           await this.refresh();
           this.deps.onOpenCreatedFile(created);
@@ -806,6 +811,13 @@ export class SidebarExplorerController {
     const bundleBtn = this.deps.contextPopoverEl.querySelector<HTMLButtonElement>('[data-ctx-action="bundle-workspace"]');
     if (bundleBtn) {
       bundleBtn.hidden = !this.contextTarget.isWorkspaceRoot || this.isAiLibraryMode || !this.deps.onBundleWorkspace;
+    }
+    const insertImageBtn = this.deps.contextPopoverEl.querySelector<HTMLButtonElement>('[data-ctx-action="insert-image"]');
+    if (insertImageBtn) {
+      insertImageBtn.hidden =
+        this.contextTarget.isDir ||
+        !isImagePath(this.contextTarget.name) ||
+        !this.deps.onInsertImage;
     }
 
     positionAndFocusPopover(this.deps.contextPopoverEl, e.clientX, e.clientY);

@@ -174,8 +174,35 @@ fn strip_query_and_fragment(url: &str) -> &str {
     before_frag.split('?').next().unwrap_or(before_frag)
 }
 
+fn is_blocked_internal_api_url(trimmed: &str) -> bool {
+    let lower = trimmed.to_ascii_lowercase();
+    let api_path = if lower.starts_with("/api/") {
+        Some(lower.as_str())
+    } else if let Some(rest) = lower
+        .strip_prefix("https://semyra.localhost")
+        .or_else(|| lower.strip_prefix("http://semyra.localhost"))
+        .or_else(|| lower.strip_prefix("semyra://localhost"))
+    {
+        if rest.starts_with("/api/") {
+            Some(rest)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let Some(path) = api_path else {
+        return false;
+    };
+    !path.starts_with("/api/local-asset?")
+}
+
 fn resolve_asset_url(raw_url: &str, base_dir: Option<&Path>) -> String {
     let trimmed = raw_url.trim();
+    if is_blocked_internal_api_url(trimmed) {
+        return "#".to_string();
+    }
     if trimmed.is_empty()
         || trimmed.starts_with('#')
         || trimmed.get(..7).is_some_and(|s| s.eq_ignore_ascii_case("http://"))
@@ -555,7 +582,16 @@ pub fn document_language(markdown: &str) -> Option<String> {
     valid.then_some(language)
 }
 
+#[cfg(test)]
 pub fn render_markdown(markdown: &str, base_dir: Option<&Path>) -> RenderResult {
+    render_markdown_with_lang(markdown, base_dir, false)
+}
+
+pub fn render_markdown_with_lang(
+    markdown: &str,
+    base_dir: Option<&Path>,
+    is_en: bool,
+) -> RenderResult {
     let line_index = LineIndex::new(markdown);
 
     let words = markdown.split_whitespace().count();
@@ -575,6 +611,7 @@ pub fn render_markdown(markdown: &str, base_dir: Option<&Path>) -> RenderResult 
     render_markdown_fragment(
         markdown,
         base_dir,
+        is_en,
         0,
         true,
         0,
@@ -599,6 +636,7 @@ pub fn render_markdown(markdown: &str, base_dir: Option<&Path>) -> RenderResult 
 fn render_markdown_fragment(
     src: &str,
     base_dir: Option<&Path>,
+    is_en: bool,
     line_offset: usize,
     is_document_start: bool,
     depth: usize,
@@ -613,6 +651,7 @@ fn render_markdown_fragment(
         render_markdown_pulldown(
             src,
             base_dir,
+            is_en,
             line_offset,
             is_document_start,
             outline,
@@ -654,6 +693,7 @@ fn render_markdown_fragment(
                     render_markdown_pulldown(
                         before,
                         base_dir,
+                        is_en,
                         slice_line_offset,
                         slice_is_doc_start,
                         outline,
@@ -670,6 +710,7 @@ fn render_markdown_fragment(
                     render_markdown_fragment(
                         trimmed_inner,
                         base_dir,
+                        is_en,
                         abs_line - 1,
                         false,
                         depth + 1,
@@ -692,6 +733,7 @@ fn render_markdown_fragment(
                     render_markdown_pulldown(
                         before,
                         base_dir,
+                        is_en,
                         slice_line_offset,
                         slice_is_doc_start,
                         outline,
@@ -709,6 +751,7 @@ fn render_markdown_fragment(
                         render_markdown_fragment(
                             inner_slice,
                             base_dir,
+                            is_en,
                             line_offset + lines[i + 1].line_num - 1,
                             false,
                             depth + 1,
@@ -735,6 +778,7 @@ fn render_markdown_fragment(
         render_markdown_pulldown(
             rest,
             base_dir,
+            is_en,
             slice_line_offset,
             slice_is_doc_start,
             outline,
@@ -744,9 +788,11 @@ fn render_markdown_fragment(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_markdown_pulldown(
     markdown: &str,
     base_dir: Option<&Path>,
+    is_en: bool,
     line_offset: usize,
     allow_yaml_frontmatter: bool,
     outline: &mut Vec<HeadingItem>,
@@ -886,7 +932,11 @@ fn render_markdown_pulldown(
                         escape_html(&mut html, lang_label);
                         html.push_str("\"><div class=\"code-block-header\"><span class=\"code-lang-badge\">");
                         escape_html(&mut html, lang_label);
-                        html.push_str("</span><button type=\"button\" class=\"copy-code-btn\" data-i18n=\"preview.copy\" aria-label=\"Code kopieren\" data-i18n-aria=\"preview.copyAria\">Kopieren</button></div><pre tabindex=\"0\"><code class=\"hl-code\">");
+                        let copy_label = if is_en { "Copy" } else { "Kopieren" };
+                        let copy_aria = if is_en { "Copy code" } else { "Code kopieren" };
+                        html.push_str(&format!(
+                            "</span><button type=\"button\" class=\"copy-code-btn\" data-i18n=\"preview.copy\" aria-label=\"{copy_aria}\" data-i18n-aria=\"preview.copyAria\">{copy_label}</button></div><pre tabindex=\"0\"><code class=\"hl-code\">"
+                        ));
                         html.push_str(&highlighted);
                         html.push_str("</code></pre></div>\n");
                     }
@@ -919,11 +969,11 @@ fn render_markdown_pulldown(
                 Tag::BlockQuote(kind) => {
                     if let Some(alert_kind) = kind {
                         let (cls, title) = match alert_kind {
-                            BlockQuoteKind::Note => ("note", "Hinweis"),
-                            BlockQuoteKind::Tip => ("tip", "Tipp"),
-                            BlockQuoteKind::Important => ("important", "Wichtig"),
-                            BlockQuoteKind::Warning => ("warning", "Warnung"),
-                            BlockQuoteKind::Caution => ("caution", "Vorsicht"),
+                            BlockQuoteKind::Note => ("note", if is_en { "Note" } else { "Hinweis" }),
+                            BlockQuoteKind::Tip => ("tip", if is_en { "Tip" } else { "Tipp" }),
+                            BlockQuoteKind::Important => ("important", if is_en { "Important" } else { "Wichtig" }),
+                            BlockQuoteKind::Warning => ("warning", if is_en { "Warning" } else { "Warnung" }),
+                            BlockQuoteKind::Caution => ("caution", if is_en { "Caution" } else { "Vorsicht" }),
                         };
                         html.push_str(&format!(
                             "<div class=\"gfm-alert gfm-alert-{cls}\" data-line=\"{line}\"><div class=\"gfm-alert-title\">{title}</div>"
@@ -956,8 +1006,9 @@ fn render_markdown_pulldown(
                 }
                 Tag::Table(alignments) => {
                     table_alignments = alignments;
+                    let table_aria = if is_en { "Markdown table" } else { "Markdown-Tabelle" };
                     html.push_str(&format!(
-                        "<div tabindex=\"0\" role=\"region\" aria-label=\"Markdown-Tabelle\" class=\"table-wrapper\" data-line=\"{line}\"><table>"
+                        "<div tabindex=\"0\" role=\"region\" aria-label=\"{table_aria}\" class=\"table-wrapper\" data-line=\"{line}\"><table>"
                     ));
                 }
                 Tag::TableHead => {
@@ -1077,7 +1128,8 @@ fn render_markdown_pulldown(
                         escape_html(&mut html, &slug);
                         html.push_str(&format!("\" data-line=\"{h_line}\"><a class=\"heading-anchor\" href=\"#"));
                         escape_html(&mut html, &slug);
-                        html.push_str("\" aria-label=\"Abschnitt verlinken\">#</a>");
+                        let anchor_aria = if is_en { "Link to section" } else { "Abschnitt verlinken" };
+                        html.push_str(&format!("\" aria-label=\"{anchor_aria}\">#</a>"));
                         html.push_str(&format!("{inner_html}</h{lvl}>\n"));
                     }
                 }
@@ -1204,12 +1256,14 @@ fn render_markdown_pulldown(
             Event::TaskListMarker(checked) => {
                 let task_line = line.max(current_item_line);
                 if checked {
+                    let done_aria = if is_en { "Task completed" } else { "Aufgabe erledigt" };
                     html.push_str(&format!(
-                        "<input type=\"checkbox\" class=\"task-checkbox\" data-task-line=\"{task_line}\" checked aria-label=\"Aufgabe erledigt\"> "
+                        "<input type=\"checkbox\" class=\"task-checkbox\" data-task-line=\"{task_line}\" checked aria-label=\"{done_aria}\"> "
                     ));
                 } else {
+                    let open_aria = if is_en { "Task open" } else { "Aufgabe offen" };
                     html.push_str(&format!(
-                        "<input type=\"checkbox\" class=\"task-checkbox\" data-task-line=\"{task_line}\" aria-label=\"Aufgabe offen\"> "
+                        "<input type=\"checkbox\" class=\"task-checkbox\" data-task-line=\"{task_line}\" aria-label=\"{open_aria}\"> "
                     ));
                 }
             }
@@ -1411,6 +1465,8 @@ mod tests {
         // Asset URL edge cases: case-insensitive schemes, passthrough, percent-decoding, query/frag, UNC
         assert_eq!(resolve_asset_url("HTTPS://example.com/a.png", Some(Path::new(r"C:\Docs"))), "HTTPS://example.com/a.png");
         assert_eq!(resolve_asset_url("/api/local-asset?path=abc", Some(Path::new(r"C:\Docs"))), "/api/local-asset?path=abc");
+        assert_eq!(resolve_asset_url("/api/dialog/open-files", Some(Path::new(r"C:\Docs"))), "#");
+        assert_eq!(resolve_asset_url("https://semyra.localhost/api/window/force-close", None), "#");
         let space_img = resolve_asset_url("my%20img.png?v=1#dark", Some(Path::new(r"C:\Docs")));
         assert!(!space_img.contains("%2520"));
         assert!(!space_img.contains("dark"));
@@ -1422,5 +1478,27 @@ mod tests {
         let highlighted = highlight_code("rust", &long_line);
         assert!(!highlighted.contains("hl-"));
         assert_eq!(highlighted.len(), long_line.len());
+    }
+
+    #[test]
+    fn localizes_preview_labels_for_english_and_german() {
+        let md = "# Title\n\n> [!WARNING]\n> Check\n\n```rs\nfn a() {}\n```\n\n| A |\n| - |\n| 1 |\n\n- [x] Done\n- [ ] Todo\n";
+        let en = render_markdown_with_lang(md, None, true);
+        assert!(en.html.contains(">Warning</div>"));
+        assert!(en.html.contains("aria-label=\"Copy code\""));
+        assert!(en.html.contains(">Copy</button>"));
+        assert!(en.html.contains("aria-label=\"Markdown table\""));
+        assert!(en.html.contains("aria-label=\"Link to section\""));
+        assert!(en.html.contains("aria-label=\"Task completed\""));
+        assert!(en.html.contains("aria-label=\"Task open\""));
+
+        let de = render_markdown_with_lang(md, None, false);
+        assert!(de.html.contains(">Warnung</div>"));
+        assert!(de.html.contains("aria-label=\"Code kopieren\""));
+        assert!(de.html.contains(">Kopieren</button>"));
+        assert!(de.html.contains("aria-label=\"Markdown-Tabelle\""));
+        assert!(de.html.contains("aria-label=\"Abschnitt verlinken\""));
+        assert!(de.html.contains("aria-label=\"Aufgabe erledigt\""));
+        assert!(de.html.contains("aria-label=\"Aufgabe offen\""));
     }
 }

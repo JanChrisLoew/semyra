@@ -556,7 +556,7 @@ fn main() {
                     close_ack.store(false, Ordering::SeqCst);
                     close_requested_at = Some(Instant::now());
                     let ack_cb = Arc::clone(&close_ack);
-                    let close_js = "if (typeof window.__semyraReceive === 'function') { window.__semyraReceive(\"close-requested\", {}); } else { fetch('/api/window/force-close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ recoveryRestored: false }) }); }";
+                    let close_js = "if (typeof window.__semyraReceive === 'function') { window.__semyraReceive(\"close-requested\", {}); } else { fetch('/api/window/force-close', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Semyra-IPC': '1' }, body: JSON.stringify({ recoveryRestored: false }) }); }";
                     if webview
                         .evaluate_script_with_callback(close_js, move |_| {
                             ack_cb.store(true, Ordering::SeqCst);

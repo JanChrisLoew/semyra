@@ -2,6 +2,7 @@ import { backend, type FilePayload } from './api';
 import {
   buildAiContextBundle,
   InvalidXmlCharacter,
+  isSensitiveAiContextPath,
   extractTemplateVariables,
   interpolateTemplateVariables,
   toWorkspaceRelativeLabel,
@@ -293,18 +294,23 @@ export function openAiBundleDialogModal(deps: AiBundleDialogDeps): void {
     content: string | null;
     filePath: string | null;
     checked: boolean;
+    sensitive: boolean;
     tokensText: string;
   };
 
-  const items: SelectableItem[] = deps.tabs.map((tab) => ({
-    key: `tab:${tab.id}`,
-    name: tab.name,
-    subtitle: tab.path ?? (isEn ? 'Unsaved tab' : 'Ungespeicherter Tab'),
-    content: tab.currentContent,
-    filePath: tab.path,
-    checked: true,
-    tokensText: `~${estimateTokens(tab.currentContent).toLocaleString(locale)} Tokens`,
-  }));
+  const items: SelectableItem[] = deps.tabs.map((tab) => {
+    const sensitive = isSensitiveAiContextPath(tab.path ?? tab.name);
+    return {
+      key: `tab:${tab.id}`,
+      name: tab.name,
+      subtitle: tab.path ?? (isEn ? 'Unsaved tab' : 'Ungespeicherter Tab'),
+      content: tab.currentContent,
+      filePath: tab.path,
+      checked: !sensitive,
+      sensitive,
+      tokensText: `~${estimateTokens(tab.currentContent).toLocaleString(locale)} Tokens`,
+    };
+  });
 
   const getBundleLabel = (item: SelectableItem): string =>
     toWorkspaceRelativeLabel(item.filePath, deps.workspaceRootPath, item.name);
@@ -427,13 +433,25 @@ export function openAiBundleDialogModal(deps: AiBundleDialogDeps): void {
 
       const meta = document.createElement('span');
       meta.className = 'ai-bundle-item-meta';
+      const nameRow = document.createElement('span');
+      nameRow.className = 'ai-bundle-item-name-row';
       const nameEl = document.createElement('span');
       nameEl.className = 'ai-bundle-item-name';
       nameEl.textContent = item.name;
+      nameRow.appendChild(nameEl);
+      if (item.sensitive) {
+        const badge = document.createElement('span');
+        badge.className = 'ai-bundle-sensitive-badge';
+        badge.textContent = isEn ? 'Sensitive' : 'Sensibel';
+        badge.title = isEn
+          ? 'May contain secrets — excluded from automatic selection'
+          : 'Kann Zugangsdaten enthalten — von automatischer Auswahl ausgeschlossen';
+        nameRow.appendChild(badge);
+      }
       const pathEl = document.createElement('span');
       pathEl.className = 'ai-bundle-item-path';
       pathEl.textContent = item.subtitle;
-      meta.append(nameEl, pathEl);
+      meta.append(nameRow, pathEl);
 
       checkWrap.append(checkbox, meta);
 
@@ -528,6 +546,7 @@ export function openAiBundleDialogModal(deps: AiBundleDialogDeps): void {
     selectAllBtn.onclick = () => {
       const targetItems = getFilteredItems();
       targetItems.forEach((item) => {
+        if (item.sensitive) return;
         item.checked = true;
         if (item.content === null) {
           void ensureItemTokens(item);
@@ -591,6 +610,7 @@ export function openAiBundleDialogModal(deps: AiBundleDialogDeps): void {
           content: null,
           filePath: file.path,
           checked: false,
+          sensitive: isSensitiveAiContextPath(file.relPath || file.name),
           tokensText: isEn ? 'Workspace' : 'Ordner',
         });
       }

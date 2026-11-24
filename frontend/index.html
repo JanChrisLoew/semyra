@@ -87,7 +87,32 @@
       <!-- Dedicated Document Tab Strip Row (full width) -->
       <nav class="toolbar-row tabs-bar-row tab-strip-wrap" aria-label="Geöffnete Dokumente" data-i18n-aria="tabCtx.openDocs">
         <div id="tab-bar" class="tab-bar" role="tablist" aria-label="Geöffnete Dokumente" data-i18n-aria="tabCtx.openDocs"></div>
-        <button type="button" id="btn-tab-add" class="tab-add-btn" title="Neuer Tab (Strg+N)" aria-label="Neuer Tab" data-i18n-title="nav.newTabTitle" data-i18n-aria="nav.newTabTitle">+</button>
+        <div class="tab-add-group">
+          <button type="button" id="btn-tab-add" class="tab-add-btn" title="Neuer Tab (Strg+N)" aria-label="Neuer Tab" data-i18n-title="nav.newTabTitle" data-i18n-aria="nav.newTabTitle">+</button>
+          <button type="button" id="btn-tab-add-menu" class="tab-add-menu-btn" aria-haspopup="menu" aria-expanded="false" commandfor="new-tab-template-popover" command="toggle-popover" title="Neues Dokument aus Vorlage" aria-label="Neues Dokument aus Vorlage" data-i18n-title="nav.newTabMenuTitle" data-i18n-aria="nav.newTabMenuAria">▾</button>
+          <div id="new-tab-template-popover" popover="auto" class="fluent-menu-popover new-tab-template-popover">
+            <div focusgroup="menu nomemory" aria-label="Vorlagen für neue Dokumente" data-i18n-aria="nav.newTabMenuAria">
+              <button type="button" class="menu-item" data-new-template="empty">
+                <span class="menu-item-text" data-i18n="newTabMenu.empty">Leeres Dokument</span>
+                <kbd class="menu-item-shortcut">Strg+N</kbd>
+              </button>
+              <div class="menu-divider" role="separator"></div>
+              <div class="menu-section-header" data-i18n="newTabMenu.templates">KI- &amp; Markdown-Vorlagen</div>
+              <button type="button" class="menu-item" data-new-template="agents">
+                <span class="menu-item-text" data-i18n="newTabMenu.agents">AGENTS.md (Projektanweisungen)</span>
+              </button>
+              <button type="button" class="menu-item" data-new-template="prompt">
+                <span class="menu-item-text" data-i18n="newTabMenu.prompt">System-Prompt</span>
+              </button>
+              <button type="button" class="menu-item" data-new-template="skill">
+                <span class="menu-item-text" data-i18n="newTabMenu.skill">Agent-Skill (SKILL.md)</span>
+              </button>
+              <button type="button" class="menu-item" data-new-template="review">
+                <span class="menu-item-text" data-i18n="newTabMenu.review">Code-Review-Vorlage</span>
+              </button>
+            </div>
+          </div>
+        </div>
       </nav>
     </header>
 
@@ -242,7 +267,7 @@
     <footer id="status-bar" class="status-bar">
       <div class="status-left">
         <span class="status-brand-pill" title="Semyra v0.2.0 — Markdown for the AI era.">semyra</span>
-        <span class="status-sep">·</span>
+        <span class="status-sep status-brand-sep">·</span>
         <button type="button" id="status-filepath" class="status-link" title="Klicken, um Datei im Windows Explorer anzuzeigen" data-i18n-title="status.filepathTitle">Unbenannt.md</button>
         <span id="status-save-badge" class="status-badge" data-i18n="status.draft">Entwurf</span>
       </div>
@@ -256,7 +281,7 @@
         <button type="button" id="status-zoom" class="status-action-btn" title="Dokument-Zoom auf 100 % zurücksetzen (Strg+0)" data-i18n-title="status.zoomResetTitle">100%</button>
         <span class="status-sep">·</span>
         <button type="button" id="status-eol" class="status-action-btn" title="Zeilenende zwischen CRLF und LF umschalten" data-i18n-title="status.eolToggleTitle">CRLF</button>
-        <span class="status-sep">·</span>
+        <span class="status-sep status-encoding-sep">·</span>
         <span id="status-encoding" title="Dateikodierung" data-i18n-title="status.encodingTitle">UTF-8</span>
       </div>
     </footer>
@@ -325,6 +350,10 @@
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4.5A1 1 0 0 1 3 3.5h3l1.2 1.5H13a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-8z" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
         <span data-i18n="treeCtx.newFolder">Neuer Unterordner…</span>
       </button>
+      <button type="button" data-ctx-action="insert-image" id="tree-ctx-insert-image" hidden>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="5.5" cy="6.2" r="1.1" fill="currentColor"/><path d="M3.2 11.5l3-3 2 2 2.2-2.4 2.4 3.4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span data-i18n="treeCtx.insertImage">Als Markdown-Bild einfügen</span>
+      </button>
       <hr>
       <button type="button" data-ctx-action="rename" id="ctx-btn-rename">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.8 2.8l2.4 2.4-7.6 7.6H3.2v-2.4l7.6-7.6z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
@@ -383,6 +412,11 @@
         <span id="tab-ctx-pin-label" data-i18n="tabCtx.pin">Tab anheften</span>
       </button>
       <hr>
+      <button type="button" data-tab-ctx="save-as" id="tab-ctx-save-as">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h7l3 3v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5 2.5v3h4v-3M5 13.5v-4h5v4" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
+        <span data-i18n="share.saveAs">Speichern unter…</span>
+        <kbd class="ctx-shortcut">Strg+Umschalt+S</kbd>
+      </button>
       <button type="button" data-tab-ctx="reveal" id="tab-ctx-reveal">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 3.5H3.5v9h9v-3M9.5 2.5h4v4M13.5 2.5l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span data-i18n="treeCtx.reveal">Im Explorer anzeigen</span>
@@ -1008,8 +1042,8 @@
     <h2 id="workspace-replace-dialog-title" data-i18n="search.replaceAll">Alle ersetzen</h2>
     <p id="workspace-replace-dialog-msg" class="dialog-text"></p>
     <form method="dialog" class="dialog-actions">
-      <button type="submit" value="cancel" class="dialog-btn" data-i18n="aiBundle.cancelBtn">Abbrechen</button>
-      <button type="submit" value="confirm" class="dialog-btn primary" data-i18n="search.replaceAll">Alle ersetzen</button>
+      <button type="submit" value="cancel" class="dialog-btn" data-i18n="aiBundle.cancelBtn" autofocus>Abbrechen</button>
+      <button type="submit" value="confirm" class="dialog-btn primary" data-i18n="search.replaceAll" aria-describedby="workspace-replace-dialog-msg">Alle ersetzen</button>
     </form>
   </dialog>
 

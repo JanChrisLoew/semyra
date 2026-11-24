@@ -244,4 +244,22 @@ describe('safeSetMarkdownHTML', () => {
     expect(nextDetails[2].open).toBe(true);
     expect(nextDetails[2].querySelector('p')?.textContent).toBe('Neu Zelle');
   });
+
+  it('strips internal /api/* image sources while preserving /api/local-asset', async () => {
+    const host = document.createElement('article');
+    await safeSetMarkdownHTML(
+      host,
+      [
+        '<img id="bad-rel" src="/api/dialog/open-files" alt="rel">',
+        '<img id="bad-abs" src="https://semyra.localhost/api/window/force-close" alt="abs">',
+        '<img id="ok-asset" src="/api/local-asset?path=C%3A%2Fimg.png" alt="ok">',
+      ].join(''),
+    );
+
+    expect(host.querySelector('#bad-rel')?.hasAttribute('src')).toBe(false);
+    expect(host.querySelector('#bad-abs')?.hasAttribute('src')).toBe(false);
+    expect(host.querySelector('#ok-asset')?.getAttribute('src')).toBe(
+      '/api/local-asset?path=C%3A%2Fimg.png',
+    );
+  });
 });

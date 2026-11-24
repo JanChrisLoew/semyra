@@ -461,10 +461,17 @@ body.is-tab-dragging * {
   color: var(--fg-primary);
 }
 
+.tab-add-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+  margin-bottom: 2px;
+}
+
 .tab-add-btn {
   width: 26px;
   height: 26px;
-  margin-bottom: 2px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -477,9 +484,30 @@ body.is-tab-dragging * {
   justify-content: center;
 }
 
-.tab-add-btn:hover {
+.tab-add-menu-btn {
+  width: 18px;
+  height: 26px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tab-add-btn:hover,
+.tab-add-menu-btn:hover {
   background: var(--bg-hover);
   color: var(--fg-primary);
+}
+
+.tab-add-menu-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 /* Info Banner */
@@ -606,6 +634,25 @@ body.is-tab-dragging * {
   color: var(--fg-primary);
 }
 
+@media (max-width: 920px) {
+  .status-bar {
+    padding: 0 8px;
+  }
+  .status-left,
+  .status-right {
+    gap: 5px;
+  }
+  .status-brand-pill,
+  .status-brand-sep,
+  #status-encoding,
+  .status-encoding-sep {
+    display: none;
+  }
+  .status-link {
+    max-width: 180px;
+  }
+}
+
 .drop-overlay {
   position: fixed;
   inset: 0;
@@ -693,7 +740,8 @@ body.is-tab-dragging * {
 }
 
 .share-popover,
-.view-popover {
+.view-popover,
+.new-tab-template-popover {
   min-width: 270px;
   max-width: 360px;
   padding: 6px;
@@ -711,15 +759,23 @@ body.is-tab-dragging * {
   z-index: 1000;
 }
 
+.new-tab-template-popover {
+  min-width: 240px;
+  position-area: block-end span-inline-end;
+  position-try-fallbacks: flip-inline, flip-block;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .share-popover,
-  .view-popover {
+  .view-popover,
+  .new-tab-template-popover {
     opacity: 0;
     transform: translateY(-4px);
     transition: opacity 120ms ease, transform 120ms ease, display 120ms allow-discrete, overlay 120ms allow-discrete;
   }
   .share-popover:popover-open,
-  .view-popover:popover-open {
+  .view-popover:popover-open,
+  .new-tab-template-popover:popover-open {
     opacity: 1;
     transform: translateY(0);
     @starting-style {
@@ -730,7 +786,8 @@ body.is-tab-dragging * {
 }
 
 .share-popover .menu-section-header,
-.view-popover .menu-section-header {
+.view-popover .menu-section-header,
+.new-tab-template-popover .menu-section-header {
   grid-column: 1 / -1;
   width: 100%;
   box-sizing: border-box;
@@ -745,12 +802,14 @@ body.is-tab-dragging * {
 }
 
 .share-popover .menu-section-header:first-of-type,
-.view-popover .menu-section-header:first-of-type {
+.view-popover .menu-section-header:first-of-type,
+.new-tab-template-popover .menu-section-header:first-of-type {
   padding-top: 4px;
 }
 
 .share-popover .menu-divider,
-.view-popover .menu-divider {
+.view-popover .menu-divider,
+.new-tab-template-popover .menu-divider {
   grid-column: 1 / -1;
   height: 1px;
   background: var(--border-subtle);
@@ -758,7 +817,8 @@ body.is-tab-dragging * {
 }
 
 .share-popover .menu-item,
-.view-popover .menu-item {
+.view-popover .menu-item,
+.new-tab-template-popover .menu-item {
   display: flex;
   align-items: center;
   gap: 9px;
@@ -778,13 +838,16 @@ body.is-tab-dragging * {
 .share-popover .menu-item:hover,
 .share-popover .menu-item:focus-visible,
 .view-popover .menu-item:hover,
-.view-popover .menu-item:focus-visible {
+.view-popover .menu-item:focus-visible,
+.new-tab-template-popover .menu-item:hover,
+.new-tab-template-popover .menu-item:focus-visible {
   background: var(--bg-hover);
   outline: none;
 }
 
 .share-popover .menu-item svg,
-.view-popover .menu-item svg {
+.view-popover .menu-item svg,
+.new-tab-template-popover .menu-item svg {
   width: 15px;
   height: 15px;
   color: var(--fg-secondary);
@@ -792,12 +855,14 @@ body.is-tab-dragging * {
 }
 
 .share-popover .menu-item:hover svg,
-.view-popover .menu-item:hover svg {
+.view-popover .menu-item:hover svg,
+.new-tab-template-popover .menu-item:hover svg {
   color: var(--fg-primary);
 }
 
 .share-popover .menu-item-text,
-.view-popover .menu-item-text {
+.view-popover .menu-item-text,
+.new-tab-template-popover .menu-item-text {
   flex: 1;
   white-space: nowrap;
   overflow: hidden;

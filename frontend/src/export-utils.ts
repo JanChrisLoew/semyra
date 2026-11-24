@@ -9,6 +9,7 @@
 
 import { renderMermaidLightInClone } from './sanitizer';
 import { backend } from './api';
+import { getLanguage } from './i18n';
 import { getFileExtension, isMarkdownPath } from './path-utils';
 
 const TEXT_LANGUAGES: Record<string, string> = {
@@ -27,13 +28,14 @@ export function renderDocument(
   content: string,
   baseDir: string | null,
   docKey?: string,
+  lang: string = getLanguage(),
 ) {
-  if (isMarkdownPath(name)) return backend.renderMarkdown(content, baseDir, docKey);
+  if (isMarkdownPath(name)) return backend.renderMarkdown(content, baseDir, docKey, lang);
   const ext = getFileExtension(name);
   const language = TEXT_LANGUAGES[ext] ?? (ext || 'text');
   let fence = '```';
   while (content.includes(fence)) fence += '`';
-  return backend.renderMarkdown(`${fence}${language}\n${content}\n${fence}`, baseDir, docKey);
+  return backend.renderMarkdown(`${fence}${language}\n${content}\n${fence}`, baseDir, docKey, lang);
 }
 
 export interface ExportThemePalette {
@@ -66,7 +68,7 @@ export const EXPORT_THEME_PALETTES: Record<'light' | 'dark', ExportThemePalette>
     surfaceAlt: '#f0f3f6',
     cardBg: '#f8fafc',
     accent: '#426b91',
-    warning: '#986c3d',
+    warning: '#8a5a18',
     syntax: {
       comment: '#6e7781',
       keyword: '#cf222e',
@@ -85,7 +87,7 @@ export const EXPORT_THEME_PALETTES: Record<'light' | 'dark', ExportThemePalette>
     surfaceAlt: '#222a35',
     cardBg: '#1a212b',
     accent: '#83a5c6',
-    warning: '#d0a774',
+    warning: '#e5b567',
     syntax: {
       comment: '#8b949e',
       keyword: '#ff7b72',
