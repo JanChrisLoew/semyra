@@ -295,7 +295,7 @@ pub fn build_standalone_html_document(
       --border: #d6dde4;
       --surface: #f3f5f7;
       --accent: #426b91;
-      --warning: #986c3d;
+      --warning: #8a5a18;
     }}
     @media (prefers-color-scheme: dark) {{
       :root {{
@@ -305,7 +305,7 @@ pub fn build_standalone_html_document(
         --border: #323e4d;
         --surface: #1a212b;
         --accent: #83a5c6;
-        --warning: #d0a774;
+        --warning: #e5b567;
       }}
     }}
     *, *::before, *::after {{ box-sizing: border-box; }}

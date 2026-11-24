@@ -85,6 +85,12 @@ export interface UiSessionPrefs {
   spellcheck: boolean;
   formatBarVisible?: boolean;
   language?: 'de' | 'en';
+  defaultLineEnding?: 'CRLF' | 'LF';
+  viewMode?: 'editor' | 'split' | 'preview';
+  themeChoice?: 'system' | 'light' | 'dark';
+  sidebarWidth?: number;
+  sidebarCollapsed?: boolean;
+  editorCentered?: boolean;
   recentFiles: string[];
   recentFolders: string[];
   sessionFiles: string[];
@@ -102,7 +108,10 @@ export interface StartupPayload {
 async function postJson<T>(endpoint: string, payload: unknown = {}): Promise<T> {
   const res = await fetch(`/api/${endpoint}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Semyra-IPC': '1',
+    },
     body: JSON.stringify(payload),
   });
   const data = await res.json();
@@ -118,11 +127,13 @@ export const backend = {
   saveUiPrefs: (revision: number, prefs: UiSessionPrefs) =>
     postJson<{ ok: boolean }>('prefs/save', { revision, prefs }),
 
-  renderMarkdown: (markdown: string, baseDir: string | null, docKey?: string) =>
-    postJson<RenderResult>(
-      'render',
-      docKey !== undefined ? { markdown, baseDir, docKey } : { markdown, baseDir },
-    ),
+  renderMarkdown: (markdown: string, baseDir: string | null, docKey?: string, lang?: string) =>
+    postJson<RenderResult>('render', {
+      markdown,
+      baseDir,
+      ...(docKey !== undefined ? { docKey } : {}),
+      ...(lang !== undefined ? { lang } : {}),
+    }),
 
   readFile: (path: string) => postJson<FilePayload>('read-file', { path }),
 
@@ -143,8 +154,17 @@ export const backend = {
   listWorkspaceFiles: (path: string) =>
     postJson<{ files: WorkspaceFileEntry[] }>('workspace-files', { path }),
 
-  createFile: (parentDir: string, fileName: string) =>
-    postJson<FilePayload>('create-file', { parentDir, fileName }),
+  createFile: (
+    parentDir: string,
+    fileName: string,
+    options?: { lang?: string; preferCrlf?: boolean },
+  ) =>
+    postJson<FilePayload>('create-file', {
+      parentDir,
+      fileName,
+      ...(options?.lang !== undefined ? { lang: options.lang } : {}),
+      ...(options?.preferCrlf !== undefined ? { preferCrlf: options.preferCrlf } : {}),
+    }),
 
   createFolder: (parentDir: string, folderName: string) =>
     postJson<{ path: string }>('create-folder', { parentDir, folderName }),
@@ -152,8 +172,17 @@ export const backend = {
   initAiLibrary: () =>
     postJson<{ root: string; tree: FileTreeNode }>('ai-library/init'),
 
-  createAiSkill: (parentDir: string, skillName: string) =>
-    postJson<FilePayload>('ai-library/create-skill', { parentDir, skillName }),
+  createAiSkill: (
+    parentDir: string,
+    skillName: string,
+    options?: { lang?: string; preferCrlf?: boolean },
+  ) =>
+    postJson<FilePayload>('ai-library/create-skill', {
+      parentDir,
+      skillName,
+      ...(options?.lang !== undefined ? { lang: options.lang } : {}),
+      ...(options?.preferCrlf !== undefined ? { preferCrlf: options.preferCrlf } : {}),
+    }),
 
   renamePath: (path: string, newName: string) =>
     postJson<{ path: string; name: string }>('rename-path', { path, newName }),

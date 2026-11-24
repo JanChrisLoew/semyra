@@ -4,6 +4,15 @@ export type ThemeChoice = 'system' | 'light' | 'dark';
 
 let currentThemeListener: (() => void) | null = null;
 
+export function hasStoredThemeChoice(): boolean {
+  try {
+    const stored = localStorage.getItem('color-scheme');
+    return stored === 'light' || stored === 'dark';
+  } catch {
+    return false;
+  }
+}
+
 export function getThemeChoice(): ThemeChoice {
   try {
     const stored = localStorage.getItem('color-scheme');
@@ -12,7 +21,7 @@ export function getThemeChoice(): ThemeChoice {
   return 'system';
 }
 
-export function setThemeChoice(choice: ThemeChoice): void {
+export function setThemeChoice(choice: ThemeChoice, notify = true): void {
   const meta = document.querySelector('meta[name="color-scheme"]') as HTMLMetaElement | null;
   try {
     if (choice === 'system') {
@@ -25,7 +34,9 @@ export function setThemeChoice(choice: ThemeChoice): void {
   } catch {}
 
   void backend.setWindowState({ theme: choice });
-  currentThemeListener?.();
+  if (notify) {
+    currentThemeListener?.();
+  }
 }
 
 export function toggleTheme(): void {

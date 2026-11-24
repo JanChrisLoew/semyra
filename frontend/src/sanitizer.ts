@@ -141,6 +141,36 @@ function isDarkColorSchemeActive(): boolean {
     : false;
 }
 
+function isBlockedInternalApiSrc(rawSrc: string): boolean {
+  const trimmed = rawSrc.trim();
+  if (!trimmed) return false;
+  let pathWithQuery: string | null = null;
+  if (/^\/api\//i.test(trimmed)) {
+    pathWithQuery = trimmed;
+  } else {
+    try {
+      const parsed = new URL(trimmed, 'https://semyra.localhost/');
+      if (
+        (parsed.protocol === 'https:' || parsed.protocol === 'http:') &&
+        parsed.hostname.toLowerCase() === 'semyra.localhost' &&
+        parsed.pathname.toLowerCase().startsWith('/api/')
+      ) {
+        pathWithQuery = `${parsed.pathname}${parsed.search}`;
+      } else if (
+        parsed.protocol === 'semyra:' &&
+        parsed.hostname.toLowerCase() === 'localhost' &&
+        parsed.pathname.toLowerCase().startsWith('/api/')
+      ) {
+        pathWithQuery = `${parsed.pathname}${parsed.search}`;
+      }
+    } catch {
+      return false;
+    }
+  }
+  if (!pathWithQuery) return false;
+  return !/^\/api\/local-asset\?/i.test(pathWithQuery);
+}
+
 /**
  * Safely sanitizes rendered Markdown HTML in an offscreen staging container,
  * applies cached KaTeX & Mermaid enhancements without flickering, and reconciles
@@ -176,6 +206,14 @@ export async function safeSetMarkdownHTML(
       ALLOW_ARIA_ATTR: false,
       ALLOW_DATA_ATTR: false,
     });
+  }
+
+  // Strip any image `src` targeting internal `/api/*` endpoints other than `/api/local-asset?`
+  for (const img of staging.querySelectorAll<HTMLImageElement>('img[src]')) {
+    const src = img.getAttribute('src') ?? '';
+    if (isBlockedInternalApiSrc(src)) {
+      img.removeAttribute('src');
+    }
   }
 
   // Enhance KaTeX inline & display math blocks using LRU cache

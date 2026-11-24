@@ -11,8 +11,9 @@ pub use html_export::{build_standalone_html_document, inline_local_asset_images}
 pub use search::search_workspace_files;
 pub use search::{replace_in_workspace_with_options, search_workspace_with_metadata};
 pub use workspace::{
-    build_directory_tree, create_ai_skill, create_new_folder, create_new_markdown_file,
-    ensure_ai_library_tree, list_workspace_markdown_files, move_to_recycle_bin, rename_fs_entry,
+    build_directory_tree, create_ai_skill_with_options, create_new_folder,
+    create_new_markdown_file_with_options, ensure_ai_library_tree, list_workspace_markdown_files,
+    move_to_recycle_bin, rename_fs_entry,
 };
 
 use std::fs;

@@ -1,6 +1,6 @@
 use super::pool::{render_worker_pool, ResponderGuard};
 use super::{err_json, ok_json};
-use crate::markdown::render_markdown;
+use crate::markdown::render_markdown_with_lang;
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -83,6 +83,8 @@ struct RenderReq {
     doc_key: Option<String>,
     #[serde(default)]
     revision: Option<u64>,
+    #[serde(default)]
+    lang: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -142,7 +144,8 @@ pub(super) fn handle_render(body: &[u8], responder: ResponderGuard) {
             }
         }
         let base = req.base_dir.as_deref().map(Path::new);
-        let result = render_markdown(&req.markdown, base);
+        let is_en = req.lang.as_deref() == Some("en");
+        let result = render_markdown_with_lang(&req.markdown, base, is_en);
         responder.respond(ok_json(&result));
     });
 }

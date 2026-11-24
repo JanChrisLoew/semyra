@@ -4,6 +4,7 @@ import {
   extractTemplateVariables,
   formatAiContextEntry,
   interpolateTemplateVariables,
+  isSensitiveAiContextPath,
   toWorkspaceRelativeLabel,
 } from '../ai-bundle';
 
@@ -165,6 +166,25 @@ describe('ai-bundle', () => {
         item: '',
       });
       expect(out).toBe('Hello Alice, your  is {{status}}. {{toString}}');
+    });
+  });
+
+  describe('isSensitiveAiContextPath', () => {
+    it('flags .env files, private keys, and credential files while allowing templates and docs', () => {
+      expect(isSensitiveAiContextPath('.env')).toBe(true);
+      expect(isSensitiveAiContextPath('C:\\Repo\\.env.local')).toBe(true);
+      expect(isSensitiveAiContextPath('config/.env.production')).toBe(true);
+      expect(isSensitiveAiContextPath('certs/server.pem')).toBe(true);
+      expect(isSensitiveAiContextPath('tls/private.key')).toBe(true);
+      expect(isSensitiveAiContextPath('/home/u/.ssh/id_rsa')).toBe(true);
+      expect(isSensitiveAiContextPath('credentials.json')).toBe(true);
+      expect(isSensitiveAiContextPath('.npmrc')).toBe(true);
+
+      expect(isSensitiveAiContextPath('.env.example')).toBe(false);
+      expect(isSensitiveAiContextPath('.env.sample')).toBe(false);
+      expect(isSensitiveAiContextPath('.env.template')).toBe(false);
+      expect(isSensitiveAiContextPath('docs/AGENTS.md')).toBe(false);
+      expect(isSensitiveAiContextPath('README.md')).toBe(false);
     });
   });
 });

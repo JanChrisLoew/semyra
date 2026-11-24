@@ -4,7 +4,7 @@ use crate::fs_ops::{
     build_directory_tree, build_standalone_html_document, clean_windows_path,
     inline_local_asset_images, normalize_existing_path, read_text_file, write_text_file,
 };
-use crate::markdown::render_markdown;
+use crate::markdown::render_markdown_with_lang;
 use crate::state::{AppState, UserEvent};
 use http::StatusCode;
 use serde::Deserialize;
@@ -331,7 +331,7 @@ pub(super) fn handle_export_html_dialog(
                 Some(client_html) => client_html.to_string(),
                 None => {
                     let base = req.base_dir.as_deref().map(Path::new);
-                    render_markdown(&req.markdown, base).html
+                    render_markdown_with_lang(&req.markdown, base, is_en).html
                 }
             };
             let (self_contained_body, images) =

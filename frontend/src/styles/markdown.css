@@ -160,8 +160,8 @@
 .gfm-alert-important { border-left-color: #8f7ce6; }
 .gfm-alert-important .gfm-alert-title { color: #8f7ce6; }
 
-.gfm-alert-warning { border-left-color: var(--color-unsaved-dot); }
-.gfm-alert-warning .gfm-alert-title { color: var(--color-unsaved-dot); }
+.gfm-alert-warning { border-left-color: var(--color-warning); }
+.gfm-alert-warning .gfm-alert-title { color: var(--color-warning); }
 
 .gfm-alert-caution { border-left-color: var(--danger); }
 .gfm-alert-caution .gfm-alert-title { color: var(--danger); }

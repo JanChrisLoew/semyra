@@ -28,6 +28,24 @@ function normalizePathForCompare(p: string): string {
   return p.replace(/^\\\\\?\\/, '').replace(/\\/g, '/');
 }
 
+const SENSITIVE_BASENAME_RE =
+  /^(?:\.env(?:\..+)?|id_(?:rsa|dsa|ecdsa|ed25519)|\.npmrc|\.netrc|credentials\.json|secrets\.json)$/i;
+const SENSITIVE_EXT_RE = /\.(?:pem|key|p12|pfx)$/i;
+
+/**
+ * Returns true if the given filename or path likely contains secrets or credentials
+ * (e.g. `.env`, `.env.local`, private keys) and must require explicit opt-in in AI bundles.
+ */
+export function isSensitiveAiContextPath(pathOrName: string): boolean {
+  const base = baseNameOfPath(pathOrName.trim());
+  if (!base) return false;
+  const lower = base.toLowerCase();
+  if (lower === '.env.example' || lower === '.env.sample' || lower === '.env.template') {
+    return false;
+  }
+  return SENSITIVE_BASENAME_RE.test(base) || SENSITIVE_EXT_RE.test(base);
+}
+
 /**
  * Normalizes a file path into a workspace-relative POSIX-style label when inside
  * `workspaceRoot`, falling back to the file basename or `fallbackName`.

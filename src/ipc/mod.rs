@@ -16,11 +16,11 @@ use render::handle_render;
 use crate::drafts::DraftEntry;
 use crate::fs_ops::encoding::write_text_file_if_unchanged;
 use crate::fs_ops::{
-    app_data_dir, build_directory_tree, clean_windows_path, create_ai_skill, create_new_folder,
-    create_new_markdown_file, ensure_ai_library_tree, import_dropped_image,
-    list_workspace_markdown_files, move_to_recycle_bin, normalize_existing_path, read_text_file,
-    rename_fs_entry, replace_in_workspace_with_options, reveal_in_explorer, save_clipboard_image,
-    search_workspace_with_metadata,
+    app_data_dir, build_directory_tree, clean_windows_path, create_ai_skill_with_options,
+    create_new_folder, create_new_markdown_file_with_options, ensure_ai_library_tree,
+    import_dropped_image, list_workspace_markdown_files, move_to_recycle_bin,
+    normalize_existing_path, read_text_file, rename_fs_entry, replace_in_workspace_with_options,
+    reveal_in_explorer, save_clipboard_image, search_workspace_with_metadata,
 };
 use crate::state::{AppState, UserEvent};
 use crate::window_prefs::UiSessionPrefs;
@@ -68,6 +68,10 @@ struct WriteReq {
 struct CreateFileReq {
     parent_dir: String,
     file_name: String,
+    #[serde(default)]
+    lang: Option<String>,
+    #[serde(default)]
+    prefer_crlf: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -82,6 +86,10 @@ struct CreateFolderReq {
 struct CreateSkillReq {
     parent_dir: String,
     skill_name: String,
+    #[serde(default)]
+    lang: Option<String>,
+    #[serde(default)]
+    prefer_crlf: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -183,7 +191,6 @@ pub(super) fn json_response<T: Serialize>(
         .status(status)
         .header("Content-Type", "application/json; charset=utf-8")
         .header("Cache-Control", "no-store")
-        .header("Access-Control-Allow-Origin", "*")
         .body(Cow::Owned(body))
         .unwrap()
 }
@@ -209,23 +216,53 @@ pub(super) fn query_param(query: Option<&str>, key: &str) -> Option<String> {
     None
 }
 
+pub(super) fn validate_api_request(
+    method: &http::Method,
+    has_ipc_header: bool,
+) -> Result<(), (StatusCode, &'static str)> {
+    if *method != http::Method::POST {
+        return Err((StatusCode::METHOD_NOT_ALLOWED, "Nur POST-Anfragen sind für IPC-Routen zulässig."));
+    }
+    if !has_ipc_header {
+        return Err((StatusCode::FORBIDDEN, "Fehlender Semyra-IPC-Header."));
+    }
+    Ok(())
+}
+
 pub fn handle_protocol_request(
     state: AppState,
     request: http::Request<Vec<u8>>,
     responder: RequestAsyncResponder,
 ) {
     let responder = ResponderGuard::new(responder);
+    let method = request.method().clone();
+    let has_ipc_header = request
+        .headers()
+        .get("x-semyra-ipc")
+        .and_then(|v| v.to_str().ok())
+        == Some("1");
     let path = request.uri().path().to_string();
     let query = request.uri().query().map(|s| s.to_string());
     let body = request.into_body();
 
     // Local Markdown asset streaming (images referenced by relative path in Markdown)
     if path == "/api/local-asset" {
+        if method != http::Method::GET {
+            responder.respond(err_json(
+                StatusCode::METHOD_NOT_ALLOWED,
+                "Nur GET-Anfragen sind für lokale Ressourcen zulässig.",
+            ));
+            return;
+        }
         handle_local_asset(query.as_deref(), state, responder);
         return;
     }
 
     if let Some(api_route) = path.strip_prefix("/api/") {
+        if let Err((status, msg)) = validate_api_request(&method, has_ipc_header) {
+            responder.respond(err_json(status, msg));
+            return;
+        }
         handle_api_route(api_route, body, state, responder);
         return;
     }
@@ -466,7 +503,14 @@ fn handle_api_route(route: &str, body: Vec<u8>, state: AppState, responder: Resp
                 return;
             };
             ipc_worker_pool().execute(move || {
-                match create_ai_skill(Path::new(&req.parent_dir), &req.skill_name) {
+                let is_en = req.lang.as_deref().unwrap_or(&state.get_language()) == "en";
+                let prefer_crlf = req.prefer_crlf.unwrap_or(true);
+                match create_ai_skill_with_options(
+                    Path::new(&req.parent_dir),
+                    &req.skill_name,
+                    is_en,
+                    prefer_crlf,
+                ) {
                     Ok(payload) => {
                         let p = Path::new(&payload.path);
                         state.allow_file_parent(p);
@@ -576,7 +620,14 @@ fn handle_api_route(route: &str, body: Vec<u8>, state: AppState, responder: Resp
                 return;
             };
             ipc_worker_pool().execute(move || {
-                match create_new_markdown_file(Path::new(&req.parent_dir), &req.file_name) {
+                let is_en = req.lang.as_deref().unwrap_or(&state.get_language()) == "en";
+                let prefer_crlf = req.prefer_crlf.unwrap_or(true);
+                match create_new_markdown_file_with_options(
+                    Path::new(&req.parent_dir),
+                    &req.file_name,
+                    is_en,
+                    prefer_crlf,
+                ) {
                     Ok(payload) => {
                         state.allow_file_parent(Path::new(&payload.path));
                         responder.respond(ok_json(&payload));
@@ -1017,5 +1068,24 @@ mod tests {
         );
 
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn validate_api_request_requires_post_and_ipc_header() {
+        use super::{json_response, validate_api_request};
+        use http::Method;
+
+        assert!(validate_api_request(&Method::POST, true).is_ok());
+        assert_eq!(
+            validate_api_request(&Method::GET, true).unwrap_err().0,
+            StatusCode::METHOD_NOT_ALLOWED
+        );
+        assert_eq!(
+            validate_api_request(&Method::POST, false).unwrap_err().0,
+            StatusCode::FORBIDDEN
+        );
+
+        let resp = json_response(StatusCode::OK, &serde_json::json!({ "ok": true }));
+        assert!(resp.headers().get("Access-Control-Allow-Origin").is_none());
     }
 }

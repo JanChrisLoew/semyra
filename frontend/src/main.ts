@@ -78,12 +78,13 @@ import {
   extractMarkdownSection,
 } from './stats-utils';
 import { SyncScrollController } from './sync-scroll';
+import { StatusBarController } from './status-bar';
+import { TabStripController } from './tab-strip';
 import { findAdjacentTabId, reorderTabList, toggleTabPinned } from './tab-utils';
-import { bindThemeSystem, toggleTheme } from './theme';
+import { bindThemeSystem, getThemeChoice, setThemeChoice, toggleTheme } from './theme';
 import { SettingsController } from './settings';
 import { getLanguage, setLanguage, onLanguageChange, t, updateDomLanguage, Language } from './i18n';
 import { DraftCheckpoint } from './draft-checkpoint';
-import { estimateTokens } from './token-utils';
 import { WELCOME_MARKDOWN, getWelcomeMarkdown } from './welcome';
 import { WorkspaceSearchController } from './workspace-search';
 
@@ -107,14 +108,15 @@ class SemyraApp {
     name: string;
     path: string | null;
     content: string;
+    savedContent: string;
     lineEnding: 'LF' | 'CRLF';
+    savedLineEnding?: 'LF' | 'CRLF';
     wasDirty?: boolean;
   }> = [];
-  private lastSelection = { chars: 0, words: 0 };
-  private statusStatsTimer: number | undefined;
-  private readonly documentTokenCounts = new WeakMap<OpenTab, { content: string; count: number }>();
 
   private editor!: MarkdownEditorController;
+  private statusBar!: StatusBarController;
+  private tabStrip!: TabStripController;
   private syncScroll!: SyncScrollController;
   private palette!: CommandPaletteController;
   private explorer!: SidebarExplorerController;
@@ -134,6 +136,10 @@ class SemyraApp {
   /** Remembered split ratio per orientation so toggling restores each layout's own proportions. */
   private splitRatios: SplitRatios = parseSplitRatios(null);
   private editorCentered = false;
+  private viewMode: 'editor' | 'split' | 'preview' = 'split';
+  private defaultLineEnding: 'CRLF' | 'LF' = 'CRLF';
+  private sidebarWidth = SIDEBAR_WIDTH_DEFAULT;
+  private sidebarCollapsed = false;
   private zoomPercent = 100;
   private recentFiles: string[] = [];
   private recentFolders: string[] = [];
@@ -195,7 +201,6 @@ class SemyraApp {
   private prefsSyncTimer: number | undefined;
   private prefsRevision = 0;
   private prefsSaveFailed = false;
-  private toastTimer: number | undefined;
   private renderSeq = 0;
   private openFileSeq = 0;
   private externalChangedPath: string | null = null;
@@ -216,13 +221,10 @@ class SemyraApp {
     (message) => this.showToast(message),
   );
   private statusPathBtn = document.getElementById('status-filepath') as HTMLButtonElement;
-  private statusSaveBadge = document.getElementById('status-save-badge')!;
   private statusCursorEl = document.getElementById('status-cursor')!;
   private statusDocSummaryBtn = document.getElementById('status-doc-summary') as HTMLButtonElement | null;
   private statusZoomBtn = document.getElementById('status-zoom') as HTMLButtonElement;
   private statusEolBtn = document.getElementById('status-eol') as HTMLButtonElement;
-  private statusEncodingEl = document.getElementById('status-encoding')!;
-  private statusToastEl = document.getElementById('status-toast')!;
   private formatBarVisible = true;
   private dropOverlayEl = document.getElementById('drop-overlay')!;
   private externalBannerEl = document.getElementById('external-banner')!;
@@ -234,28 +236,53 @@ class SemyraApp {
     showPopover?: () => void;
     hidePopover?: () => void;
   };
-  private tabContextTargetId: string | null = null;
   private gotoLineReturnFocusEl: HTMLElement | null = null;
-  private tabDragState: {
-    tabId: string;
-    startX: number;
-    startY: number;
-    isDragging: boolean;
-    targetTabId: string | null;
-    isAfter: boolean;
-  } | null = null;
-  private suppressNextTabClick = false;
-  private suppressNextTabClickTimer: number | undefined;
   private settingsCtrl!: SettingsController;
 
   public async init(): Promise<void> {
+    this.statusBar = new StatusBarController({
+      pathBtn: this.statusPathBtn,
+      saveBadge: document.getElementById('status-save-badge')!,
+      cursorEl: this.statusCursorEl,
+      docSummaryBtn: this.statusDocSummaryBtn,
+      zoomBtn: this.statusZoomBtn,
+      eolBtn: this.statusEolBtn,
+      encodingEl: document.getElementById('status-encoding')!,
+      toastEl: document.getElementById('status-toast')!,
+      getActiveTab: () => this.activeTab,
+      getZoomPercent: () => this.zoomPercent,
+      getCursorPosition: () => {
+        if (!this.editor) return null;
+        const { state } = this.editor.view;
+        const head = state.selection.main.head;
+        const lineObj = state.doc.lineAt(head);
+        return { line: lineObj.number, col: head - lineObj.from + 1 };
+      },
+      getSelectedText: () => this.editor?.getSelectedText() ?? '',
+      onScheduleLintUpdate: (delayMs) => this.lintCtrl?.scheduleUpdate(delayMs),
+    });
+
+    this.tabStrip = new TabStripController({
+      tabBarEl: this.tabBarEl,
+      tabContextMenuEl: this.tabContextMenuEl,
+      tabStripWrapEl: document.querySelector('.tab-strip-wrap'),
+      getTabs: () => this.tabs,
+      onActivateTab: (tabId) => this.activateTab(tabId),
+      onCloseTab: (tabId) => this.documentClose.closeTab(tabId),
+      onNewTab: () => this.createNewTab(),
+      onReorderTabs: (draggedId, targetId, isAfter) => {
+        this.tabs = reorderTabList(this.tabs, draggedId, targetId, isAfter);
+        this.renderTabBar();
+        this.schedulePrefsSave();
+      },
+      onContextAction: (action, tabId) => this.handleTabContextAction(action, tabId),
+    });
+
     const cmHost = document.getElementById('codemirror-host')!;
     this.editor = new MarkdownEditorController(cmHost, '', {
       onDocChanged: (content) => this.handleEditorContentChange(content),
       onCursorChanged: (line, col, selChars, selWords) => {
-        this.statusCursorEl.textContent = t('status.cursor', { line, col });
-        this.lastSelection = { chars: selChars, words: selWords };
-        this.scheduleStatusStatistics();
+        this.statusBar.setCursor(line, col, selChars, selWords);
       },
       onEditorScrolled: () => this.syncScroll.syncEditorToPreview(),
       onFormatCommand: (cmd) => this.editor.applyFormat(cmd),
@@ -388,7 +415,12 @@ class SemyraApp {
         this.scaffoldWorkspaceSkill(targetDir);
       },
       onBundleWorkspace: (rootPath) => this.openAiBundleDialog(rootPath),
+      onInsertImage: (imagePath) => this.handleDroppedImages([imagePath]),
       onShowToast: (message) => this.showToast(message),
+      getCreateFileOptions: () => ({
+        lang: getLanguage(),
+        preferCrlf: this.defaultLineEnding === 'CRLF',
+      }),
     });
 
     this.workspaceSearch = new WorkspaceSearchController({
@@ -601,7 +633,7 @@ class SemyraApp {
         syncScroll: this.syncScroll.isEnabled(),
         formatBarVisible: this.formatBarVisible,
         centeredEditor: this.editorCentered,
-        lineEnding: this.activeTab?.lineEnding ?? 'CRLF',
+        lineEnding: this.defaultLineEnding,
         language: getLanguage(),
       }),
       {
@@ -614,7 +646,7 @@ class SemyraApp {
         onToggleOrientation: () => this.toggleSplitOrientation(),
         onToggleZen: () => void this.toggleZen(),
         onResetSplit: () => this.setSplitRatio(50),
-        onSetLineEnding: (eol) => this.setActiveTabLineEnding(eol),
+        onSetLineEnding: (eol) => this.setDefaultLineEnding(eol),
         onSetLanguage: (lang) => {
           if (lang === getLanguage()) return;
           setLanguage(lang);
@@ -627,6 +659,7 @@ class SemyraApp {
       },
     );
     bindThemeSystem(() => {
+      this.schedulePrefsSave();
       if (this.activeTab) {
         void this.renderPreviewImmediate(
           this.activeTab.currentContent,
@@ -782,6 +815,38 @@ class SemyraApp {
       this.editor.setAppLanguage(prefs.language);
     }
 
+    if (prefs.defaultLineEnding === 'LF' || prefs.defaultLineEnding === 'CRLF') {
+      this.defaultLineEnding = prefs.defaultLineEnding;
+    }
+
+    if (prefs.viewMode === 'editor' || prefs.viewMode === 'split' || prefs.viewMode === 'preview') {
+      this.setViewMode(prefs.viewMode, false);
+    }
+
+    if (typeof prefs.editorCentered === 'boolean') {
+      this.editorCentered = prefs.editorCentered;
+      this.applyEditorCentered();
+    }
+
+    if (typeof prefs.sidebarWidth === 'number' && prefs.sidebarWidth > 0) {
+      this.setSidebarWidth(prefs.sidebarWidth, false);
+    }
+
+    if (typeof prefs.sidebarCollapsed === 'boolean') {
+      this.sidebarCollapsed = prefs.sidebarCollapsed;
+      if (window.innerWidth >= 800) {
+        this.sidebarEl.classList.toggle('is-collapsed', this.sidebarCollapsed);
+      }
+    }
+
+    if (
+      prefs.themeChoice === 'system' ||
+      prefs.themeChoice === 'light' ||
+      prefs.themeChoice === 'dark'
+    ) {
+      setThemeChoice(prefs.themeChoice, false);
+    }
+
     this.recentFiles = prefs.recentFiles ?? [];
     this.recentFolders = prefs.recentFolders ?? [];
     this.settingsCtrl?.syncAll();
@@ -800,26 +865,31 @@ class SemyraApp {
     this.applyFormatBarVisibility();
     this.settingsCtrl?.syncAll();
     this.schedulePrefsSave();
-    this.showToast(
-      this.formatBarVisible
-        ? t('toast.formatBarOn')
-        : t('toast.formatBarOff'),
-    );
+    if (!this.activeTab || isMarkdownPath(this.activeTab.name)) {
+      this.showToast(
+        this.formatBarVisible
+          ? t('toast.formatBarOn')
+          : t('toast.formatBarOff'),
+      );
+    }
   }
 
   private applyFormatBarVisibility(): void {
     const bar = document.getElementById('format-bar');
     const expandBtn = document.getElementById('btn-expand-format-bar');
+    const isMarkdownTab = !this.activeTab || isMarkdownPath(this.activeTab.name);
+    const showBar = isMarkdownTab && this.formatBarVisible;
     if (bar) {
-      bar.classList.toggle('is-collapsed', !this.formatBarVisible);
+      bar.classList.toggle('is-collapsed', !showBar);
     }
     if (expandBtn) {
-      expandBtn.hidden = this.formatBarVisible;
+      expandBtn.hidden = !isMarkdownTab || this.formatBarVisible;
     }
   }
 
   private setSidebarWidth(px: number, persist = true): void {
     const clamped = clampSidebarWidth(px, window.innerWidth);
+    this.sidebarWidth = clamped;
     document.documentElement.style.setProperty('--sidebar-width', `${clamped}px`);
     const resizer = document.getElementById('sidebar-resizer');
     resizer?.setAttribute('aria-valuenow', String(clamped));
@@ -830,6 +900,7 @@ class SemyraApp {
       } catch {
         // Storage unavailable: width simply is not persisted.
       }
+      this.schedulePrefsSave();
     }
   }
 
@@ -863,6 +934,7 @@ class SemyraApp {
     } catch {
       // ignore
     }
+    this.schedulePrefsSave();
     this.showToast(
       this.editorCentered ? t('toast.centeredOn') : t('toast.centeredOff'),
     );
@@ -929,17 +1001,33 @@ class SemyraApp {
     });
   }
 
+  private getEffectiveSplitOrientation(): 'vertical' | 'horizontal' {
+    if (this.splitOrientation === 'horizontal') return 'horizontal';
+    const splitContainer = document.getElementById('split-container');
+    if (splitContainer && splitContainer.clientWidth > 0 && splitContainer.clientWidth <= 680) {
+      return 'horizontal';
+    }
+    return 'vertical';
+  }
+
+  private syncSplitResizerAria(): void {
+    const splitResizer = document.getElementById('split-resizer');
+    if (!splitResizer) return;
+    const effective = this.getEffectiveSplitOrientation();
+    splitResizer.setAttribute('aria-orientation', effective);
+    splitResizer.setAttribute('aria-valuenow', String(Math.round(this.splitRatio)));
+    splitResizer.setAttribute(
+      'aria-valuetext',
+      formatSplitValueText(effective, this.splitRatio),
+    );
+  }
+
   private setSplitRatio(pct: number, persist = true): void {
     const clamped = clampSplitRatio(pct);
     this.splitRatio = clamped;
-    this.splitRatios[this.splitOrientation] = clamped;
+    this.splitRatios[this.getEffectiveSplitOrientation()] = clamped;
     document.documentElement.style.setProperty('--split-ratio', `${clamped.toFixed(2)}%`);
-    const splitResizer = document.getElementById('split-resizer');
-    splitResizer?.setAttribute('aria-valuenow', String(Math.round(clamped)));
-    splitResizer?.setAttribute(
-      'aria-valuetext',
-      formatSplitValueText(this.splitOrientation, clamped),
-    );
+    this.syncSplitResizerAria();
     if (persist) {
       this.saveSplitRatios();
       this.schedulePrefsSave();
@@ -958,7 +1046,7 @@ class SemyraApp {
     const clamped = Math.max(75, Math.min(175, Math.round(pct / 5) * 5));
     this.zoomPercent = clamped;
     document.documentElement.style.setProperty('--doc-zoom', String(clamped / 100));
-    this.statusZoomBtn.textContent = `${clamped}%`;
+    this.statusBar.setZoomPercent(clamped);
     this.syncScroll?.invalidateCache();
     if (persist) {
       this.schedulePrefsSave();
@@ -972,8 +1060,7 @@ class SemyraApp {
     if (splitContainer) {
       splitContainer.dataset.orientation = orientation;
     }
-    const resizer = document.getElementById('split-resizer');
-    resizer?.setAttribute('aria-orientation', orientation);
+    this.syncSplitResizerAria();
 
     if (persist) {
       this.schedulePrefsSave();
@@ -1001,7 +1088,7 @@ class SemyraApp {
     if (!popover) return;
 
     const content = this.activeTab?.currentContent ?? '';
-    const stats = calculateDetailedStats(content, this.lastSelection);
+    const stats = calculateDetailedStats(content, this.statusBar.getLastSelection());
     const isEn = getLanguage() === 'en';
     const locale = isEn ? 'en-US' : 'de-DE';
 
@@ -1082,6 +1169,12 @@ class SemyraApp {
       spellcheck: this.editor.isSpellcheckEnabled(),
       formatBarVisible: this.formatBarVisible,
       language: getLanguage(),
+      defaultLineEnding: this.defaultLineEnding,
+      viewMode: this.viewMode,
+      themeChoice: getThemeChoice(),
+      sidebarWidth: Math.round(this.sidebarWidth),
+      sidebarCollapsed: this.sidebarCollapsed,
+      editorCentered: this.editorCentered,
       recentFiles: this.recentFiles,
       recentFolders: this.recentFolders,
       sessionFiles,
@@ -1181,7 +1274,7 @@ class SemyraApp {
         this.updateStatusBar();
         this.syncWindowMetadata();
       }
-      this.statusSaveBadge.textContent = t('status.restored');
+      this.statusBar.setRestoredBadge();
       if (restoredCount > 0) {
         this.showToast(
           restoredCount === 1
@@ -1374,7 +1467,12 @@ class SemyraApp {
   // Tab & File Lifecycle
   // ==========================================================================
 
-  private createNewTab(name?: string, initialContent = '', markDirty = false): void {
+  private createNewTab(
+    name?: string,
+    initialContent = '',
+    markDirty = false,
+    lineEnding: 'CRLF' | 'LF' = this.defaultLineEnding,
+  ): void {
     this.persistActiveTabScrollAndState();
 
     const tabName = name ?? t('tab.untitledName', { num: this.untitledCounter++ });
@@ -1388,7 +1486,7 @@ class SemyraApp {
       parentDir: this.explorer.rootPath,
       savedContent: markDirty ? '' : initialContent,
       currentContent: initialContent,
-      lineEnding: 'CRLF',
+      lineEnding,
       encoding: 'UTF-8',
       isDirty: markDirty,
       editorState: state,
@@ -1435,6 +1533,7 @@ class SemyraApp {
     this.syncScroll.suppressFor(150);
     this.editor.swapState(target.editorState, target.editorScrollTop);
     void this.editor.setLanguageForFile(target.name);
+    this.applyFormatBarVisibility();
 
     this.renderTabBar();
     this.explorer.highlightActiveFile();
@@ -1571,6 +1670,7 @@ class SemyraApp {
         window.clearTimeout(this.renderDebounceTimer);
         this.renderDebounceTimer = undefined;
         void this.editor.setLanguageForFile(tab.name);
+        this.applyFormatBarVisibility();
         const preserveScrollTop =
           isMarkdownPath(tab.name) && (!previousPath || isMarkdownPath(previousPath))
             ? this.previewPaneEl.scrollTop
@@ -1597,6 +1697,13 @@ class SemyraApp {
     if (this.explorer.hasWorkspace) {
       void this.explorer.refresh();
     }
+  }
+
+  private setDefaultLineEnding(eol: 'CRLF' | 'LF'): void {
+    if (this.defaultLineEnding === eol) return;
+    this.defaultLineEnding = eol;
+    this.settingsCtrl?.syncAll();
+    this.schedulePrefsSave();
   }
 
   private setActiveTabLineEnding(eol: 'CRLF' | 'LF'): void {
@@ -1629,7 +1736,9 @@ class SemyraApp {
       name: tab.name,
       path: tab.path,
       content: tab.currentContent,
+      savedContent: tab.savedContent,
       lineEnding: tab.lineEnding,
+      savedLineEnding: tab.savedLineEnding,
       wasDirty: tab.isDirty,
     });
     if (this.closedTabsHistory.length > 15) {
@@ -1660,10 +1769,47 @@ class SemyraApp {
     if (last.path) {
       const opened = await this.openFileByPath(last.path);
       if (opened) {
+        if (last.wasDirty) {
+          const reopenedTab = this.tabs.find((t) => t.path && isSamePath(t.path, last.path!));
+          if (reopenedTab && (reopenedTab.currentContent !== last.content || reopenedTab.lineEnding !== last.lineEnding)) {
+            restoreDocumentDraft(reopenedTab, {
+              name: last.name,
+              path: last.path,
+              parentDir: reopenedTab.parentDir,
+              content: last.content,
+              savedContent: last.savedContent,
+              lineEnding: last.lineEnding,
+              savedLineEnding: last.savedLineEnding,
+            });
+            reopenedTab.editorState = this.editor.createState(last.content);
+            if (reopenedTab.id === this.activeTabId) {
+              this.editor.swapState(reopenedTab.editorState, 0);
+              if (reopenedTab.hasExternalConflict) {
+                this.markExternalConflict(reopenedTab);
+              }
+              void this.renderPreviewImmediate(
+                reopenedTab.currentContent,
+                reopenedTab.parentDir ?? this.explorer.rootPath,
+              );
+            }
+            this.renderTabBar();
+            this.updateStatusBar();
+            this.syncWindowMetadata();
+            this.draftCheckpoint.schedule();
+          }
+        }
         this.showToast(t('toast.tabReopened', { name: last.name }));
+      } else if (last.wasDirty) {
+        this.createNewTab(last.name, last.content, true, last.lineEnding);
+        this.showToast(t('toast.draftReopened', { name: last.name }));
       }
     } else {
-      this.createNewTab(last.name, last.content, last.wasDirty ?? last.content.length > 0);
+      this.createNewTab(
+        last.name,
+        last.content,
+        last.wasDirty ?? last.content.length > 0,
+        last.lineEnding,
+      );
       this.showToast(t('toast.draftReopened', { name: last.name }));
     }
   }
@@ -1709,6 +1855,7 @@ class SemyraApp {
         t.parentDir = parentDirOfPath(newPath);
         if (t.id === this.activeTabId) {
           void this.editor.setLanguageForFile(t.name);
+          this.applyFormatBarVisibility();
         }
       } else if (isSameOrDescendantPath(t.path, oldPath)) {
         const suffix = t.path.slice(cleanOldLen);
@@ -1826,7 +1973,7 @@ class SemyraApp {
         tab.stats = res.stats;
       }
       this.outlineCtrl.render(res.outline);
-      if (this.statusStatsTimer === undefined) this.updateWordCountDisplay();
+      if (!this.statusBar.isStatisticsPending()) this.updateWordCountDisplay();
 
       if (typeof restoreScrollTop === 'number') {
         this.syncScroll.suppressFor(150);
@@ -1871,143 +2018,62 @@ class SemyraApp {
   // ==========================================================================
 
   private renderTabBar(scrollActiveIntoView = false): void {
-    this.tabBarEl.replaceChildren();
-    let activeTabBtn: HTMLButtonElement | null = null;
-
-    for (const tab of this.tabs) {
-      const isSelected = tab.id === this.activeTabId;
-
-      const slot = document.createElement('div');
-      slot.className = `tab-slot ${isSelected ? 'is-active' : ''} ${tab.isPinned ? 'is-pinned' : ''}`.trim();
-      slot.setAttribute('role', 'presentation');
-      slot.dataset.tabId = tab.id;
-
-      slot.addEventListener('auxclick', (e) => {
-        if (e.button === 1) {
-          e.preventDefault();
-          void this.documentClose.closeTab(tab.id);
-        }
-      });
-      slot.addEventListener('contextmenu', (e) => {
-        this.openTabContextMenu(e, tab.id);
-      });
-
-      const selectBtn = document.createElement('button');
-      selectBtn.type = 'button';
-      selectBtn.className = 'tab-select-btn';
-      selectBtn.setAttribute('role', 'tab');
-      selectBtn.setAttribute('aria-selected', String(isSelected));
-      selectBtn.tabIndex = isSelected ? 0 : -1;
-      selectBtn.title = tab.path ?? `${tab.name} (${t('tab.unsavedTitle')})`;
-      selectBtn.addEventListener('click', (e) => {
-        if (this.suppressNextTabClick) {
-          e.preventDefault();
-          e.stopPropagation();
-          return;
-        }
-        this.activateTab(tab.id);
-      });
-
-      const titleSpan = document.createElement('span');
-      titleSpan.className = 'tab-title';
-      titleSpan.textContent = tab.name;
-
-      if (tab.isPinned) {
-        const pinEl = document.createElement('span');
-        pinEl.className = 'tab-pin-indicator';
-        pinEl.textContent = '📌';
-        pinEl.title = t('tab.pinnedTitle');
-        pinEl.setAttribute('aria-hidden', 'true');
-        selectBtn.append(pinEl, titleSpan);
-      } else {
-        selectBtn.appendChild(titleSpan);
-      }
-
-      if (tab.isDirty) {
-        const dot = document.createElement('span');
-        dot.className = 'tab-dirty-dot';
-        dot.setAttribute('role', 'img');
-        dot.title = t('tab.unsavedTitle');
-        dot.setAttribute('aria-label', t('tab.unsavedTitle'));
-        selectBtn.appendChild(dot);
-      }
-
-      if (isSelected) {
-        activeTabBtn = selectBtn;
-      }
-
-      const closeBtn = document.createElement('button');
-      closeBtn.type = 'button';
-      closeBtn.className = 'tab-close-btn';
-      closeBtn.setAttribute('aria-label', t('tab.closeTitle', { name: tab.name }));
-      closeBtn.textContent = '×';
-      closeBtn.addEventListener('click', () => {
-        void this.documentClose.closeTab(tab.id);
-      });
-
-      slot.append(selectBtn, closeBtn);
-      this.tabBarEl.appendChild(slot);
-    }
-
-    syncRovingTabindex(this.tabBarEl, 'button[role="tab"]', activeTabBtn);
-    if (scrollActiveIntoView) {
-      activeTabBtn?.closest('.tab-slot')?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
-    }
+    this.tabStrip.render(this.tabs, this.activeTabId, scrollActiveIntoView);
   }
 
   private updateTabDirtyState(tabId: string, isDirty: boolean): void {
-    const slot = this.tabBarEl.querySelector<HTMLElement>(`.tab-slot[data-tab-id="${tabId}"]`);
-    if (!slot) return;
-    const selectBtn = slot.querySelector<HTMLButtonElement>('.tab-select-btn');
-    if (!selectBtn) return;
-    const existingDot = selectBtn.querySelector('.tab-dirty-dot');
-    if (isDirty) {
-      if (!existingDot) {
-        const dot = document.createElement('span');
-        dot.className = 'tab-dirty-dot';
-        dot.setAttribute('role', 'img');
-        dot.title = t('tab.unsavedTitle');
-        dot.setAttribute('aria-label', t('tab.unsavedTitle'));
-        selectBtn.appendChild(dot);
-      }
-    } else {
-      existingDot?.remove();
-    }
+    this.tabStrip.updateDirtyState(tabId, isDirty);
   }
 
-  private openTabContextMenu(e: MouseEvent, tabId: string): void {
-    e.preventDefault();
-    this.tabContextTargetId = tabId;
-    const tab = this.tabs.find((t) => t.id === tabId);
+  private async handleTabContextAction(action: string, tabId: string): Promise<void> {
+    const tab = this.tabs.find((tItem) => tItem.id === tabId);
     if (!tab) return;
 
-    const revealBtn = document.getElementById('tab-ctx-reveal') as HTMLButtonElement;
-    const copyPathBtn = document.getElementById('tab-ctx-copy-path') as HTMLButtonElement;
-    const copyAtPathBtn = document.getElementById('tab-ctx-copy-at-path') as HTMLButtonElement | null;
-    const diffSavedBtn = document.getElementById('tab-ctx-diff-saved') as HTMLButtonElement | null;
-    const compareTabsBtn = document.getElementById('tab-ctx-compare-tabs') as HTMLButtonElement | null;
-    if (revealBtn) revealBtn.disabled = !tab.path;
-    if (copyPathBtn) copyPathBtn.disabled = !tab.path;
-    if (copyAtPathBtn) copyAtPathBtn.disabled = !tab.path;
-    if (diffSavedBtn) diffSavedBtn.disabled = !tab.path;
-    if (compareTabsBtn) compareTabsBtn.disabled = this.tabs.length < 2;
-
-    const closeOthersBtn = this.tabContextMenuEl.querySelector<HTMLButtonElement>(
-      '[data-tab-ctx="close-others"]',
-    );
-    const closeRightBtn = this.tabContextMenuEl.querySelector<HTMLButtonElement>(
-      '[data-tab-ctx="close-to-right"]',
-    );
-    const tabIdx = this.tabs.findIndex((t) => t.id === tabId);
-    if (closeOthersBtn) closeOthersBtn.disabled = this.tabs.length <= 1;
-    if (closeRightBtn) closeRightBtn.disabled = tabIdx === -1 || tabIdx >= this.tabs.length - 1;
-
-    const pinLabel = document.getElementById('tab-ctx-pin-label');
-    if (pinLabel) {
-      pinLabel.textContent = tab.isPinned ? t('tabCtx.unpin') : t('tabCtx.pin');
+    switch (action) {
+      case 'close':
+        await this.documentClose.closeTab(tab.id);
+        break;
+      case 'close-others':
+        await this.closeOtherTabs(tab.id);
+        break;
+      case 'close-to-right':
+        await this.closeTabsToRight(tab.id);
+        break;
+      case 'toggle-pin':
+        this.tabs = toggleTabPinned(this.tabs, tab.id);
+        this.renderTabBar(true);
+        this.schedulePrefsSave();
+        break;
+      case 'save-as':
+        await this.documentFiles.save(tab, true);
+        break;
+      case 'reveal':
+        if (tab.path) this.revealPathInExplorer(tab.path);
+        break;
+      case 'copy-path':
+        if (tab.path) {
+          await this.copyTextWithToast(tab.path, t('toast.copyPath'));
+        }
+        break;
+      case 'copy-at-path':
+        await this.copyAtPath(tab);
+        break;
+      case 'copy-markdown':
+        await this.copyTextWithToast(
+          tab.currentContent,
+          isMarkdownPath(tab.name) ? t('toast.copyMarkdown') : t('toast.copySource'),
+        );
+        break;
+      case 'copy-ai-context':
+        await this.copyTabAiContext(tab);
+        break;
+      case 'diff-saved':
+        await this.openDiffWithSavedDialog(tab);
+        break;
+      case 'compare-tabs':
+        this.openCompareOpenTabsDialog(tab);
+        break;
     }
-
-    positionAndFocusPopover(this.tabContextMenuEl, e.clientX, e.clientY);
   }
 
   private openTableContextMenu(clientX: number, clientY: number): void {
@@ -2015,86 +2081,19 @@ class SemyraApp {
   }
 
   private updateSaveStatus(tab: OpenTab): void {
-    this.statusSaveBadge.textContent = tab.isDirty
-      ? t('status.unsaved')
-      : tab.path
-        ? t('status.saved')
-        : t('status.draft');
-    this.statusSaveBadge.classList.toggle('is-dirty', tab.isDirty);
+    this.statusBar.updateSaveStatus(tab);
   }
 
   private scheduleStatusStatistics(updateLint = false): void {
-    window.clearTimeout(this.statusStatsTimer);
-    this.statusStatsTimer = window.setTimeout(() => {
-      this.statusStatsTimer = undefined;
-      this.updateWordCountDisplay();
-    }, 120);
-    if (updateLint) {
-      this.lintCtrl.scheduleUpdate(350);
-    }
+    this.statusBar.scheduleStatistics(updateLint);
   }
 
   private updateStatusBar(): void {
-    const tab = this.activeTab;
-    if (!tab) return;
-
-    this.statusPathBtn.textContent = tab.path ?? tab.name;
-    this.updateSaveStatus(tab);
-    const { state } = this.editor.view;
-    const head = state.selection.main.head;
-    const lineObj = state.doc.lineAt(head);
-    this.statusCursorEl.textContent = t('status.cursor', {
-      line: lineObj.number,
-      col: head - lineObj.from + 1,
-    });
-    this.scheduleStatusStatistics(true);
-    this.statusZoomBtn.textContent = `${this.zoomPercent}%`;
-    this.statusEolBtn.textContent = tab.lineEnding;
-    this.statusEncodingEl.textContent = tab.encoding;
-  }
-
-  private formatReadingTime(readingTimeSec: number, isEn: boolean): string {
-    if (readingTimeSec < 60) {
-      return isEn ? `${readingTimeSec}s read time` : `${readingTimeSec} Sek. Lesezeit`;
-    }
-    const mins = Math.ceil(readingTimeSec / 60);
-    return isEn ? `~${mins} min read time` : `~${mins} Min. Lesezeit`;
+    this.statusBar.update();
   }
 
   private updateWordCountDisplay(): void {
-    const tab = this.activeTab;
-    if (!tab) return;
-    const { words, readingTimeSec } = tab.stats;
-    let tokens = this.documentTokenCounts.get(tab);
-    if (tokens?.content !== tab.currentContent) {
-      tokens = { content: tab.currentContent, count: estimateTokens(tab.currentContent) };
-      this.documentTokenCounts.set(tab, tokens);
-    }
-    const totalTokens = tokens.count;
-    const selTokens = this.lastSelection.chars > 0 ? estimateTokens(this.editor.getSelectedText()) : 0;
-    const isEn = getLanguage() === 'en';
-    const locale = isEn ? 'en-US' : 'de-DE';
-    const wordLabel = isEn ? (words === 1 ? 'word' : 'words') : (words === 1 ? 'Wort' : 'Wörter');
-    const readingTimeStr = this.formatReadingTime(readingTimeSec, isEn);
-
-    if (this.statusDocSummaryBtn) {
-      if (this.lastSelection.chars > 0) {
-        const selW = this.lastSelection.words;
-        const selC = this.lastSelection.chars;
-        this.statusDocSummaryBtn.textContent = isEn
-          ? `${selW} of ${words.toLocaleString(locale)} words · ~${selTokens.toLocaleString(locale)} tokens`
-          : `${selW} von ${words.toLocaleString(locale)} Wörtern · ~${selTokens.toLocaleString(locale)} Tokens`;
-        this.statusDocSummaryBtn.title = isEn
-          ? `Selection: ${selW.toLocaleString(locale)} words (${selC.toLocaleString(locale)} ch.), ~${selTokens.toLocaleString(locale)} tokens · Document: ${words.toLocaleString(locale)} words (~${totalTokens.toLocaleString(locale)} tokens, ${readingTimeStr}) · Click for details`
-          : `Auswahl: ${selW.toLocaleString(locale)} Wörter (${selC.toLocaleString(locale)} Z.), ~${selTokens.toLocaleString(locale)} Tokens · Dokument: ${words.toLocaleString(locale)} Wörter (~${totalTokens.toLocaleString(locale)} Tokens, ${readingTimeStr}) · Klicken für Details`;
-      } else {
-        const tokenLabel = isEn ? 'tokens' : 'Tokens';
-        this.statusDocSummaryBtn.textContent = `${words.toLocaleString(locale)} ${wordLabel} · ~${totalTokens.toLocaleString(locale)} ${tokenLabel}`;
-        this.statusDocSummaryBtn.title = isEn
-          ? `Document statistics: ${words.toLocaleString(locale)} words · ~${totalTokens.toLocaleString(locale)} tokens · ${readingTimeStr} · Click for details`
-          : `Dokument-Statistiken: ${words.toLocaleString(locale)} Wörter · ~${totalTokens.toLocaleString(locale)} Tokens · ${readingTimeStr} · Klicken für Details`;
-      }
-    }
+    this.statusBar.updateWordCountDisplay();
   }
 
   private syncWindowMetadata(): void {
@@ -2132,7 +2131,8 @@ class SemyraApp {
   // View, Toolbar & Global Shortcuts Wiring
   // ==========================================================================
 
-  private setViewMode(mode: 'editor' | 'split' | 'preview'): void {
+  private setViewMode(mode: 'editor' | 'split' | 'preview', persist = true): void {
+    this.viewMode = mode;
     if (mode !== 'preview' && this.previewFind.isOpen) {
       this.previewFind.close(false);
     }
@@ -2141,6 +2141,9 @@ class SemyraApp {
       b.classList.toggle('is-active', b.dataset.setView === mode);
     }
     this.syncScroll.updateActiveHeadingFromViewport();
+    if (persist) {
+      this.schedulePrefsSave();
+    }
   }
 
   private toggleWordWrap(): void {
@@ -2296,15 +2299,7 @@ class SemyraApp {
   }
 
   private showToast(message: string, durationMs = 2800): void {
-    // Never mutate the polite live region while a modal dialog makes outside DOM inert
-    if (document.querySelector('dialog[open]')) return;
-    window.clearTimeout(this.toastTimer);
-    this.statusToastEl.textContent = message;
-    this.statusToastEl.classList.add('is-visible');
-    this.toastTimer = window.setTimeout(() => {
-      this.statusToastEl.classList.remove('is-visible');
-      this.statusToastEl.textContent = '';
-    }, durationMs);
+    this.statusBar.showToast(message, durationMs);
   }
 
   private snapshotActiveDocument(): DocumentSnapshot | undefined {
@@ -2638,7 +2633,10 @@ class SemyraApp {
 
     try {
       const tpl = getAiTemplate('agents', getLanguage());
-      const created = await backend.createFile(cleanRoot, 'AGENTS.md');
+      const created = await backend.createFile(cleanRoot, 'AGENTS.md', {
+        lang: getLanguage(),
+        preferCrlf: this.defaultLineEnding === 'CRLF',
+      });
       await backend.writeFile(
         created.path,
         tpl.content,
@@ -2720,7 +2718,8 @@ class SemyraApp {
     });
 
     document.getElementById('btn-toggle-sidebar')!.addEventListener('click', () => {
-      this.sidebarEl.classList.toggle('is-collapsed');
+      this.sidebarCollapsed = this.sidebarEl.classList.toggle('is-collapsed');
+      this.schedulePrefsSave();
     });
 
     document.getElementById('btn-source-workspace')?.addEventListener('click', () => {
@@ -2731,6 +2730,54 @@ class SemyraApp {
     });
 
     document.getElementById('btn-tab-add')?.addEventListener('click', () => this.createNewTab());
+
+    const newTabTemplatePopover = document.getElementById('new-tab-template-popover') as (HTMLElement & {
+      hidePopover?: () => void;
+    }) | null;
+    const newTabMenuBtn = document.getElementById('btn-tab-add-menu') as HTMLButtonElement | null;
+    let newTabMenuOpenedByPointer = false;
+    newTabMenuBtn?.addEventListener('pointerdown', () => {
+      newTabMenuOpenedByPointer = true;
+    });
+    newTabMenuBtn?.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        newTabMenuOpenedByPointer = false;
+        if (!newTabTemplatePopover?.matches?.(':popover-open')) {
+          newTabMenuBtn.click();
+        } else {
+          newTabTemplatePopover
+            .querySelector<HTMLButtonElement>('[data-new-template]')
+            ?.focus();
+        }
+      }
+    });
+    newTabTemplatePopover?.addEventListener('toggle', (e) => {
+      const toggleEvt = e as ToggleEvent;
+      const isOpen = toggleEvt.newState === 'open';
+      newTabMenuBtn?.setAttribute('aria-expanded', String(isOpen));
+      if (isOpen && !newTabMenuOpenedByPointer) {
+        newTabTemplatePopover
+          .querySelector<HTMLButtonElement>('[data-new-template]')
+          ?.focus();
+      }
+      newTabMenuOpenedByPointer = false;
+    });
+    newTabTemplatePopover?.addEventListener('click', (e) => {
+      const itemBtn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-new-template]');
+      if (!itemBtn) return;
+      const tpl = itemBtn.dataset.newTemplate;
+      try {
+        newTabTemplatePopover.hidePopover?.();
+      } catch {
+        /* ignore */
+      }
+      if (tpl === 'empty') {
+        this.createNewTab();
+      } else if (tpl === 'agents' || tpl === 'prompt' || tpl === 'skill' || tpl === 'review') {
+        this.createTabFromAiTemplate(tpl);
+      }
+    });
 
     document.getElementById('btn-open-file')?.addEventListener('click', () => {
       void this.triggerOpenFilesDialog();
@@ -2837,62 +2884,6 @@ class SemyraApp {
       void this.toggleZen(false);
     });
 
-    // Context menu actions for tab bar
-    this.tabContextMenuEl.addEventListener('click', async (e) => {
-      const actionBtn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-tab-ctx]');
-      if (!actionBtn) return;
-      const action = actionBtn.dataset.tabCtx;
-      const targetId = this.tabContextTargetId;
-      this.tabContextMenuEl.hidePopover?.();
-      if (!targetId) return;
-
-      const tab = this.tabs.find((t) => t.id === targetId);
-      if (!tab) return;
-
-      switch (action) {
-        case 'close':
-          await this.documentClose.closeTab(tab.id);
-          break;
-        case 'close-others':
-          await this.closeOtherTabs(tab.id);
-          break;
-        case 'close-to-right':
-          await this.closeTabsToRight(tab.id);
-          break;
-        case 'toggle-pin':
-          this.tabs = toggleTabPinned(this.tabs, tab.id);
-          this.renderTabBar(true);
-          this.schedulePrefsSave();
-          break;
-        case 'reveal':
-          if (tab.path) this.revealPathInExplorer(tab.path);
-          break;
-        case 'copy-path':
-          if (tab.path) {
-            await this.copyTextWithToast(tab.path, t('toast.copyPath'));
-          }
-          break;
-        case 'copy-at-path':
-          await this.copyAtPath(tab);
-          break;
-        case 'copy-markdown':
-          await this.copyTextWithToast(
-            tab.currentContent,
-            isMarkdownPath(tab.name) ? t('toast.copyMarkdown') : t('toast.copySource'),
-          );
-          break;
-        case 'copy-ai-context':
-          await this.copyTabAiContext(tab);
-          break;
-        case 'diff-saved':
-          await this.openDiffWithSavedDialog(tab);
-          break;
-        case 'compare-tabs':
-          this.openCompareOpenTabsDialog(tab);
-          break;
-      }
-    });
-
     // Context menu actions for Markdown tables
     this.tableContextMenuEl.addEventListener('click', (e) => {
       const actionBtn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-table-action]');
@@ -2903,128 +2894,6 @@ class SemyraApp {
         this.applyTableAction(action);
       }
     });
-
-    // Tab drag-and-drop reordering via Pointer Events (immune to button click suppression)
-    this.tabBarEl.addEventListener('pointerdown', (e: PointerEvent) => {
-      window.clearTimeout(this.suppressNextTabClickTimer);
-      this.suppressNextTabClickTimer = undefined;
-      this.suppressNextTabClick = false;
-      if (e.button !== 0) return;
-      if ((e.target as HTMLElement).closest('.tab-close-btn')) return;
-
-      const slot = (e.target as HTMLElement).closest<HTMLElement>('.tab-slot');
-      if (!slot || !slot.dataset.tabId) return;
-
-      this.tabDragState = {
-        tabId: slot.dataset.tabId,
-        startX: e.clientX,
-        startY: e.clientY,
-        isDragging: false,
-        targetTabId: null,
-        isAfter: false,
-      };
-    });
-
-    window.addEventListener('pointermove', (e: PointerEvent) => {
-      if (!this.tabDragState) return;
-
-      if (!this.tabDragState.isDragging) {
-        const dist = Math.hypot(e.clientX - this.tabDragState.startX, e.clientY - this.tabDragState.startY);
-        if (dist < 6) return;
-        this.tabDragState.isDragging = true;
-        this.suppressNextTabClick = true;
-        document.body.classList.add('is-tab-dragging');
-
-        const activeSlot = this.tabBarEl.querySelector<HTMLElement>(
-          `.tab-slot[data-tab-id="${this.tabDragState.tabId}"]`,
-        );
-        activeSlot?.classList.add('is-dragging');
-      }
-
-      for (const el of this.tabBarEl.querySelectorAll('.tab-slot')) {
-        el.classList.remove('drop-before', 'drop-after');
-      }
-
-      let targetSlot =
-        (document.elementFromPoint(e.clientX, e.clientY)?.closest('.tab-slot') as HTMLElement | null) ?? null;
-      const slots = Array.from(this.tabBarEl.querySelectorAll<HTMLElement>('.tab-slot'));
-      if (!targetSlot && slots.length > 0) {
-        for (const slot of slots) {
-          const rect = slot.getBoundingClientRect();
-          if (e.clientX >= rect.left && e.clientX <= rect.right) {
-            targetSlot = slot;
-            break;
-          }
-        }
-        if (!targetSlot) {
-          const firstRect = slots[0].getBoundingClientRect();
-          const lastRect = slots[slots.length - 1].getBoundingClientRect();
-          if (e.clientX < firstRect.left) {
-            targetSlot = slots[0];
-          } else if (e.clientX > lastRect.right) {
-            targetSlot = slots[slots.length - 1];
-          }
-        }
-      }
-
-      if (targetSlot && targetSlot.dataset.tabId && targetSlot.dataset.tabId !== this.tabDragState.tabId) {
-        const rect = targetSlot.getBoundingClientRect();
-        const isAfter = e.clientX > rect.left + rect.width / 2;
-        targetSlot.classList.toggle('drop-after', isAfter);
-        targetSlot.classList.toggle('drop-before', !isAfter);
-        this.tabDragState.targetTabId = targetSlot.dataset.tabId;
-        this.tabDragState.isAfter = isAfter;
-      } else {
-        this.tabDragState.targetTabId = null;
-      }
-    });
-
-    const finishTabDrag = () => {
-      if (!this.tabDragState) return;
-      const state = this.tabDragState;
-      this.tabDragState = null;
-
-      document.body.classList.remove('is-tab-dragging');
-      for (const el of this.tabBarEl.querySelectorAll('.tab-slot')) {
-        el.classList.remove('drop-before', 'drop-after', 'is-dragging');
-      }
-
-      if (state.isDragging) {
-        window.clearTimeout(this.suppressNextTabClickTimer);
-        this.suppressNextTabClickTimer = window.setTimeout(() => {
-          this.suppressNextTabClickTimer = undefined;
-          this.suppressNextTabClick = false;
-        }, 80);
-
-        if (state.targetTabId && state.targetTabId !== state.tabId) {
-          this.tabs = reorderTabList(this.tabs, state.tabId, state.targetTabId, state.isAfter);
-          this.renderTabBar();
-          this.schedulePrefsSave();
-        }
-      }
-    };
-
-    window.addEventListener('pointerup', finishTabDrag);
-    window.addEventListener('pointercancel', finishTabDrag);
-
-    // Double click empty tab bar space to open a new tab
-    const tabStripWrap = document.querySelector('.tab-strip-wrap');
-    tabStripWrap?.addEventListener('dblclick', (e) => {
-      if ((e.target as HTMLElement).closest('.tab-slot, button')) return;
-      this.createNewTab();
-    });
-
-    // Horizontal mouse wheel scrolling on tab bar
-    this.tabBarEl.addEventListener(
-      'wheel',
-      (e) => {
-        if (e.deltaY && !e.deltaX) {
-          e.preventDefault();
-          this.tabBarEl.scrollLeft += e.deltaY;
-        }
-      },
-      { passive: false },
-    );
 
     // Horizontal mouse wheel scrolling on format ribbon
     const formatScroll = document.querySelector('.format-buttons-scroll');
@@ -3133,7 +3002,7 @@ class SemyraApp {
       const onMove = (ev: PointerEvent) => {
         const rect = splitContainer.getBoundingClientRect();
         const pct = splitRatioFromPointer(
-          this.splitOrientation,
+          this.getEffectiveSplitOrientation(),
           { x: ev.clientX, y: ev.clientY },
           rect,
         );
@@ -3165,7 +3034,7 @@ class SemyraApp {
     this.initLayoutPreferences();
 
     resizer.addEventListener('keydown', (e) => {
-      const isHoriz = this.splitOrientation === 'horizontal';
+      const isHoriz = this.getEffectiveSplitOrientation() === 'horizontal';
       const step = e.shiftKey ? 10 : 3;
       if ((!isHoriz && e.key === 'ArrowLeft') || (isHoriz && e.key === 'ArrowUp')) {
         e.preventDefault();
@@ -3181,6 +3050,13 @@ class SemyraApp {
         this.setSplitRatio(80);
       }
     });
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const splitResizeObserver = new ResizeObserver(() => {
+        this.syncSplitResizerAria();
+      });
+      splitResizeObserver.observe(splitContainer);
+    }
 
     this.statusDocSummaryBtn?.addEventListener('click', () => this.openDocStatsPopover());
 
@@ -3522,7 +3398,8 @@ class SemyraApp {
           this.cycleActiveTab(-1);
         } else if (mod && !e.altKey && !e.shiftKey && key === 'j') {
           consume();
-          this.sidebarEl.classList.toggle('is-collapsed');
+          this.sidebarCollapsed = this.sidebarEl.classList.toggle('is-collapsed');
+          this.schedulePrefsSave();
         } else if (mod && !e.altKey && (e.key === '+' || e.key === '=')) {
           consume();
           this.setZoomPercent(this.zoomPercent + 10);
