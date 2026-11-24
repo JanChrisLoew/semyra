@@ -81,7 +81,7 @@ import { SyncScrollController } from './sync-scroll';
 import { StatusBarController } from './status-bar';
 import { TabStripController } from './tab-strip';
 import { findAdjacentTabId, reorderTabList, toggleTabPinned } from './tab-utils';
-import { bindThemeSystem, getThemeChoice, hasStoredThemeChoice, setThemeChoice, toggleTheme } from './theme';
+import { bindThemeSystem, getThemeChoice, setThemeChoice, toggleTheme } from './theme';
 import { SettingsController } from './settings';
 import { getLanguage, setLanguage, onLanguageChange, t, updateDomLanguage, Language } from './i18n';
 import { DraftCheckpoint } from './draft-checkpoint';
@@ -840,8 +840,9 @@ class SemyraApp {
     }
 
     if (
-      (prefs.themeChoice === 'light' || prefs.themeChoice === 'dark') &&
-      !hasStoredThemeChoice()
+      prefs.themeChoice === 'system' ||
+      prefs.themeChoice === 'light' ||
+      prefs.themeChoice === 'dark'
     ) {
       setThemeChoice(prefs.themeChoice, false);
     }
@@ -864,11 +865,13 @@ class SemyraApp {
     this.applyFormatBarVisibility();
     this.settingsCtrl?.syncAll();
     this.schedulePrefsSave();
-    this.showToast(
-      this.formatBarVisible
-        ? t('toast.formatBarOn')
-        : t('toast.formatBarOff'),
-    );
+    if (!this.activeTab || isMarkdownPath(this.activeTab.name)) {
+      this.showToast(
+        this.formatBarVisible
+          ? t('toast.formatBarOn')
+          : t('toast.formatBarOff'),
+      );
+    }
   }
 
   private applyFormatBarVisibility(): void {
@@ -1022,7 +1025,7 @@ class SemyraApp {
   private setSplitRatio(pct: number, persist = true): void {
     const clamped = clampSplitRatio(pct);
     this.splitRatio = clamped;
-    this.splitRatios[this.splitOrientation] = clamped;
+    this.splitRatios[this.getEffectiveSplitOrientation()] = clamped;
     document.documentElement.style.setProperty('--split-ratio', `${clamped.toFixed(2)}%`);
     this.syncSplitResizerAria();
     if (persist) {
@@ -1464,7 +1467,12 @@ class SemyraApp {
   // Tab & File Lifecycle
   // ==========================================================================
 
-  private createNewTab(name?: string, initialContent = '', markDirty = false): void {
+  private createNewTab(
+    name?: string,
+    initialContent = '',
+    markDirty = false,
+    lineEnding: 'CRLF' | 'LF' = this.defaultLineEnding,
+  ): void {
     this.persistActiveTabScrollAndState();
 
     const tabName = name ?? t('tab.untitledName', { num: this.untitledCounter++ });
@@ -1478,7 +1486,7 @@ class SemyraApp {
       parentDir: this.explorer.rootPath,
       savedContent: markDirty ? '' : initialContent,
       currentContent: initialContent,
-      lineEnding: this.defaultLineEnding,
+      lineEnding,
       encoding: 'UTF-8',
       isDirty: markDirty,
       editorState: state,
@@ -1791,9 +1799,17 @@ class SemyraApp {
           }
         }
         this.showToast(t('toast.tabReopened', { name: last.name }));
+      } else if (last.wasDirty) {
+        this.createNewTab(last.name, last.content, true, last.lineEnding);
+        this.showToast(t('toast.draftReopened', { name: last.name }));
       }
     } else {
-      this.createNewTab(last.name, last.content, last.wasDirty ?? last.content.length > 0);
+      this.createNewTab(
+        last.name,
+        last.content,
+        last.wasDirty ?? last.content.length > 0,
+        last.lineEnding,
+      );
       this.showToast(t('toast.draftReopened', { name: last.name }));
     }
   }
@@ -2718,10 +2734,34 @@ class SemyraApp {
     const newTabTemplatePopover = document.getElementById('new-tab-template-popover') as (HTMLElement & {
       hidePopover?: () => void;
     }) | null;
-    const newTabMenuBtn = document.getElementById('btn-tab-add-menu');
+    const newTabMenuBtn = document.getElementById('btn-tab-add-menu') as HTMLButtonElement | null;
+    let newTabMenuOpenedByPointer = false;
+    newTabMenuBtn?.addEventListener('pointerdown', () => {
+      newTabMenuOpenedByPointer = true;
+    });
+    newTabMenuBtn?.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        newTabMenuOpenedByPointer = false;
+        if (!newTabTemplatePopover?.matches?.(':popover-open')) {
+          newTabMenuBtn.click();
+        } else {
+          newTabTemplatePopover
+            .querySelector<HTMLButtonElement>('[data-new-template]')
+            ?.focus();
+        }
+      }
+    });
     newTabTemplatePopover?.addEventListener('toggle', (e) => {
       const toggleEvt = e as ToggleEvent;
-      newTabMenuBtn?.setAttribute('aria-expanded', String(toggleEvt.newState === 'open'));
+      const isOpen = toggleEvt.newState === 'open';
+      newTabMenuBtn?.setAttribute('aria-expanded', String(isOpen));
+      if (isOpen && !newTabMenuOpenedByPointer) {
+        newTabTemplatePopover
+          .querySelector<HTMLButtonElement>('[data-new-template]')
+          ?.focus();
+      }
+      newTabMenuOpenedByPointer = false;
     });
     newTabTemplatePopover?.addEventListener('click', (e) => {
       const itemBtn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-new-template]');

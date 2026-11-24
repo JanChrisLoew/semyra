@@ -337,8 +337,13 @@ pub fn create_ai_skill_with_options(
     if fs::symlink_metadata(&skill_file).is_ok() {
         return Err(exists_err);
     }
-    fs::create_dir_all(&skill_dir)
-        .map_err(|e| format!("Skill-Ordner konnte nicht erstellt werden: {e}"))?;
+    fs::create_dir_all(&skill_dir).map_err(|e| {
+        if is_en {
+            format!("Could not create skill folder: {e}")
+        } else {
+            format!("Skill-Ordner konnte nicht erstellt werden: {e}")
+        }
+    })?;
     let initial = if is_en {
         format!(
             "---\nname: {slug}\ndescription: Precisely describe what this skill does and when it should be used.\n---\n\n# {slug}\n\n## Goal\n\n## Steps\n- Step 1\n- Step 2\n"

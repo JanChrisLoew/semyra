@@ -27,6 +27,7 @@ export interface TabStripDeps {
 
 export class TabStripController {
   private readonly deps: TabStripDeps;
+  private readonly abortController = new AbortController();
   private tabContextTargetId: string | null = null;
   private tabDragState: {
     tabId: string;
@@ -42,6 +43,12 @@ export class TabStripController {
   constructor(deps: TabStripDeps) {
     this.deps = deps;
     this.bindEvents();
+  }
+
+  public destroy(): void {
+    this.abortController.abort();
+    window.clearTimeout(this.suppressNextTabClickTimer);
+    this.suppressNextTabClickTimer = undefined;
   }
 
   public render(
@@ -287,7 +294,7 @@ export class TabStripController {
       } else {
         this.tabDragState.targetTabId = null;
       }
-    });
+    }, { signal: this.abortController.signal });
 
     const finishTabDrag = () => {
       if (!this.tabDragState) return;
@@ -312,8 +319,8 @@ export class TabStripController {
       }
     };
 
-    window.addEventListener('pointerup', finishTabDrag);
-    window.addEventListener('pointercancel', finishTabDrag);
+    window.addEventListener('pointerup', finishTabDrag, { signal: this.abortController.signal });
+    window.addEventListener('pointercancel', finishTabDrag, { signal: this.abortController.signal });
 
     // Double click empty tab bar space to open a new tab
     this.deps.tabStripWrapEl?.addEventListener('dblclick', (e) => {

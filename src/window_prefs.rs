@@ -30,14 +30,6 @@ fn default_view_mode() -> String {
     "split".to_string()
 }
 
-fn default_theme_choice() -> String {
-    "system".to_string()
-}
-
-fn default_sidebar_width() -> u16 {
-    255
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UiSessionPrefs {
@@ -63,10 +55,10 @@ pub struct UiSessionPrefs {
     pub default_line_ending: String,
     #[serde(default = "default_view_mode")]
     pub view_mode: String,
-    #[serde(default = "default_theme_choice")]
-    pub theme_choice: String,
-    #[serde(default = "default_sidebar_width")]
-    pub sidebar_width: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_choice: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sidebar_width: Option<u16>,
     #[serde(default)]
     pub sidebar_collapsed: bool,
     #[serde(default)]
@@ -97,8 +89,8 @@ impl Default for UiSessionPrefs {
             language: default_language(),
             default_line_ending: default_line_ending(),
             view_mode: default_view_mode(),
-            theme_choice: default_theme_choice(),
-            sidebar_width: default_sidebar_width(),
+            theme_choice: None,
+            sidebar_width: None,
             sidebar_collapsed: false,
             editor_centered: false,
             recent_files: Vec::new(),
@@ -148,7 +140,9 @@ fn is_unc_path(path: &str) -> bool {
 fn sanitize_loaded_prefs(prefs: &mut WindowPrefs) {
     prefs.ui.split_ratio = prefs.ui.split_ratio.clamp(20.0, 80.0);
     prefs.ui.zoom_percent = prefs.ui.zoom_percent.clamp(75, 175);
-    prefs.ui.sidebar_width = prefs.ui.sidebar_width.clamp(190, 560);
+    if let Some(width) = prefs.ui.sidebar_width.as_mut() {
+        *width = (*width).clamp(190, 560);
+    }
     if !matches!(prefs.ui.split_orientation.as_str(), "vertical" | "horizontal") {
         prefs.ui.split_orientation = default_split_orientation();
     }
@@ -160,8 +154,10 @@ fn sanitize_loaded_prefs(prefs: &mut WindowPrefs) {
     if !matches!(prefs.ui.view_mode.as_str(), "editor" | "split" | "preview") {
         prefs.ui.view_mode = default_view_mode();
     }
-    if !matches!(prefs.ui.theme_choice.as_str(), "system" | "light" | "dark") {
-        prefs.ui.theme_choice = default_theme_choice();
+    if let Some(theme) = prefs.ui.theme_choice.as_deref() {
+        if !matches!(theme, "system" | "light" | "dark") {
+            prefs.ui.theme_choice = None;
+        }
     }
     prefs
         .ui
@@ -368,20 +364,20 @@ mod tests {
         let mut prefs: WindowPrefs = serde_json::from_str(legacy_json).unwrap();
         assert_eq!(prefs.ui.default_line_ending, "CRLF");
         assert_eq!(prefs.ui.view_mode, "split");
-        assert_eq!(prefs.ui.theme_choice, "system");
-        assert_eq!(prefs.ui.sidebar_width, 255);
+        assert_eq!(prefs.ui.theme_choice, None);
+        assert_eq!(prefs.ui.sidebar_width, None);
         assert!(!prefs.ui.sidebar_collapsed);
         assert!(!prefs.ui.editor_centered);
 
-        prefs.ui.sidebar_width = 999;
+        prefs.ui.sidebar_width = Some(999);
         prefs.ui.view_mode = "invalid".into();
-        prefs.ui.theme_choice = "neon".into();
+        prefs.ui.theme_choice = Some("neon".into());
         prefs.ui.default_line_ending = "lf".into();
         sanitize_loaded_prefs(&mut prefs);
 
-        assert_eq!(prefs.ui.sidebar_width, 560);
+        assert_eq!(prefs.ui.sidebar_width, Some(560));
         assert_eq!(prefs.ui.view_mode, "split");
-        assert_eq!(prefs.ui.theme_choice, "system");
+        assert_eq!(prefs.ui.theme_choice, None);
         assert_eq!(prefs.ui.default_line_ending, "LF");
     }
 }

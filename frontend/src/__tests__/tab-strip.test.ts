@@ -71,6 +71,7 @@ describe('TabStripController', () => {
     expect(slots[0].querySelector('.tab-dirty-dot')).not.toBeNull();
     ctrl.updateDirtyState('t1', false);
     expect(slots[0].querySelector('.tab-dirty-dot')).toBeNull();
+    ctrl.destroy();
   });
 
   it('opens tab context menu with proper disabled states and dispatches save-as action', () => {
@@ -99,5 +100,6 @@ describe('TabStripController', () => {
 
     (document.getElementById('tab-ctx-save-as') as HTMLButtonElement).click();
     expect(onContextAction).toHaveBeenCalledWith('save-as', 't1');
+    ctrl.destroy();
   });
 });
